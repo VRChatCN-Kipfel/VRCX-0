@@ -799,7 +799,8 @@
         "tab": {
             "maps": "Map board",
             "notifications": "Notifications",
-            "me": "Me"
+            "me": "Me",
+            "mutuals": "Mutuals"
         },
         "maps": {
             "hint": "Needs {{min}} ratings to reach the board",
@@ -846,6 +847,16 @@
             "window": "Requests this minute",
             "usage_note": "These are counts this client kept itself, not remaining server quota — the API has no endpoint that reports remaining quota.",
             "disclaimer": "Third-party client. Not affiliated with vrcc.cc."
+        },
+        "error": {
+            "unknown": "The action failed. Please try again."
+        },
+        "mutuals": {
+            "need_connect": "Connect to VRCC to see who you are mutually linked with",
+            "empty": "No mutual links yet",
+            "needs_scope": "Mutual links need the mutuals permission; tick it when you reconnect.",
+            "unnamed": "Unnamed",
+            "open_profile": "Open in the VRChat player dialog"
         }
     },
     "nav_menu": {

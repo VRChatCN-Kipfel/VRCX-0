@@ -22,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/shadcn/tabs';
 import { VrccCurrentMapCard } from './components/VrccCurrentMapCard';
 import { VrccMapsPanel } from './components/VrccMapsPanel';
 import { VrccMePanel } from './components/VrccMePanel';
+import { VrccMutualsPanel } from './components/VrccMutualsPanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
 import { useVrccController } from './useVrccController';
 
@@ -37,6 +38,7 @@ export function VrccPage() {
         boards,
         recent,
         myMap,
+        mutuals,
         service,
         deviceAuth,
         deviceAuthBusy,
@@ -45,7 +47,8 @@ export function VrccPage() {
         refreshBoards,
         beginDeviceAuth,
         disconnect,
-        openWorld
+        openWorld,
+        openUser
     } = useVrccController();
 
     const connected = connection?.connected ?? false;
@@ -141,6 +144,9 @@ export function VrccPage() {
                                     </span>
                                 )}
                             </TabsTrigger>
+                            <TabsTrigger value="mutuals">
+                                {t('vrcc.tab.mutuals')}
+                            </TabsTrigger>
                             <TabsTrigger value="me">
                                 {t('vrcc.tab.me')}
                             </TabsTrigger>
@@ -170,6 +176,14 @@ export function VrccPage() {
                                 connected={connected}
                                 recent={recent}
                                 onConnect={() => setTab('me')}
+                            />
+                        </TabsContent>
+
+                        <TabsContent value="mutuals" className="min-h-0 flex-1">
+                            <VrccMutualsPanel
+                                connected={connected}
+                                mutuals={mutuals}
+                                onOpenUser={openUser}
                             />
                         </TabsContent>
 

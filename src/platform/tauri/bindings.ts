@@ -401,6 +401,15 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_today');
     },
     /**
+     * 「互相连上」的星友列表。需要 `mutuals` 敏感权限（要审核）。
+     *
+     * 条目里的 `vrcUser` 用来打开 VRCX-0 自己的玩家详情页；加好友由玩家在那里
+     * 自己点。官方合规要求明文禁止程序代玩家发好友请求，所以这里只有这个命令。
+     */
+    async appVrccMutuals(): Promise<VrccMutuals> {
+        return await TAURI_INVOKE('app__vrcc_mutuals');
+    },
+    /**
      * 把一行错误信息归类，并把缺的权限一并带回。
      *
      * 运行时的命令把 `VrccError` 折成了字符串（`AppError::Custom`），这里按
@@ -7295,6 +7304,53 @@ export type VrccErrorKindOutput =
     | 'throttled'
     | 'transport'
     | 'other';
+/**
+ * 「互相连上」的一颗星，对应 `GET /me/mutuals` 的条目。
+ *
+ * `vrc_user` 是对方的 VRChat 用户 ID（`usr_…`），**只在对方已验证且公开
+ * 「已验证」标志时才有**。有它才能打开 VRCX 自己的玩家详情页。
+ */
+export type VrccMutualStar = {
+    /**
+     * 星的编号。
+     */
+    n?: number;
+    /**
+     * 星位名称。
+     */
+    name?: string | null;
+    group?: string | null;
+    /**
+     * 点亮编号。
+     */
+    star?: number | null;
+    /**
+     * 对方的 VRChat 显示名。
+     */
+    vrc?: string | null;
+    /**
+     * 对方的 VRChat 用户 ID；对方没公开时为 `null`。
+     *
+     * **合规提醒**：官方要求客户端若提供「加好友」入口，只能打开客户端自己
+     * 的玩家页面让玩家手动点添加，**不得由程序代发好友请求**。这里只把 ID
+     * 交出去用于打开玩家详情页，不提供任何自动发送好友请求的通道。
+     */
+    vrcUser?: string | null;
+    /**
+     * 互相连上的时间（毫秒时间戳）。
+     */
+    at?: number | null;
+};
+/**
+ * `GET /me/mutuals`：与当前玩家双向连线的星友列表。
+ */
+export type VrccMutuals = {
+    stars?: VrccMutualStar[];
+    /**
+     * 互相连上的总数。
+     */
+    n?: number | null;
+};
 /**
  * `GET /me/maps/{world}`：玩家**当前所在地图**在地图榜上的状态与本人评分。
  *

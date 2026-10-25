@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import { openWorldDialog } from '@/services/dialogService';
+import { openUserDialog, openWorldDialog } from '@/services/dialogService';
 import { toast } from '@/services/toastService';
 
 import {
@@ -9,6 +10,7 @@ import {
     type VrccBoard,
     type VrccConnection,
     type VrccDeviceAuthPrompt,
+    type VrccMutuals,
     type VrccMyMap,
     type VrccRecentNotifications,
     type VrccStatus,
@@ -24,7 +26,7 @@ function nextPollDelay(): number {
     return POLL_BASE_MS + Math.random() * POLL_JITTER_MS;
 }
 
-export type VrccTab = 'maps' | 'notifications' | 'me';
+export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'me';
 
 type State = {
     tab: VrccTab;
@@ -34,6 +36,8 @@ type State = {
     recent: VrccRecentNotifications | null;
     /** 当前所在地图在榜上的状态；null 表示不显示（未连接、无地图、或被隐藏）。 */
     myMap: VrccMyMap | null;
+    /** 「互相连上」的星友；null 表示还没拉过或没权限。 */
+    mutuals: VrccMutuals | null;
     service: VrccStatus | null;
     loading: boolean;
     error: VrccError | null;
@@ -50,6 +54,7 @@ const initialState: State = {
     boards: null,
     recent: null,
     myMap: null,
+    mutuals: null,
     service: null,
     loading: true,
     error: null,
@@ -65,6 +70,7 @@ const initialState: State = {
  * 已连接时轮询，且间隔带抖动。
  */
 export function useVrccController() {
+    const { t } = useTranslation();
     const [state, setState] = useState<State>(initialState);
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const authTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,6 +81,40 @@ export function useVrccController() {
             setState((current) => ({ ...current, ...next }));
         }
     }, []);
+
+    /**
+     * 统一上报一个错误。
+     *
+     * 三条路一起走，缺一不可：
+     * - `console.error` 留原始对象，便于在 DevTools 里看堆栈和错误码
+     * - 应用内 toast 给即时反馈（是窗口内的 toast，不是系统级 Windows 通知）
+     * - 页内 `error` 横幅留住它，玩家切页签回来还能看到
+     *
+     * 只做其中一两样会出现「操作失败了但没有任何提示」，这是最难受的体验。
+     *
+     * `vrccApi` 保证抛出的都是 `VrccError`（内部已把后端错误归一化并分类），
+     * 所以这里直接用；万一有非 `VrccError` 漏出来，按 `other` 兜住。
+     */
+    const reportError = useCallback(
+        (error: unknown, where: string) => {
+            console.error(`[vrcc] ${where} failed:`, error);
+            const normalized =
+                error instanceof VrccError
+                    ? error
+                    : new VrccError(
+                          error instanceof Error
+                              ? error.message
+                              : String(error),
+                          'other'
+                      );
+            toast.add({
+                type: 'error',
+                title: normalized.message || t('vrcc.error.unknown')
+            });
+            patch({ error: normalized });
+        },
+        [patch, t]
+    );
 
     /** 刷新连接状态与本地用量。 */
     const refreshConnection = useCallback(async () => {
@@ -118,6 +158,17 @@ export function useVrccController() {
         patch({ myMap });
     }, [patch]);
 
+    /**
+     * 「互相连上」的星友列表。
+     *
+     * 需要 `mutuals` 敏感权限；`dev-` 标识会拿到 403 `scope_unreviewed`，
+     * 这时走 reportError 提示，而不是静默失败。
+     */
+    const refreshMutuals = useCallback(async () => {
+        const mutuals = await vrccApi.mutuals();
+        patch({ mutuals });
+    }, [patch]);
+
     const refreshService = useCallback(async () => {
         try {
             const service = await vrccApi.status();
@@ -137,20 +188,30 @@ export function useVrccController() {
             await refreshBoards();
             if (connection.connected) {
                 await refreshRecent();
+                // 「互相连上」要敏感权限，`dev-` 一定拿不到；单独兜住错误，
+                // 不让它拖垮整页加载——地图榜和提醒仍然可用。
+                try {
+                    await refreshMutuals();
+                } catch (error) {
+                    reportError(error, 'refreshMutuals');
+                }
             }
             // 当前所在地图从 VRCX 自己的游戏日志拿，不额外请求 VRChat。
             await refreshMyMap();
             patch({ loading: false });
         } catch (error) {
-            patch({ loading: false, error: error as VrccError });
+            patch({ loading: false });
+            reportError(error, 'load');
         }
     }, [
         patch,
         refreshBoards,
         refreshConnection,
+        refreshMutuals,
         refreshMyMap,
         refreshRecent,
-        refreshService
+        refreshService,
+        reportError
     ]);
 
     useEffect(() => {
@@ -198,7 +259,7 @@ export function useVrccController() {
                     error.kind === 'needsReauth'
                 ) {
                     // 令牌失效：停下轮询，让玩家看到「重新连接」。
-                    if (!cancelled) patch({ error });
+                    if (!cancelled) reportError(error, 'poll');
                     return;
                 }
             }
@@ -213,7 +274,7 @@ export function useVrccController() {
             cancelled = true;
             if (pollTimer.current) clearTimeout(pollTimer.current);
         };
-    }, [state.connection?.connected, patch, refreshRecent]);
+    }, [state.connection?.connected, patch, refreshRecent, reportError]);
 
     /**
      * 切页签。
@@ -225,13 +286,26 @@ export function useVrccController() {
     const setTab = useCallback(
         (tab: VrccTab) => {
             patch({ tab });
-            if (tab === 'notifications' && state.connection?.connected) {
+            if (!state.connection?.connected) return;
+            if (tab === 'notifications') {
                 refreshRecent(true).catch(() => {
                     // 标记已读失败不该打断看列表；列表内容已经在了。
                 });
             }
+            if (tab === 'mutuals') {
+                // 打开时拉一次：列表可能在上次加载后变了。
+                refreshMutuals().catch((error) => {
+                    reportError(error, 'refreshMutuals');
+                });
+            }
         },
-        [patch, refreshRecent, state.connection?.connected]
+        [
+            patch,
+            refreshMutuals,
+            refreshRecent,
+            reportError,
+            state.connection?.connected
+        ]
     );
 
     /** 开始设备授权。 */
@@ -247,12 +321,10 @@ export function useVrccController() {
                 window.open(target, '_blank', 'noopener,noreferrer');
             }
         } catch (error) {
-            patch({
-                deviceAuthBusy: false,
-                error: error as VrccError
-            });
+            patch({ deviceAuthBusy: false });
+            reportError(error, 'beginDeviceAuth');
         }
-    }, [patch]);
+    }, [patch, reportError]);
 
     /**
      * 轮询设备授权。按后端给的 interval 反复问，直到成功、终态或超时。
@@ -289,10 +361,8 @@ export function useVrccController() {
                 }
             } catch (error) {
                 if (!cancelled) {
-                    patch({
-                        deviceAuth: null,
-                        error: error as VrccError
-                    });
+                    patch({ deviceAuth: null });
+                    reportError(error, 'pollDeviceAuth');
                 }
             }
         };
@@ -306,7 +376,7 @@ export function useVrccController() {
             cancelled = true;
             if (authTimer.current) clearTimeout(authTimer.current);
         };
-    }, [state.deviceAuth, load, patch]);
+    }, [state.deviceAuth, load, patch, reportError]);
 
     const disconnect = useCallback(async () => {
         patch({ error: null });
@@ -315,9 +385,9 @@ export function useVrccController() {
             patch({ deviceAuth: null, recent: null });
             await refreshConnection();
         } catch (error) {
-            patch({ error: error as VrccError });
+            reportError(error, 'disconnect');
         }
-    }, [patch, refreshConnection]);
+    }, [patch, refreshConnection, reportError]);
 
     /**
      * 打开 VRCX-0 自己的世界详情窗。
@@ -330,14 +400,29 @@ export function useVrccController() {
         openWorldDialog({ worldId });
     }, []);
 
+    /**
+     * 打开 VRCX-0 自己的玩家详情窗。
+     *
+     * 官方合规要求的落点就在这里：`me/mutuals` 里对方的 `vrcUser` 只用来打开
+     * 我们自己的玩家页，**加好友由玩家在那个界面里自己点**。
+     * 官方原文两处都写明「严禁由程序自动代替玩家向 VRChat 发送好友请求」，
+     * 所以这里只到"打开详情页"为止，没有、也不会有自动发送好友请求的分支。
+     */
+    const openUser = useCallback((userId: string) => {
+        if (!userId.startsWith('usr_')) return;
+        openUserDialog({ userId });
+    }, []);
+
     return {
         ...state,
         setTab,
         reload: load,
         refreshBoards,
         refreshMyMap,
+        refreshMutuals,
         beginDeviceAuth,
         disconnect,
-        openWorld
+        openWorld,
+        openUser
     };
 }

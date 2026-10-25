@@ -96,7 +96,15 @@ export const vrccApi = {
     myMap: () => call(() => commands.appVrccMyMap()),
 
     /** 今天这一轮。需要 today 敏感权限（审核后才可用）。 */
-    today: () => call(() => commands.appVrccToday())
+    today: () => call(() => commands.appVrccToday()),
+
+    /**
+     * 「互相连上」的星友列表。需要 mutuals 敏感权限（审核后才可用）。
+     *
+     * 条目带 `vrcUser` 时只能用来打开 VRCX-0 自己的玩家详情页——官方合规
+     * 要求加好友由玩家在原生界面里自己点，禁止程序代发好友请求。
+     */
+    mutuals: () => call(() => commands.appVrccMutuals())
 };
 
 export type VrccBoard = Awaited<ReturnType<typeof commands.appVrccBoards>>;
@@ -120,6 +128,8 @@ export type VrccDeviceAuthStep = Awaited<
 >;
 export type VrccStatus = Awaited<ReturnType<typeof commands.appVrccStatus>>;
 export type VrccToday = Awaited<ReturnType<typeof commands.appVrccToday>>;
+export type VrccMutuals = Awaited<ReturnType<typeof commands.appVrccMutuals>>;
+export type VrccMutualStar = NonNullable<VrccMutuals['stars']>[number];
 export type VrccMyMap = NonNullable<
     Awaited<ReturnType<typeof commands.appVrccMyMap>>
 >;

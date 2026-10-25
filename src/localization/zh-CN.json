@@ -799,7 +799,8 @@
         "tab": {
             "maps": "地图榜",
             "notifications": "提醒",
-            "me": "我的"
+            "me": "我的",
+            "mutuals": "连上"
         },
         "maps": {
             "hint": "满 {{min}} 人评分才进总榜",
@@ -846,6 +847,16 @@
             "window": "本分钟请求",
             "usage_note": "这是本客户端自己记的次数，不是服务器的剩余额度——官方没有查询剩余额度的接口。",
             "disclaimer": "第三方客户端，不是星遇同频官方。"
+        },
+        "error": {
+            "unknown": "操作失败，请稍后再试"
+        },
+        "mutuals": {
+            "need_connect": "连接星遇同频后，这里会显示互相连上的星友",
+            "empty": "还没有互相连上的星友",
+            "needs_scope": "「互相连上」需要 mutuals 权限，重新连接时勾上。",
+            "unnamed": "未命名",
+            "open_profile": "在 VRChat 玩家详情里打开"
         }
     },
     "nav_menu": {
