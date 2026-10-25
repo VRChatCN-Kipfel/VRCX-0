@@ -1,0 +1,342 @@
+//! 星遇同频（vrcc.cc）开放接口的线上数据契约。
+//!
+//! 字段名与类型严格对照官方 `openapi.yaml` 与 `xingshi-app` 的实现，
+//! 不做"我猜它应该叫这个"的推断。凡是官方允许缺失的字段，一律 `Option`，
+//! 因为接口在不同 scope / 审核状态下返回的字段集合并不相同。
+
+use serde::{Deserialize, Serialize};
+
+/// API 基址。生产代码里只允许拼相对路径，绝对地址会在客户端层被拒绝。
+pub const VRCC_API_BASE: &str = "https://vrcc.cc/api/v1/";
+
+/// 默认客户端标识。申请到审核通过的 `app_…` 后改这里。
+pub const VRCC_DEFAULT_CLIENT: &str = "dev-vrcx0";
+
+// ---------------------------------------------------------------------------
+// 开放数据 · 地图榜
+// ---------------------------------------------------------------------------
+
+/// `GET /boards/maps`、`GET /maps`、`GET /me/maps` 共用的地图条目。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccBoardMap {
+    /// 世界 ID，形如 `wrld_…`。
+    pub world: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    /// 平均分（1–10）。
+    #[serde(default)]
+    pub avg: Option<f64>,
+    /// 评分人数；官方要求满 5 人才进总榜。
+    #[serde(default)]
+    pub raters: Option<i64>,
+    /// 名次，1 起。
+    #[serde(default)]
+    pub rank: Option<i64>,
+    /// 口碑档位 `light` / `mid` / …
+    #[serde(default)]
+    pub weight: Option<String>,
+    /// vrcc.cc 上的地图页。
+    #[serde(default)]
+    pub page: Option<String>,
+    /// 封面图地址。
+    #[serde(default)]
+    pub img: Option<String>,
+}
+
+/// 地图榜 / 批量查地图 / 我打过的图，三者的外层结构一致。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccBoard {
+    #[serde(default)]
+    pub board: Option<String>,
+    /// 上总榜所需最少评分人数。
+    #[serde(default)]
+    pub min: Option<i64>,
+    #[serde(default)]
+    pub maps: Vec<VrccBoardMap>,
+    /// 榜单快照时间（毫秒）。
+    #[serde(default)]
+    pub at: Option<i64>,
+}
+
+/// 单张地图详情：`GET /maps/{world}`。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapDetail {
+    #[serde(default)]
+    pub map: Option<VrccBoardMap>,
+    #[serde(default)]
+    pub at: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// 连接身份
+// ---------------------------------------------------------------------------
+
+/// 通用的"我"：点亮编号 + VRChat 名字。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMe {
+    /// 星号（点亮编号）。
+    #[serde(default)]
+    pub star: Option<i64>,
+    /// 公开的 VRChat 名字。
+    #[serde(default)]
+    pub vrc: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 设备授权（RFC 8628）
+// ---------------------------------------------------------------------------
+
+/// `POST /device/code` 的返回：给玩家看的码 + 同意链接。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct VrccDeviceCode {
+    #[serde(rename = "device_code")]
+    pub device_code: String,
+    #[serde(rename = "user_code")]
+    pub user_code: String,
+    #[serde(rename = "verification_uri", default)]
+    pub verification_uri: Option<String>,
+    /// 带码的同意链接，优先用这个。
+    #[serde(rename = "verification_uri_complete", default)]
+    pub verification_uri_complete: Option<String>,
+    /// 有效期秒数。
+    #[serde(rename = "expires_in", default)]
+    pub expires_in: Option<i64>,
+    /// 官方建议的轮询间隔秒数。
+    #[serde(default)]
+    pub interval: Option<i64>,
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+/// `POST /device/token` 成功后返回的令牌。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct VrccTokenResponse {
+    #[serde(rename = "access_token")]
+    pub access_token: String,
+    #[serde(rename = "token_type", default)]
+    pub token_type: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub me: Option<VrccMe>,
+}
+
+// ---------------------------------------------------------------------------
+// 提醒
+// ---------------------------------------------------------------------------
+
+/// 一条提醒。`url` 存在时说明它关联一个可打开的链接。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccNotificationItem {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    /// 毫秒时间戳。
+    #[serde(default)]
+    pub at: Option<i64>,
+}
+
+/// `GET /me/notifications`：带增量游标的轮询接口。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccNotifications {
+    /// 下一次轮询要回传的游标。
+    #[serde(default)]
+    pub last: Option<i64>,
+    #[serde(default)]
+    pub items: Vec<VrccNotificationItem>,
+    /// 官方建议的轮询间隔（秒），通常 60。
+    #[serde(default)]
+    pub every: Option<i64>,
+    /// 未读角标数。
+    #[serde(default)]
+    pub dot: Option<i64>,
+}
+
+/// `GET /me/notifications/recent`：最近一天的最后几条。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRecentNotifications {
+    #[serde(default)]
+    pub items: Vec<VrccNotificationItem>,
+    #[serde(default)]
+    pub read: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// 地图评分
+// ---------------------------------------------------------------------------
+
+/// `GET /me/maps/{world}` 与打分接口共用的返回。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyMap {
+    #[serde(default)]
+    pub world: Option<String>,
+    /// 是否已进总榜。
+    #[serde(default)]
+    pub board: Option<bool>,
+    #[serde(default)]
+    pub avg: Option<f64>,
+    #[serde(default)]
+    pub raters: Option<i64>,
+    /// 自己打的分（1–10）。
+    #[serde(default)]
+    pub mine: Option<i64>,
+    /// 现在能不能打分。
+    #[serde(default)]
+    pub can: Option<bool>,
+    /// 不能打分时缺什么：`verify` / `friend` / `go`。
+    #[serde(default)]
+    pub need: Option<String>,
+    /// 自己的短评。
+    #[serde(default)]
+    pub words: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 星卡 / 今天（敏感 scope，需审核）
+// ---------------------------------------------------------------------------
+
+/// 一张星卡：`GET /me/card` 里的条目，也用于「今天」。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccStarCard {
+    /// 星号。
+    #[serde(default)]
+    pub n: i64,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub vrc: Option<String>,
+    #[serde(default)]
+    pub at: Option<i64>,
+    #[serde(default)]
+    pub mutual: Option<bool>,
+}
+
+/// 「今天」的轮次信息。这一轮连了几颗、下一轮什么时候开始。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRound {
+    /// 本轮开始时间（毫秒）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// 下一轮开始时间（毫秒）。
+    #[serde(default)]
+    pub next: Option<i64>,
+    /// 本轮已连几颗。
+    #[serde(default)]
+    pub used: Option<i64>,
+    /// 本轮最多能连几颗。
+    #[serde(default)]
+    pub max: Option<i64>,
+    #[serde(default)]
+    pub remind: Option<bool>,
+}
+
+/// `GET /me/today`：这一轮路过的星 + 轮次进度。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccToday {
+    /// 第几轮，形如 `#12`。
+    #[serde(default)]
+    pub day: Option<String>,
+    #[serde(default)]
+    pub cards: Vec<VrccStarCard>,
+    #[serde(default)]
+    pub round: VrccRound,
+}
+
+// ---------------------------------------------------------------------------
+// 服务状态
+// ---------------------------------------------------------------------------
+
+/// `GET /status`：不需要 client 标识的探活接口。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccStatus {
+    /// 毫秒时间戳。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// `ok` 表示正常。
+    #[serde(default)]
+    pub state: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 错误体
+// ---------------------------------------------------------------------------
+
+/// 官方错误体：`{"error": "…", "need": "…", "why": "…"}`。
+///
+/// 三个字段都可能缺，所以整体是 Option 链而不是结构体默认值。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct VrccErrorBody {
+    #[serde(default)]
+    pub error: Option<String>,
+    /// 缺哪一项权限或前置条件。
+    #[serde(default)]
+    pub need: Option<String>,
+    #[serde(default)]
+    pub why: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 前端用的聚合投影
+// ---------------------------------------------------------------------------
+
+/// 本客户端的本地用量。**这不是服务器数据**：官方没有"查询剩余配额"的接口，
+/// 所以只能报我们自己记的计数，措辞必须诚实。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccUsageSnapshot {
+    /// 今日个人接口已用次数（本地计数）。
+    pub personal_used_today: i64,
+    /// 官方对四个个人接口的每日合计上限。
+    pub personal_daily_limit: i64,
+    /// 今日 `/device/code` 已用次数（本地计数）。
+    pub device_code_used_today: i64,
+    /// 官方对每网络地址每日拿码上限。
+    pub device_code_daily_limit: i64,
+    /// 限流窗口内已发请求数。
+    pub window_used: i64,
+    /// 限流窗口容量（每分钟）。
+    pub window_limit: i64,
+    /// 若正在退避，还有多少毫秒恢复。
+    pub backoff_remaining_ms: i64,
+    /// 用量计数的日期（本地时区 `YYYY-MM-DD`）。
+    pub date: String,
+}
+
+/// 连接状态投影。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccConnectionSnapshot {
+    /// 是否持有令牌。
+    pub connected: bool,
+    /// 星号，已连接且拿到时才有。
+    pub star: Option<i64>,
+    /// 公开的 VRChat 名字。
+    pub vrc_name: Option<String>,
+    /// 令牌实际拿到的 scope。
+    pub scope: Option<String>,
+    /// 客户端标识。
+    pub client: String,
+    /// 上次成功轮询提醒的时间（毫秒）。
+    pub last_poll_at: Option<i64>,
+    /// 下一次建议轮询时间（毫秒）。
+    pub next_poll_at: Option<i64>,
+}
