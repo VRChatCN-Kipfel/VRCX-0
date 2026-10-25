@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 /// API 基址。生产代码里只允许拼相对路径，绝对地址会在客户端层被拒绝。
 pub const VRCC_API_BASE: &str = "https://vrcc.cc/api/v1/";
 
+/// 站点根，用来把接口给的**相对路径**（如 `/match/?tab=inbox`）拼成完整地址。
+pub const VRCC_SITE_ORIGIN: &str = "https://vrcc.cc";
+
 /// 默认客户端标识。申请到审核通过的 `app_…` 后改这里。
 pub const VRCC_DEFAULT_CLIENT: &str = "dev-vrcx0";
 
@@ -131,19 +134,22 @@ pub struct VrccTokenResponse {
 // 提醒
 // ---------------------------------------------------------------------------
 
-/// 一条提醒。`url` 存在时说明它关联一个可打开的链接。
+/// 一条提醒，对应官方的 `Notice`。
+///
+/// 官方定义只有 `id` / `title` / `body` / `at` 四个字段。`/me/notifications/recent`
+/// 会在此之上多给一个 `url`（见 [`VrccRecentNotificationItem`]）——
+/// `/me/notifications` 的轮询**没有** `url`，两者不能混用同一个类型。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccNotificationItem {
+    /// 提醒递增编号。
     #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
     pub body: Option<String>,
-    #[serde(default)]
-    pub url: Option<String>,
-    /// 毫秒时间戳。
+    /// 产生时间（毫秒时间戳）。
     #[serde(default)]
     pub at: Option<i64>,
 }
@@ -165,14 +171,53 @@ pub struct VrccNotifications {
     pub dot: Option<i64>,
 }
 
-/// `GET /me/notifications/recent`：最近一天的最后几条。
+/// `GET /me/notifications/recent`：最近 24 小时内的最后 5 条（新的在前）。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccRecentNotifications {
     #[serde(default)]
-    pub items: Vec<VrccNotificationItem>,
+    pub items: Vec<VrccRecentNotificationItem>,
+    /// 玩家最后已读的提醒 ID；大于它的可视为未读。
     #[serde(default)]
     pub read: Option<i64>,
+}
+
+/// `recent` 里的提醒条目：`Notice` 加上站内跳转路径。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRecentNotificationItem {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    /// 产生时间（毫秒时间戳）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// 对应的网页**相对路径**（以 `/match/` 开头），无跳转时为 `null`。
+    ///
+    /// 注意：这是相对路径，不是完整 URL。前面要拼上 [`VRCC_SITE_ORIGIN`]。
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+impl VrccRecentNotificationItem {
+    /// 拼出可点击的完整地址。`url` 为空时回到站点首页。
+    pub fn absolute_url(&self) -> String {
+        match self
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+        {
+            Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
+                url.to_string()
+            }
+            Some(url) => format!("{}{}", VRCC_SITE_ORIGIN, url),
+            None => format!("{}/", VRCC_SITE_ORIGIN),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -210,21 +255,55 @@ pub struct VrccMyMap {
 // 星卡 / 今天（敏感 scope，需审核）
 // ---------------------------------------------------------------------------
 
-/// 一张星卡：`GET /me/card` 里的条目，也用于「今天」。
+/// 一张星卡：`/me/today`、`/me/inbox` 里的条目。
+///
+/// 字段照官方 `StarCard` schema。`additionalProperties: true`，所以还有文档
+/// 没列出的字段存在，这里只取我们用得到的那些；多出来的字段解析时被忽略。
+///
+/// 注意：这张卡**没有** `at` 时间字段（官方 `StarCard` 不提供），时间由
+/// 外层结构给。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccStarCard {
-    /// 星号。
+    /// 星的编号，连线、私聊都用它。
     #[serde(default)]
     pub n: i64,
     #[serde(default)]
     pub name: Option<String>,
+    /// 星位的一句话描述。
     #[serde(default)]
-    pub vrc: Option<String>,
+    pub line: Option<String>,
     #[serde(default)]
-    pub at: Option<i64>,
+    pub group: Option<String>,
+    /// 星群名称。
+    #[serde(default)]
+    pub group_name: Option<String>,
+    /// 氛围：`安静` / `随场` / `热闹`。
+    #[serde(default)]
+    pub vibe: Option<String>,
+    #[serde(default)]
+    pub intro: Option<String>,
+    /// 点亮编号（对方没公开时为 `null`）。
+    #[serde(default)]
+    pub star: Option<i64>,
+    /// 对方验证过 VRChat 账号。
+    #[serde(default)]
+    pub verified: Option<bool>,
+    /// 我连向了 TA。
+    #[serde(default)]
+    pub linked: Option<bool>,
+    /// 已经互相连上。
     #[serde(default)]
     pub mutual: Option<bool>,
+    /// 对方的 VRChat 名字，**只在互相连上时才有**。
+    #[serde(default)]
+    pub vrc: Option<String>,
+    /// 对方的 VRChat 用户 ID，只在互相连上且对方公开已验证时才有。
+    #[serde(default)]
+    pub vrc_user: Option<String>,
+    /// 共同的星友数（对方不公开时为 `null`）。
+    #[serde(default)]
+    pub friends: Option<i64>,
 }
 
 /// 「今天」的轮次信息。这一轮连了几颗、下一轮什么时候开始。
@@ -283,6 +362,7 @@ pub struct VrccStatus {
 /// 官方错误体：`{"error": "…", "need": "…", "why": "…"}`。
 ///
 /// 三个字段都可能缺，所以整体是 Option 链而不是结构体默认值。
+/// `every` 只在 429 `too_soon` 时出现，是官方建议的重试间隔（秒）。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 pub struct VrccErrorBody {
     #[serde(default)]
