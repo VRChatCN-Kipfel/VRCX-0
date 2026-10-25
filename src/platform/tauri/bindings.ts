@@ -7279,15 +7279,21 @@ export type VrccErrorKindOutput =
     | 'transport'
     | 'other';
 /**
- * 一条提醒。`url` 存在时说明它关联一个可打开的链接。
+ * 一条提醒，对应官方的 `Notice`。
+ *
+ * 官方定义只有 `id` / `title` / `body` / `at` 四个字段。`/me/notifications/recent`
+ * 会在此之上多给一个 `url`（见 [`VrccRecentNotificationItem`]）——
+ * `/me/notifications` 的轮询**没有** `url`，两者不能混用同一个类型。
  */
 export type VrccNotificationItem = {
+    /**
+     * 提醒递增编号。
+     */
     id?: number;
     title?: string | null;
     body?: string | null;
-    url?: string | null;
     /**
-     * 毫秒时间戳。
+     * 产生时间（毫秒时间戳）。
      */
     at?: number | null;
 };
@@ -7310,10 +7316,31 @@ export type VrccNotifications = {
     dot?: number | null;
 };
 /**
- * `GET /me/notifications/recent`：最近一天的最后几条。
+ * `recent` 里的提醒条目：`Notice` 加上站内跳转路径。
+ */
+export type VrccRecentNotificationItem = {
+    id?: number;
+    title?: string | null;
+    body?: string | null;
+    /**
+     * 产生时间（毫秒时间戳）。
+     */
+    at?: number | null;
+    /**
+     * 对应的网页**相对路径**（以 `/match/` 开头），无跳转时为 `null`。
+     *
+     * 注意：这是相对路径，不是完整 URL。前面要拼上 [`VRCC_SITE_ORIGIN`]。
+     */
+    url?: string | null;
+};
+/**
+ * `GET /me/notifications/recent`：最近 24 小时内的最后 5 条（新的在前）。
  */
 export type VrccRecentNotifications = {
-    items?: VrccNotificationItem[];
+    items?: VrccRecentNotificationItem[];
+    /**
+     * 玩家最后已读的提醒 ID；大于它的可视为未读。
+     */
     read?: number | null;
 };
 /**
@@ -7339,17 +7366,62 @@ export type VrccRound = {
     remind?: boolean | null;
 };
 /**
- * 一张星卡：`GET /me/card` 里的条目，也用于「今天」。
+ * 一张星卡：`/me/today`、`/me/inbox` 里的条目。
+ *
+ * 字段照官方 `StarCard` schema。`additionalProperties: true`，所以还有文档
+ * 没列出的字段存在，这里只取我们用得到的那些；多出来的字段解析时被忽略。
+ *
+ * 注意：这张卡**没有** `at` 时间字段（官方 `StarCard` 不提供），时间由
+ * 外层结构给。
  */
 export type VrccStarCard = {
     /**
-     * 星号。
+     * 星的编号，连线、私聊都用它。
      */
     n?: number;
     name?: string | null;
-    vrc?: string | null;
-    at?: number | null;
+    /**
+     * 星位的一句话描述。
+     */
+    line?: string | null;
+    group?: string | null;
+    /**
+     * 星群名称。
+     */
+    groupName?: string | null;
+    /**
+     * 氛围：`安静` / `随场` / `热闹`。
+     */
+    vibe?: string | null;
+    intro?: string | null;
+    /**
+     * 点亮编号（对方没公开时为 `null`）。
+     */
+    star?: number | null;
+    /**
+     * 对方验证过 VRChat 账号。
+     */
+    verified?: boolean | null;
+    /**
+     * 我连向了 TA。
+     */
+    linked?: boolean | null;
+    /**
+     * 已经互相连上。
+     */
     mutual?: boolean | null;
+    /**
+     * 对方的 VRChat 名字，**只在互相连上时才有**。
+     */
+    vrc?: string | null;
+    /**
+     * 对方的 VRChat 用户 ID，只在互相连上且对方公开已验证时才有。
+     */
+    vrcUser?: string | null;
+    /**
+     * 共同的星友数（对方不公开时为 `null`）。
+     */
+    friends?: number | null;
 };
 /**
  * `GET /status`：不需要 client 标识的探活接口。

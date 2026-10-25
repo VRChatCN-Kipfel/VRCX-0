@@ -7,6 +7,20 @@ import type { VrccRecentNotifications } from '../vrccApi';
 
 const SITE = 'https://vrcc.cc';
 
+/**
+ * 把官方给的**相对路径**拼成完整地址。
+ *
+ * 官方 `/me/notifications/recent` 的 `url` 形如 `/match/?tab=inbox`，
+ * 接在 `https://vrcc.cc` 后面才是可点的链接。已经是绝对地址的原样返回。
+ */
+function toAbsolute(url: string): string {
+    const trimmed = url.trim();
+    if (!trimmed) return SITE;
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://'))
+        return trimmed;
+    return `${SITE}${trimmed.startsWith('/') ? '' : '/'}${trimmed}`;
+}
+
 /** 相对时间：刚 / N 分钟 / N 小时 / N 天。 */
 function relativeTime(at: number | null | undefined): string {
     if (!at) return '';
@@ -68,7 +82,10 @@ export function VrccNotificationsPanel({
         <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border">
             <ul className="divide-y">
                 {items.map((item) => {
-                    const href = item.url ?? SITE;
+                    // 官方 recent 的 url 是**相对路径**（以 /match/ 开头）。
+                    // 契约层的 absolute_url() 会拼上站点根；命令层把拼好的
+                    // 结果放在同一个字段里，所以我们这里拿到的可以直接用。
+                    const href = item.url ? toAbsolute(item.url) : SITE;
                     return (
                         <li key={item.id}>
                             <a
