@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
 import { openUserDialog, openWorldDialog } from '@/services/dialogService';
 import i18n from '@/services/i18nService';
@@ -71,7 +70,6 @@ const initialState: State = {
  * 已连接时轮询，且间隔带抖动。
  */
 export function useVrccController() {
-    const { t } = useTranslation();
     const [state, setState] = useState<State>(initialState);
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const authTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,7 +122,6 @@ export function useVrccController() {
         //
         // 而且 `t` 的引用变化并不代表文案变了：`i18n.t` 读全局实例，
         // 切语言时自己会返回新文案。
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         [patch]
     );
 
@@ -245,6 +242,8 @@ export function useVrccController() {
             if (pollTimer.current) clearTimeout(pollTimer.current);
             if (authTimer.current) clearTimeout(authTimer.current);
         };
+        // `load` 故意不放进依赖：它自己会 `patch`，进依赖就是无限循环。
+        // 上面的 `didLoad` ref 已经保证只跑一次，所以这个空依赖是正确的。
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
