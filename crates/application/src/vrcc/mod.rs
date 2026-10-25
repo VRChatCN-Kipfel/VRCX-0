@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use vrcx_0_application_core::{Error, Result};
+use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
     VrccUsageSnapshot,

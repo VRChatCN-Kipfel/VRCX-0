@@ -218,6 +218,7 @@ pub struct DesktopRuntimeHostState {
     world_collections: vrcx_0_outbound_adapters::LocalWorldCollectionAdapter,
     friend_log_name_store: vrcx_0_outbound_adapters::LocalFriendLogNameStore,
     notification_sync: vrcx_0_outbound_adapters::LocalNotificationSyncAdapter,
+    vrcc: crate::vrcc::DesktopVrccRuntime,
 }
 
 struct DesktopRuntimeProfileExtension {
@@ -678,6 +679,9 @@ impl DesktopRuntimeHostState {
             Arc::clone(runtime.database()),
             Arc::clone(runtime.web_client()),
         );
+        let vrcc = crate::vrcc::DesktopVrccRuntime::new(
+            vrcx_0_outbound_adapters::LocalVrccTokenStore::new(Arc::clone(runtime.database())),
+        );
         let hmd_membership_runtime = Arc::downgrade(runtime.realtime_runtime());
         desktop
             .vr_overlay_runtime
@@ -723,6 +727,7 @@ impl DesktopRuntimeHostState {
             world_collections,
             friend_log_name_store,
             notification_sync,
+            vrcc,
         })
     }
 
@@ -1671,6 +1676,11 @@ impl DesktopRuntimeHostState {
         {
             tracing::warn!(error = %error, "app__world_open_register: best-effort registration failed");
         }
+    }
+
+    /// 星遇同频运行时。
+    pub fn vrcc(&self) -> &crate::vrcc::DesktopVrccRuntime {
+        &self.vrcc
     }
 
     pub async fn preview_shared_collection(

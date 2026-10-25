@@ -17,3 +17,7 @@ pub use throttle::{
     backoff_for, format_local_date, local_date_today, now_millis, DailyUsage, RateLimiter,
     DEVICE_CODE_DAILY_LIMIT, NOTIFICATIONS_MIN_GAP, PERSONAL_DAILY_LIMIT, WINDOW_LIMIT,
 };
+pub use vrcx_0_contracts::vrcc::{VRCC_API_BASE, VRCC_DEFAULT_CLIENT};
+
+/// 默认客户端标识的别名，方便调用点读起来顺一点。
+pub const VRCC_DEFAULT_CLIENT_ID: &str = VRCC_DEFAULT_CLIENT;
