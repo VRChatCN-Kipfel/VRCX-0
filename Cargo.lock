@@ -9342,6 +9342,7 @@ dependencies = [
  "vrcx-0-contracts",
  "vrcx-0-core",
  "vrcx-0-i18n",
+ "vrcx-0-integrations",
 ]
 
 [[package]]
