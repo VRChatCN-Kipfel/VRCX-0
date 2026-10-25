@@ -784,6 +784,19 @@ impl DesktopRuntimeHostState {
         self.desktop.services.now_playing().as_ref().clone()
     }
 
+    /// 玩家当前所在地图的 world ID（`wrld_…`），不在图里时为空串。
+    ///
+    /// 只给 world ID，不带房间实例号——星遇同频的地图接口要的是前者。
+    /// 游戏没在跑时直接返回空：离线状态下的 `location` 可能是上一次的残留，
+    /// 拿它去查会显示一张玩家其实不在的图。
+    pub fn current_world_id(&self) -> String {
+        if !self.is_game_running() {
+            return String::new();
+        }
+        let snapshot = self.desktop.services.game_log_snapshot();
+        vrcx_0_core::location::world_id_from_location(&snapshot.location)
+    }
+
     pub fn set_game_log_persistence_disabled(&self, disabled: bool) -> Result<()> {
         self.game
             .game_log_runtime

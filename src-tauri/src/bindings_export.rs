@@ -208,6 +208,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             commands::application::vrcc::app__vrcc_device_auth_poll,
             commands::application::vrcc::app__vrcc_disconnect,
             commands::application::vrcc::app__vrcc_recent_notifications,
+            commands::application::vrcc::app__vrcc_my_map,
             commands::application::vrcc::app__vrcc_poll_notifications,
             commands::application::vrcc::app__vrcc_today,
             commands::application::vrcc::app__vrcc_classify_error,

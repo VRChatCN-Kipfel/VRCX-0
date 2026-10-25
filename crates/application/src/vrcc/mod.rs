@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
-    VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
+    VrccBoard, VrccConnectionSnapshot, VrccMyMap, VrccRecentNotifications, VrccStatus, VrccToday,
     VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{
@@ -305,14 +305,24 @@ impl VrccService {
 
     // -- 提醒 --------------------------------------------------------------
 
-    /// 拉最近的提醒。首次不传游标。
+    /// 拉最近的提醒。
+    ///
+    /// `mark` 对应官方的 `?mark=1`：传 `true` 表示**玩家此刻正在看这个列表**，
+    /// 服务器会把最新一条 ID 记到账号的 `read` 字段，跨设备同步已读状态。
+    ///
+    /// 两种调用场景必须区分：玩家打开「提醒」页时传 `true`；后台只为算数字时
+    /// 传 `false`——否则等于替玩家把提醒标成看过了，而其实他没看。
     pub async fn recent_notifications(
         &self,
+        mark: bool,
     ) -> std::result::Result<VrccRecentNotifications, VrccError> {
         self.ensure_connected()?;
-        let result = self.client.recent_notifications(false).await?;
+        let result = self.client.recent_notifications(mark).await?;
         // 未读数按官方语义算：id 大于 read 的算未读。`read` 缺省时（账号上
         // 还没记过已读），把返回的条目都当作未读——这是唯一诚实的解读。
+        //
+        // 刚标记过 `mark=1` 时服务器会把 read 推到最新，未读随之变 0，这是对的：
+        // 玩家确实看到了。
         let unread = match result.read {
             Some(read) => result.items.iter().filter(|item| item.id > read).count() as u32,
             None => result.items.len() as u32,
@@ -321,6 +331,29 @@ impl VrccService {
         self.session
             .note_poll(vrcx_0_integrations::vrcc::now_millis(), None, None);
         Ok(result)
+    }
+
+    /// 当前所在地图在地图榜上的状态与我自己的评分。
+    ///
+    /// 需要 `maps`（普通权限）。官方的硬性要求是 `off` 为 `true` 时客户端不要
+    /// 显示打分面板；这里在 `off` 时直接返回 `None`，调用方拿不到对象就不可能
+    /// 误显示——比在每个 UI 分支里记得判断 `off` 更可靠。
+    pub async fn my_map(&self, world: &str) -> std::result::Result<Option<VrccMyMap>, VrccError> {
+        // 只认 wrld_…：带房间实例号的 location 会让接口查错图。
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            return Ok(None);
+        }
+        self.ensure_connected()?;
+        let map = self.client.my_map(&world).await?;
+        if !map.is_visible() {
+            tracing::debug!(
+                world = %world,
+                "vrcc: this map is not shown to this player, hiding the card"
+            );
+            return Ok(None);
+        }
+        Ok(Some(map))
     }
 
     /// 增量轮询。游标与建议间隔都自动维护。

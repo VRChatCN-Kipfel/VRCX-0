@@ -115,9 +115,13 @@ impl DesktopVrccRuntime {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn recent_notifications(&self) -> Result<VrccRecentNotifications, String> {
+    /// 最近的提醒。`mark` 为 `true` 时同时把已读状态同步到账号（跨设备）。
+    pub async fn recent_notifications(
+        &self,
+        mark: bool,
+    ) -> Result<VrccRecentNotifications, String> {
         self.service
-            .recent_notifications()
+            .recent_notifications(mark)
             .await
             .map_err(|error| error.to_string())
     }
@@ -127,6 +131,17 @@ impl DesktopVrccRuntime {
     ) -> Result<vrcx_0_contracts::vrcc::VrccNotifications, String> {
         self.service
             .poll_notifications()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// 当前所在地图在地图榜上的状态。`off` 的地图返回 `None`（不给看）。
+    pub async fn my_map(
+        &self,
+        world: &str,
+    ) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, String> {
+        self.service
+            .my_map(world)
             .await
             .map_err(|error| error.to_string())
     }

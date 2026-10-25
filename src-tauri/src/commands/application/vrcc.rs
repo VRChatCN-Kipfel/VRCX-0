@@ -230,16 +230,44 @@ pub async fn app__vrcc_disconnect(state: State<'_, AppState>) -> Result<(), AppE
 
 // -- 提醒 -------------------------------------------------------------------
 
-/// 最近的提醒（最近一天的最后几条）。
+/// 最近的提醒。
+///
+/// `mark` 为 `true` 表示玩家正在看这个列表：服务器会把已读状态同步到账号，
+/// 其他设备（网页、手机 App）上的红点跟着消。后台只为算数字时传 `false`。
 #[tauri::command]
 #[specta::specta]
 pub async fn app__vrcc_recent_notifications(
     state: State<'_, AppState>,
+    mark: bool,
 ) -> Result<VrccRecentNotifications, AppError> {
     state
         .runtime_host()
         .vrcc()
-        .recent_notifications()
+        .recent_notifications(mark)
+        .await
+        .map_err(AppError::Custom)
+}
+
+/// 当前所在地图在地图榜上的状态与我自己的评分。
+///
+/// 地图 ID 由后端自己从游戏日志取，前端不用传：位置本来就只有后端知道，
+/// 让每个调用点自己算一遍只会多出一处可能算错的地方。
+///
+/// 返回 `null` 的三种情况：不在任何地图里、地图被下架或不对当前玩家开放
+/// （官方要求此时不显示打分面板）、以及未连接。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_map(
+    state: State<'_, AppState>,
+) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, AppError> {
+    let runtime = state.runtime_host();
+    let world = runtime.current_world_id();
+    if world.is_empty() {
+        return Ok(None);
+    }
+    runtime
+        .vrcc()
+        .my_map(&world)
         .await
         .map_err(AppError::Custom)
 }

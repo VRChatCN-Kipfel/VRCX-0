@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use vrcx_0_contracts::vrcc::{
-    VrccBoard, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccNotifications,
+    VrccBoard, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMyMap, VrccNotifications,
     VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse, VRCC_API_BASE,
     VRCC_DEFAULT_CLIENT,
 };
@@ -539,6 +539,25 @@ impl VrccClient {
         };
         self.request("GET", path, None, true, "recent", Duration::from_secs(10))
             .await
+    }
+
+    /// 当前所在地图在地图榜上的状态与我自己的评分。
+    ///
+    /// 需要 `maps`（普通权限，`dev-` 就能用）。这是官方插件「所在地图」那块
+    /// 的数据来源：能看分、看人数、看自己打了几分、现在能不能打分。
+    ///
+    /// `world` 只能是 `wrld_…`，不要带房间实例号。
+    pub async fn my_map(&self, world: &str) -> Result<VrccMyMap, VrccError> {
+        self.spend_personal()?;
+        self.request(
+            "GET",
+            &format!("me/maps/{world}"),
+            None,
+            true,
+            "my_map",
+            Duration::from_secs(10),
+        )
+        .await
     }
 
     /// 今天这一轮路过的星 + 轮次进度。需要 `today` 权限（敏感，要审核）。

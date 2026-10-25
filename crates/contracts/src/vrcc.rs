@@ -224,15 +224,33 @@ impl VrccRecentNotificationItem {
 // 地图评分
 // ---------------------------------------------------------------------------
 
-/// `GET /me/maps/{world}` 与打分接口共用的返回。
+/// `GET /me/maps/{world}`：玩家**当前所在地图**在地图榜上的状态与本人评分。
+///
+/// 字段照官方 `MyMap`。三个布尔各有明确含义，客户端行为直接依赖它们：
+///
+/// | 字段 | 为 `true` 时 |
+/// | --- | --- |
+/// | `board` | 已正式在榜上展示 |
+/// | `pending` | 已提交收录、等审核 |
+/// | `off` | **不给当前玩家看**（下架或年龄池不符）→ 客户端**必须隐藏**这张图的卡片与打分入口 |
+///
+/// 三者皆 `false` 表示地图榜还没有这张图；玩家首次打分时会自动提交审核。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccMyMap {
     #[serde(default)]
     pub world: Option<String>,
-    /// 是否已进总榜。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 是否已正式在地图榜上展示。
     #[serde(default)]
     pub board: Option<bool>,
+    /// 是否已提交收录、正在等待审核。
+    #[serde(default)]
+    pub pending: Option<bool>,
+    /// 是否不给当前玩家看；为 `true` 时客户端应隐藏这张图。
+    #[serde(default)]
+    pub off: Option<bool>,
     #[serde(default)]
     pub avg: Option<f64>,
     #[serde(default)]
@@ -249,6 +267,46 @@ pub struct VrccMyMap {
     /// 自己的短评。
     #[serde(default)]
     pub words: Option<String>,
+    /// 短评的审核状态：`wait` 审核中 / `ok` 已通过 / `hidden` 未通过；
+    /// 没有短评时为 `null`。
+    #[serde(default)]
+    pub words_ok: Option<String>,
+    /// 封面**相对路径**（接在 [`VRCC_SITE_ORIGIN`] 之后使用）。
+    ///
+    /// 官方给的示例是 `/api/match?xdimg=…`，也就是说这个图片来自网页端那套
+    /// 内部接口。我们只把它当图片地址加载，不通过它取任何数据。
+    #[serde(default)]
+    pub img: Option<String>,
+}
+
+impl VrccMyMap {
+    /// 客户端是否应当显示这张地图。
+    ///
+    /// 官方的硬性要求：`off` 为 `true` 时不要显示打分面板。把判断收在这里，
+    /// 免得每个调用点各写一遍、漏掉一处就等于没做。
+    pub fn is_visible(&self) -> bool {
+        !self.off.unwrap_or(false)
+    }
+
+    /// 封面的完整地址；没有封面时返回 `None`。
+    pub fn image_url(&self) -> Option<String> {
+        let img = self.img.as_deref()?.trim();
+        if img.is_empty() {
+            return None;
+        }
+        if img.starts_with("http://") || img.starts_with("https://") {
+            return Some(img.to_string());
+        }
+        Some(format!(
+            "{}{}",
+            VRCC_SITE_ORIGIN,
+            if img.starts_with('/') {
+                img.to_string()
+            } else {
+                format!("/{img}")
+            }
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------

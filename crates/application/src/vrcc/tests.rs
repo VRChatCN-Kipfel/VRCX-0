@@ -187,7 +187,7 @@ async fn connected_guard_blocks_personal_calls_when_disconnected() {
     let store = Arc::new(MemoryStore::default());
     let service = VrccService::new(store, "dev-test");
     // 未连接时不应发请求，直接报没令牌。
-    let error = service.recent_notifications().await.unwrap_err();
+    let error = service.recent_notifications(false).await.unwrap_err();
     assert!(matches!(error, VrccError::TokenMissing));
 }
 
