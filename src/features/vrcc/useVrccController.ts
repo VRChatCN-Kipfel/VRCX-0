@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { openUserDialog, openWorldDialog } from '@/services/dialogService';
+import i18n from '@/services/i18nService';
 import { toast } from '@/services/toastService';
 
 import {
@@ -109,11 +110,22 @@ export function useVrccController() {
                       );
             toast.add({
                 type: 'error',
-                title: normalized.message || t('vrcc.error.unknown')
+                title: normalized.message || i18n.t('vrcc.error.unknown')
             });
             patch({ error: normalized });
         },
-        [patch, t]
+        // 这里刻意只依赖 `patch`（空依赖的 useCallback，永远稳定）。
+        //
+        // 翻译不通过 `useTranslation()` 拿，而是直接用全局 `i18n` 实例——
+        // 和 `toastService` 的做法一致。原因：`useTranslation()` 返回的 `t`
+        // 每次渲染可能是新引用，放进依赖会让 `reportError` 换引用 →
+        // 依赖它的 `load` 换引用 → 调 `load` 的 effect 重跑 → `load` 里
+        // `patch` → 再渲染 → 无限循环。实测在 jsdom 里几秒就把堆打爆。
+        //
+        // 而且 `t` 的引用变化并不代表文案变了：`i18n.t` 读全局实例，
+        // 切语言时自己会返回新文案。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [patch]
     );
 
     /** 刷新连接状态与本地用量。 */
@@ -214,15 +226,27 @@ export function useVrccController() {
         reportError
     ]);
 
+    /**
+     * 初次加载：只在挂载时跑一次。
+     *
+     * **不能把 `load` 放进依赖数组。** `load` 会 `patch({ loading: true })`，
+     * 这触发重新渲染 → 生成新的 `load` → effect 重跑 → 再 patch……
+     * 依赖里放一个"自己会改状态"的回调，就是无限循环。
+     *
+     * 用 ref 记住已经跑过，依赖数组留空。需要手动重载时走 `reload()`。
+     */
+    const didLoad = useRef(false);
     useEffect(() => {
-        mounted.current = true;
+        if (didLoad.current) return;
+        didLoad.current = true;
         void load();
         return () => {
             mounted.current = false;
             if (pollTimer.current) clearTimeout(pollTimer.current);
             if (authTimer.current) clearTimeout(authTimer.current);
         };
-    }, [load]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     /**
      * 提醒轮询。只在已连接时跑，间隔带抖动。
