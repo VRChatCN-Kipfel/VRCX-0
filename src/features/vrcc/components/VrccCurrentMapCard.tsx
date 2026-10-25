@@ -30,17 +30,14 @@ export function VrccCurrentMapCard({
             <div className="mb-1.5 flex items-center gap-2">
                 <MapPin className="text-muted-foreground size-3.5 shrink-0" />
                 <span className="text-muted-foreground text-xs">
-                    {t('vrcc.current_map.label', '你所在的图')}
+                    {t('vrcc.current_map.label')}
                 </span>
                 {world && (
                     <button
                         type="button"
                         className="text-muted-foreground hover:text-primary ml-auto shrink-0"
                         onClick={() => onOpenWorld(world)}
-                        aria-label={t(
-                            'vrcc.current_map.open',
-                            '在世界详情里打开'
-                        )}
+                        aria-label={t('vrcc.current_map.open')}
                     >
                         <ExternalLink className="size-3.5" />
                     </button>
@@ -53,28 +50,25 @@ export function VrccCurrentMapCard({
 
             {notRanked ? (
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                    {t(
-                        'vrcc.current_map.not_ranked',
-                        '这张图还没进地图榜。在星遇同频打分后会提交收录审核。'
-                    )}
+                    {t('vrcc.current_map.not_ranked')}
                 </p>
             ) : (
                 <div className="flex items-center gap-4">
                     <Stat
-                        label={t('vrcc.current_map.avg', '均分')}
+                        label={t('vrcc.current_map.avg')}
                         value={map.avg != null ? map.avg.toFixed(1) : '—'}
                     />
                     <Stat
-                        label={t('vrcc.current_map.raters', '人数')}
+                        label={t('vrcc.current_map.raters')}
                         value={String(map.raters ?? 0)}
                     />
                     <Stat
-                        label={t('vrcc.current_map.mine', '我打的')}
+                        label={t('vrcc.current_map.mine')}
                         value={map.mine != null ? `${map.mine}` : '—'}
                     />
                     {map.pending && (
                         <Badge variant="secondary" className="shrink-0">
-                            {t('vrcc.current_map.pending', '审核中')}
+                            {t('vrcc.current_map.pending')}
                         </Badge>
                     )}
                 </div>
@@ -91,8 +85,8 @@ export function VrccCurrentMapCard({
             {map.words && map.wordsOk && map.wordsOk !== 'ok' && (
                 <p className="text-muted-foreground mt-1 text-[11px]">
                     {map.wordsOk === 'wait'
-                        ? t('vrcc.current_map.words_pending', '短评审核中')
-                        : t('vrcc.current_map.words_hidden', '短评未通过审核')}
+                        ? t('vrcc.current_map.words_pending')
+                        : t('vrcc.current_map.words_hidden')}
                 </p>
             )}
         </section>
@@ -114,28 +108,15 @@ function Stat({ label, value }: { label: string; value: string }) {
  * 官方只有三个值：`verify` 先验证 VRChat 账号、`friend` 先同意机器人好友
  * 请求、`go` 要先在这张图上待一会儿。照官方插件的措辞，别让玩家看到码。
  */
-function needHint(
-    need: string,
-    t: (key: string, options: { defaultValue: string }) => string
-): string {
+function needHint(need: string, t: (key: string) => string): string {
     switch (need) {
         case 'verify':
-            return t('vrcc.current_map.need_verify', {
-                defaultValue:
-                    '打分前请先在星遇同频「我的资料 → VRChat 名字」验证账号。'
-            });
+            return t('vrcc.current_map.need_verify');
         case 'friend':
-            return t('vrcc.current_map.need_friend', {
-                defaultValue:
-                    '打分前请先在 VRChat 中同意机器人「VRCC的小助手」的好友请求。'
-            });
+            return t('vrcc.current_map.need_friend');
         case 'go':
-            return t('vrcc.current_map.need_go', {
-                defaultValue: '机器人暂未看到你在 VRChat 中在线，请稍后再试。'
-            });
+            return t('vrcc.current_map.need_go');
         default:
-            return t('vrcc.current_map.need_other', {
-                defaultValue: '现在还打不了分。'
-            });
+            return t('vrcc.current_map.need_other');
     }
 }

@@ -49,22 +49,22 @@ export function VrccMePanel({
                 <div className="mb-2 flex items-center gap-2">
                     <ShieldCheck className="text-muted-foreground size-4" />
                     <h3 className="text-sm font-semibold">
-                        {t('vrcc.me.status', '连接')}
+                        {t('vrcc.me.status')}
                     </h3>
                     <Badge
                         variant={connected ? 'outline' : 'secondary'}
                         className="ml-auto shrink-0"
                     >
                         {connected
-                            ? t('vrcc.connected', '已连接')
-                            : t('vrcc.not_connected', '未连接')}
+                            ? t('vrcc.connected')
+                            : t('vrcc.not_connected')}
                     </Badge>
                 </div>
 
                 {connected ? (
                     <div className="space-y-1 text-xs">
                         <Row
-                            label={t('vrcc.me.star', '星号')}
+                            label={t('vrcc.me.star')}
                             value={
                                 connection?.star != null
                                     ? `#${connection.star}`
@@ -72,20 +72,20 @@ export function VrccMePanel({
                             }
                         />
                         <Row
-                            label={t('vrcc.me.vrc_name', 'VRChat 名字')}
+                            label={t('vrcc.me.vrc_name')}
                             value={connection?.vrcName ?? '—'}
                         />
                         <Row
-                            label={t('vrcc.me.scope', '权限')}
+                            label={t('vrcc.me.scope')}
                             value={connection?.scope ?? '—'}
                         />
                         <Row
-                            label={t('vrcc.me.client', '客户端标识')}
+                            label={t('vrcc.me.client')}
                             value={connection?.client ?? '—'}
                         />
                         {connection?.nextPollAt && (
                             <Row
-                                label={t('vrcc.me.next_poll', '下次轮询')}
+                                label={t('vrcc.me.next_poll')}
                                 value={new Date(
                                     connection.nextPollAt
                                 ).toLocaleTimeString()}
@@ -98,16 +98,13 @@ export function VrccMePanel({
                             onClick={() => void onDisconnect()}
                         >
                             <Unplug className="mr-1 size-3" />
-                            {t('vrcc.me.disconnect', '断开连接')}
+                            {t('vrcc.me.disconnect')}
                         </Button>
                     </div>
                 ) : (
                     <div className="space-y-2">
                         <p className="text-muted-foreground text-xs leading-relaxed">
-                            {t(
-                                'vrcc.me.connect_hint',
-                                '用下面的连接码在星遇同频网页上同意，这里会自动连上。令牌只存在本机，只发给 vrcc.cc。'
-                            )}
+                            {t('vrcc.me.connect_hint')}
                         </p>
                         <Button
                             size="sm"
@@ -118,7 +115,7 @@ export function VrccMePanel({
                             {deviceAuthBusy && (
                                 <Spinner className="mr-1 size-3" />
                             )}
-                            {t('vrcc.me.begin', '开始连接')}
+                            {t('vrcc.me.begin')}
                         </Button>
                     </div>
                 )}
@@ -128,13 +125,10 @@ export function VrccMePanel({
             {deviceAuth && (
                 <section className="rounded-xl border p-3">
                     <h3 className="mb-2 text-sm font-semibold">
-                        {t('vrcc.me.auth_pending', '等待同意')}
+                        {t('vrcc.me.auth_pending')}
                     </h3>
                     <div className="text-muted-foreground text-xs">
-                        {t(
-                            'vrcc.me.auth_hint',
-                            '在浏览器里打开下面的链接，或手动输入连接码：'
-                        )}
+                        {t('vrcc.me.auth_hint')}
                     </div>
                     <div className="bg-muted my-2 rounded-lg border border-dashed py-3 text-center font-mono text-lg font-bold tracking-[0.3em]">
                         {deviceAuth.userCode}
@@ -154,14 +148,12 @@ export function VrccMePanel({
                             }
                         >
                             <ExternalLink className="mr-1 size-3" />
-                            {t('vrcc.me.open_browser', '在浏览器打开')}
+                            {t('vrcc.me.open_browser')}
                         </Button>
                     )}
                     <div className="text-muted-foreground mt-2 text-center text-[10px]">
                         {t('vrcc.me.auth_expires', {
                             minutes: Math.floor(deviceAuth.expiresInSecs / 60),
-                            defaultValue:
-                                '{{minutes}} 分钟内有效，每 {{sec}} 秒检查一次',
                             sec: deviceAuth.intervalSecs
                         })}
                     </div>
@@ -179,38 +171,35 @@ export function VrccMePanel({
                 <section className="rounded-xl border p-3">
                     <div className="mb-2 flex items-baseline gap-2">
                         <h3 className="text-sm font-semibold">
-                            {t('vrcc.me.usage', '本客户端用量')}
+                            {t('vrcc.me.usage')}
                         </h3>
                         <span className="text-muted-foreground ml-auto text-[10px] tabular-nums">
                             {usage.date}
                         </span>
                     </div>
                     <UsageBar
-                        label={t('vrcc.me.personal_used', '个人接口')}
+                        label={t('vrcc.me.personal_used')}
                         used={usage.personalUsedToday}
                         limit={usage.personalDailyLimit}
                     />
                     <UsageBar
-                        label={t('vrcc.me.device_code_used', '申请连接码')}
+                        label={t('vrcc.me.device_code_used')}
                         used={usage.deviceCodeUsedToday}
                         limit={usage.deviceCodeDailyLimit}
                     />
                     <UsageBar
-                        label={t('vrcc.me.window', '本分钟请求')}
+                        label={t('vrcc.me.window')}
                         used={usage.windowUsed}
                         limit={usage.windowLimit}
                     />
                     <p className="text-muted-foreground mt-2 text-[10px] leading-relaxed">
-                        {t(
-                            'vrcc.me.usage_note',
-                            '这是本客户端自己记的次数，不是服务器的剩余额度——官方没有查询剩余额度的接口。'
-                        )}
+                        {t('vrcc.me.usage_note')}
                     </p>
                 </section>
             )}
 
             <div className="text-muted-foreground text-center text-[10px] leading-relaxed">
-                {t('vrcc.me.disclaimer', '第三方客户端，不是星遇同频官方。')}{' '}
+                {t('vrcc.me.disclaimer')}{' '}
                 <a
                     href={SITE}
                     target="_blank"

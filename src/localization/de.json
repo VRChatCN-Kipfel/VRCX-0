@@ -787,6 +787,67 @@
         "collapse_nav": "Navigation einklappen",
         "toggle_theme": "Design wechseln"
     },
+    "vrcc": {
+        "title": "VRCC",
+        "description": "vrcc.cc map leaderboard, notifications and connection status",
+        "not_connected": "Not connected",
+        "connected": "Connected",
+        "service_down": "Service unavailable",
+        "go_connect": "Connect",
+        "reconnect_hint": "Reconnect from the \"Me\" tab",
+        "missing_scope": "This needs the {{scope}} permission; tick it when you reconnect",
+        "tab": {
+            "maps": "Map board",
+            "notifications": "Notifications",
+            "me": "Me"
+        },
+        "maps": {
+            "hint": "Needs {{min}} ratings to reach the board",
+            "empty": "No board data yet",
+            "open": "Open on vrcc.cc"
+        },
+        "current_map": {
+            "label": "Your current map",
+            "open": "Open in world details",
+            "not_ranked": "This map is not on the board yet. Rating it on vrcc.cc submits it for review.",
+            "avg": "Average",
+            "raters": "Ratings",
+            "mine": "My score",
+            "pending": "In review",
+            "words_pending": "Your review text is being checked",
+            "words_hidden": "Your review text was rejected",
+            "need_verify": "Before rating, verify your account under \"My profile → VRChat name\" on vrcc.cc.",
+            "need_friend": "Before rating, accept the friend request from the VRCC bot in VRChat.",
+            "need_go": "The bot has not seen you online in VRChat yet. Try again later.",
+            "need_other": "Rating is not available right now."
+        },
+        "notifications": {
+            "need_connect": "Connect to VRCC and your notifications will appear here",
+            "empty": "No recent notifications",
+            "untitled": "Notification"
+        },
+        "me": {
+            "status": "Connection",
+            "star": "Star number",
+            "vrc_name": "VRChat name",
+            "scope": "Permissions",
+            "client": "Client id",
+            "next_poll": "Next poll",
+            "disconnect": "Disconnect",
+            "connect_hint": "Approve the code below on vrcc.cc and this will connect automatically. The token stays on this machine and is only ever sent to vrcc.cc.",
+            "begin": "Connect",
+            "auth_pending": "Waiting for approval",
+            "auth_hint": "Open the link below in a browser, or enter the code manually:",
+            "open_browser": "Open in browser",
+            "auth_expires": "Valid for {{minutes}} minutes, checked every {{sec}} seconds",
+            "usage": "This client usage",
+            "personal_used": "Personal endpoints",
+            "device_code_used": "Connection codes",
+            "window": "Requests this minute",
+            "usage_note": "These are counts this client kept itself, not remaining server quota — the API has no endpoint that reports remaining quota.",
+            "disclaimer": "Third-party client. Not affiliated with vrcc.cc."
+        }
+    },
     "nav_menu": {
         "qq_group": "QQ-Gruppe",
         "changelog": "Änderungsprotokoll",

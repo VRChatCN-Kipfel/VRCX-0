@@ -55,13 +55,10 @@ export function VrccNotificationsPanel({
             <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-3 text-sm">
                 <BellOff className="size-6" />
                 <div className="text-center">
-                    {t(
-                        'vrcc.notifications.need_connect',
-                        '连接星遇同频后，提醒会出现在这里'
-                    )}
+                    {t('vrcc.notifications.need_connect')}
                 </div>
                 <Button variant="outline" size="sm" onClick={onConnect}>
-                    {t('vrcc.go_connect', '去连接')}
+                    {t('vrcc.go_connect')}
                 </Button>
             </div>
         );
@@ -73,7 +70,7 @@ export function VrccNotificationsPanel({
         return (
             <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-2 text-sm">
                 <BellRing className="size-6" />
-                {t('vrcc.notifications.empty', '最近没有新的提醒')}
+                {t('vrcc.notifications.empty')}
             </div>
         );
     }
@@ -97,10 +94,7 @@ export function VrccNotificationsPanel({
                                 <div className="flex items-baseline gap-2">
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium">
                                         {item.title ??
-                                            t(
-                                                'vrcc.notifications.untitled',
-                                                '提醒'
-                                            )}
+                                            t('vrcc.notifications.untitled')}
                                     </span>
                                     <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
                                         {relativeTime(item.at)}

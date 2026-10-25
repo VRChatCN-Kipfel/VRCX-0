@@ -57,19 +57,19 @@ export function VrccPage() {
             <PageHeader>
                 <div className="flex min-w-0 items-center gap-2">
                     <Star className="text-muted-foreground size-4 shrink-0" />
-                    <PageTitle>{t('vrcc.title', '星遇同频')}</PageTitle>
+                    <PageTitle>{t('vrcc.title')}</PageTitle>
                     {connected ? (
                         <Badge variant="outline" className="shrink-0">
                             #{connection?.star ?? '—'}
                         </Badge>
                     ) : (
                         <Badge variant="secondary" className="shrink-0">
-                            {t('vrcc.not_connected', '未连接')}
+                            {t('vrcc.not_connected')}
                         </Badge>
                     )}
                     {serviceDown && (
                         <Badge variant="destructive" className="shrink-0">
-                            {t('vrcc.service_down', '服务不可用')}
+                            {t('vrcc.service_down')}
                         </Badge>
                     )}
                     {unread > 0 && <Badge className="shrink-0">{unread}</Badge>}
@@ -104,18 +104,13 @@ export function VrccPage() {
                                     className="h-auto p-0 text-xs"
                                     onClick={() => setTab('me')}
                                 >
-                                    {t(
-                                        'vrcc.reconnect_hint',
-                                        '去「我的」重新连接'
-                                    )}
+                                    {t('vrcc.reconnect_hint')}
                                 </Button>
                             )}
                             {error.kind === 'missingScope' && error.scope && (
                                 <div className="text-muted-foreground text-xs">
                                     {t('vrcc.missing_scope', {
-                                        scope: error.scope,
-                                        defaultValue:
-                                            '这一项需要 {{scope}} 权限，重新连接时勾上'
+                                        scope: error.scope
                                     })}
                                 </div>
                             )}
@@ -136,10 +131,10 @@ export function VrccPage() {
                     >
                         <TabsList className="shrink-0">
                             <TabsTrigger value="maps">
-                                {t('vrcc.tab.maps', '地图榜')}
+                                {t('vrcc.tab.maps')}
                             </TabsTrigger>
                             <TabsTrigger value="notifications">
-                                {t('vrcc.tab.notifications', '提醒')}
+                                {t('vrcc.tab.notifications')}
                                 {unread > 0 && (
                                     <span className="bg-primary/15 text-primary ml-1.5 rounded-full px-1.5 text-[10px] leading-4">
                                         {unread}
@@ -147,7 +142,7 @@ export function VrccPage() {
                                 )}
                             </TabsTrigger>
                             <TabsTrigger value="me">
-                                {t('vrcc.tab.me', '我的')}
+                                {t('vrcc.tab.me')}
                             </TabsTrigger>
                         </TabsList>
 

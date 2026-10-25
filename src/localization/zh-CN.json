@@ -787,6 +787,67 @@
         "collapse_nav": "收起导航栏",
         "toggle_theme": "切换日/夜间模式"
     },
+    "vrcc": {
+        "title": "星遇同频",
+        "description": "星遇同频（vrcc.cc）的地图榜、提醒与连接状态",
+        "not_connected": "未连接",
+        "connected": "已连接",
+        "service_down": "服务不可用",
+        "go_connect": "去连接",
+        "reconnect_hint": "去「我的」重新连接",
+        "missing_scope": "这一项需要 {{scope}} 权限，重新连接时勾上",
+        "tab": {
+            "maps": "地图榜",
+            "notifications": "提醒",
+            "me": "我的"
+        },
+        "maps": {
+            "hint": "满 {{min}} 人评分才进总榜",
+            "empty": "暂无榜单数据",
+            "open": "在星遇同频打开"
+        },
+        "current_map": {
+            "label": "你所在的图",
+            "open": "在世界详情里打开",
+            "not_ranked": "这张图还没进地图榜。在星遇同频打分后会提交收录审核。",
+            "avg": "均分",
+            "raters": "人数",
+            "mine": "我打的",
+            "pending": "审核中",
+            "words_pending": "短评审核中",
+            "words_hidden": "短评未通过审核",
+            "need_verify": "打分前请先在星遇同频「我的资料 → VRChat 名字」验证账号。",
+            "need_friend": "打分前请先在 VRChat 中同意机器人「VRCC的小助手」的好友请求。",
+            "need_go": "机器人暂未看到你在 VRChat 中在线，请稍后再试。",
+            "need_other": "现在还打不了分。"
+        },
+        "notifications": {
+            "need_connect": "连接星遇同频后，提醒会出现在这里",
+            "empty": "最近没有新的提醒",
+            "untitled": "提醒"
+        },
+        "me": {
+            "status": "连接",
+            "star": "星号",
+            "vrc_name": "VRChat 名字",
+            "scope": "权限",
+            "client": "客户端标识",
+            "next_poll": "下次轮询",
+            "disconnect": "断开连接",
+            "connect_hint": "用下面的连接码在星遇同频网页上同意，这里会自动连上。令牌只存在本机，只发给 vrcc.cc。",
+            "begin": "开始连接",
+            "auth_pending": "等待同意",
+            "auth_hint": "在浏览器里打开下面的链接，或手动输入连接码：",
+            "open_browser": "在浏览器打开",
+            "auth_expires": "{{minutes}} 分钟内有效，每 {{sec}} 秒检查一次",
+            "usage": "本客户端用量",
+            "personal_used": "个人接口",
+            "device_code_used": "申请连接码",
+            "window": "本分钟请求",
+            "usage_note": "这是本客户端自己记的次数，不是服务器的剩余额度——官方没有查询剩余额度的接口。",
+            "disclaimer": "第三方客户端，不是星遇同频官方。"
+        }
+    },
     "nav_menu": {
         "qq_group": "QQ群",
         "changelog": "更新日志",
