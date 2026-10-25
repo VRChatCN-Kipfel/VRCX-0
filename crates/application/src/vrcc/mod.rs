@@ -41,7 +41,11 @@ pub enum VrccErrorKind {
 pub fn classify_vrcc_error(error: &VrccError) -> (VrccErrorKind, Option<String>) {
     let need = error.needed_scope().map(str::to_string);
     let kind = match error {
-        VrccError::RateLimited(_) | VrccError::QuotaExhausted(_) => VrccErrorKind::Throttled,
+        // `TooSoon` 是「问勤了」，归到 Throttled 只是为了让前端显示
+        // 「稍后再试」；它不会触发长时间退避，也不消耗额度。
+        VrccError::RateLimited(_) | VrccError::QuotaExhausted(_) | VrccError::TooSoon { .. } => {
+            VrccErrorKind::Throttled
+        }
         VrccError::Transport(_) | VrccError::Decode(_) => VrccErrorKind::Transport,
         VrccError::TokenMissing => VrccErrorKind::NeedsReauth,
         VrccError::Api { need, .. } if need.is_some() && error.needs_reauth() => {

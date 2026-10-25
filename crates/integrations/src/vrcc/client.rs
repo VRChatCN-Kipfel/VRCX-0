@@ -40,6 +40,10 @@ pub enum VrccError {
     BodyTooLarge,
     #[error("星遇同频限流：{0}")]
     RateLimited(String),
+    /// 429 `too_soon`：两次轮询间隔太短。等 `retry_after_secs` 再问，
+    /// 不触发长时间退避——这不是配额问题，只是问勤了。
+    #[error("星遇同频轮询太快，{retry_after_secs} 秒后再问")]
+    TooSoon { retry_after_secs: u64 },
     #[error("星遇同频额度已用尽：{0}")]
     QuotaExhausted(String),
     #[error("星遇同频接口返回 HTTP {status}（{error}）")]
@@ -336,6 +340,20 @@ impl VrccClient {
                 .clone()
                 .unwrap_or_else(|| format!("http_{code}"));
             if code == 429 {
+                // 官方把 429 分成两种，含义完全不同：
+                // - `too_soon`：两次轮询间隔不到 25 秒。等一会儿再问就行，
+                //   **不该**触发长时间退避，否则下一次正常轮询也会被自己拖慢。
+                // - `too_many`：频率或当日额度用完。要退避。
+                if error == "too_soon" {
+                    let gap = parsed
+                        .every
+                        .filter(|every| *every > 0)
+                        .map(|every| every as u64)
+                        .unwrap_or(NOTIFICATIONS_MIN_GAP.as_secs());
+                    return Err(VrccError::TooSoon {
+                        retry_after_secs: gap,
+                    });
+                }
                 let wait = self.note_rate_limited();
                 return Err(VrccError::RateLimited(format!(
                     "{error}，退避 {} 秒",
@@ -600,6 +618,42 @@ mod tests {
             assert!(error.is_device_auth_terminal(), "{code}");
             assert!(!error.is_authorization_pending(), "{code}");
         }
+    }
+
+    #[test]
+    fn too_soon_is_not_a_quota_problem() {
+        // 官方把 429 分成两种：too_soon 是问勤了，too_many 是额度用完。
+        // 前者不该被当成需要长时间退避的配额问题。
+        let too_soon = VrccError::TooSoon {
+            retry_after_secs: 25,
+        };
+        assert!(!too_soon.needs_reauth());
+        assert!(too_soon.to_string().contains("25"));
+
+        let too_many = VrccError::RateLimited("too_many".into());
+        assert!(!too_many.needs_reauth());
+    }
+
+    #[test]
+    fn recent_notification_urls_are_relative_and_get_prefixed() {
+        use vrcx_0_contracts::vrcc::VrccRecentNotificationItem;
+        // 官方 recent 的 url 是相对路径（以 /match/ 开头）。
+        let item = VrccRecentNotificationItem {
+            url: Some("/match/?tab=inbox".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(item.absolute_url(), "https://vrcc.cc/match/?tab=inbox");
+
+        // 已经是绝对地址就原样用。
+        let absolute = VrccRecentNotificationItem {
+            url: Some("https://vrcc.cc/match/?x=1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(absolute.absolute_url(), "https://vrcc.cc/match/?x=1");
+
+        // 没有 url 回到站点首页。
+        let none = VrccRecentNotificationItem::default();
+        assert_eq!(none.absolute_url(), "https://vrcc.cc/");
     }
 
     #[tokio::test]

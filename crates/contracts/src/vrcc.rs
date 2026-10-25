@@ -372,6 +372,12 @@ pub struct VrccErrorBody {
     pub need: Option<String>,
     #[serde(default)]
     pub why: Option<String>,
+    /// 429 `too_soon` 时给的建议重试间隔（秒）。
+    ///
+    /// 官方把 429 分成两种：`too_soon` 是两次轮询间隔太短，`too_many` 是
+    /// 频率或当日额度用完。只有前者带这个字段，用来告诉客户端该等多久。
+    #[serde(default)]
+    pub every: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
