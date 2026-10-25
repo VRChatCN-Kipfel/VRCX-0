@@ -384,6 +384,50 @@ pub struct VrccRound {
     pub remind: Option<bool>,
 }
 
+/// 「互相连上」的一颗星，对应 `GET /me/mutuals` 的条目。
+///
+/// `vrc_user` 是对方的 VRChat 用户 ID（`usr_…`），**只在对方已验证且公开
+/// 「已验证」标志时才有**。有它才能打开 VRCX 自己的玩家详情页。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMutualStar {
+    /// 星的编号。
+    #[serde(default)]
+    pub n: i64,
+    /// 星位名称。
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+    /// 点亮编号。
+    #[serde(default)]
+    pub star: Option<i64>,
+    /// 对方的 VRChat 显示名。
+    #[serde(default)]
+    pub vrc: Option<String>,
+    /// 对方的 VRChat 用户 ID；对方没公开时为 `null`。
+    ///
+    /// **合规提醒**：官方要求客户端若提供「加好友」入口，只能打开客户端自己
+    /// 的玩家页面让玩家手动点添加，**不得由程序代发好友请求**。这里只把 ID
+    /// 交出去用于打开玩家详情页，不提供任何自动发送好友请求的通道。
+    #[serde(default)]
+    pub vrc_user: Option<String>,
+    /// 互相连上的时间（毫秒时间戳）。
+    #[serde(default)]
+    pub at: Option<i64>,
+}
+
+/// `GET /me/mutuals`：与当前玩家双向连线的星友列表。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMutuals {
+    #[serde(default)]
+    pub stars: Vec<VrccMutualStar>,
+    /// 互相连上的总数。
+    #[serde(default)]
+    pub n: Option<i64>,
+}
+
 /// `GET /me/today`：这一轮路过的星 + 轮次进度。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]

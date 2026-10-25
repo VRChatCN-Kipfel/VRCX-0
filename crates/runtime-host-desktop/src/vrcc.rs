@@ -152,4 +152,12 @@ impl DesktopVrccRuntime {
             .await
             .map_err(|error| error.to_string())
     }
+
+    /// 「互相连上」的星友列表。需要 `mutuals` 敏感权限。
+    pub async fn mutuals(&self) -> Result<vrcx_0_contracts::vrcc::VrccMutuals, String> {
+        self.service
+            .mutuals()
+            .await
+            .map_err(|error| error.to_string())
+    }
 }

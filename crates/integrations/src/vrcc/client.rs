@@ -15,9 +15,9 @@ use std::time::{Duration, Instant};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use vrcx_0_contracts::vrcc::{
-    VrccBoard, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMyMap, VrccNotifications,
-    VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse, VRCC_API_BASE,
-    VRCC_DEFAULT_CLIENT,
+    VrccBoard, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMutuals, VrccMyMap,
+    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
+    VRCC_API_BASE, VRCC_DEFAULT_CLIENT,
 };
 
 use super::throttle::{
@@ -569,6 +569,24 @@ impl VrccClient {
             None,
             true,
             "today",
+            Duration::from_secs(30),
+        )
+        .await
+    }
+
+    /// 「互相连上」的星友列表。需要 `mutuals` 权限（敏感，要审核）。
+    ///
+    /// 条目里的 `vrcUser` 是对方的 VRChat 用户 ID，只在对方验证过且公开
+    /// 「已验证」标志时才有。客户端拿它只能打开自己的玩家详情页，
+    /// **不得代玩家发好友请求**——这条是官方的硬性合规要求。
+    pub async fn mutuals(&self) -> Result<VrccMutuals, VrccError> {
+        self.spend_personal()?;
+        self.request(
+            "GET",
+            "me/mutuals",
+            None,
+            true,
+            "mutuals",
             Duration::from_secs(30),
         )
         .await

@@ -297,3 +297,20 @@ pub async fn app__vrcc_today(state: State<'_, AppState>) -> Result<VrccToday, Ap
         .await
         .map_err(AppError::Custom)
 }
+
+/// 「互相连上」的星友列表。需要 `mutuals` 敏感权限（要审核）。
+///
+/// 条目里的 `vrcUser` 用来打开 VRCX-0 自己的玩家详情页；加好友由玩家在那里
+/// 自己点。官方合规要求明文禁止程序代玩家发好友请求，所以这里只有这个命令。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_mutuals(
+    state: State<'_, AppState>,
+) -> Result<vrcx_0_contracts::vrcc::VrccMutuals, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .mutuals()
+        .await
+        .map_err(AppError::Custom)
+}

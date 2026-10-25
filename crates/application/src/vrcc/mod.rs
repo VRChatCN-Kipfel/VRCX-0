@@ -9,8 +9,8 @@ use std::sync::{Arc, RwLock};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
-    VrccBoard, VrccConnectionSnapshot, VrccMyMap, VrccRecentNotifications, VrccStatus, VrccToday,
-    VrccUsageSnapshot, VrccWristSummary,
+    VrccBoard, VrccConnectionSnapshot, VrccMutuals, VrccMyMap, VrccRecentNotifications, VrccStatus,
+    VrccToday, VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{
     VrccClient, VrccError, VrccSession, PERSONAL_DAILY_LIMIT, WINDOW_LIMIT,
@@ -381,6 +381,16 @@ impl VrccService {
     pub async fn today(&self) -> std::result::Result<VrccToday, VrccError> {
         self.ensure_connected()?;
         self.client.today().await
+    }
+
+    /// 「互相连上」的星友列表（需要 `mutuals` 敏感权限）。
+    ///
+    /// 条目带 `vrcUser` 时，前端可以打开 VRCX-0 自己的玩家详情页。按官方合规
+    /// 要求，这里**不提供**代玩家发送好友请求的通道——加好友必须由玩家在
+    /// 原生界面里自己点。
+    pub async fn mutuals(&self) -> std::result::Result<VrccMutuals, VrccError> {
+        self.ensure_connected()?;
+        self.client.mutuals().await
     }
 
     fn ensure_connected(&self) -> std::result::Result<(), VrccError> {
