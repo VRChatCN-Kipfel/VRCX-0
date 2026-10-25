@@ -47,6 +47,33 @@ pub struct VrccBoardMap {
     /// 封面图地址。
     #[serde(default)]
     pub img: Option<String>,
+    /// 地图的简短口碑。
+    ///
+    /// **官方文档未记录这个字段**——`openapi.yaml` 的 `BoardMap` 里没有它，
+    /// 但线上确实返回（实测 `text` / `by` / `up` / `went` 四个键，结构稳定）。
+    /// 因为 schema 没有禁 `additionalProperties`，接收它是安全的；缺了也不报错。
+    #[serde(default)]
+    pub hot: Option<VrccMapHot>,
+}
+
+/// 地图榜条目上的「口碑」小段文字。
+///
+/// 字段名全部按线上实返，不是文档（文档没有这一块）。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapHot {
+    /// 那句短评。
+    #[serde(default)]
+    pub text: Option<String>,
+    /// 出处（形如「某位炉边倾听者」）。
+    #[serde(default)]
+    pub by: Option<String>,
+    /// 点赞数。
+    #[serde(default)]
+    pub up: Option<i64>,
+    /// 相关标记，线上为布尔。
+    #[serde(default)]
+    pub went: Option<bool>,
 }
 
 /// 地图榜 / 批量查地图 / 我打过的图，三者的外层结构一致。
