@@ -160,6 +160,28 @@ impl VrccClientState {
             .map(|until| until.saturating_duration_since(now))
             .unwrap_or_default()
     }
+
+    pub fn personal_used_today(&self) -> i64 {
+        self.usage.personal_used()
+    }
+
+    pub fn device_code_used_today(&self) -> i64 {
+        self.usage.device_code_used()
+    }
+}
+
+/// 客户端本地用量快照。
+///
+/// 口径是「**已用**多少」，不是「还剩」多少。官方没有查询剩余额度的接口，
+/// 服务器按令牌计数，我们只看得到自己发过多少次。命名里刻意不带 remaining。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VrccLocalUsage {
+    pub personal_used_today: i64,
+    pub device_code_used_today: i64,
+    pub window_used: usize,
+    pub backoff_remaining: Duration,
+    /// 用量计数的日期（本地时区 `YYYY-MM-DD`）。
+    pub date: String,
 }
 
 /// 一个可克隆的客户端句柄。
@@ -199,6 +221,23 @@ impl VrccClient {
 
     pub fn client_id(&self) -> &str {
         &self.client_id
+    }
+
+    /// 读本地用量计数。
+    ///
+    /// 会顺带把跨天的计数清零——调用方通常是界面，正好一天看一次。
+    pub fn local_usage(&self) -> VrccLocalUsage {
+        let today = super::throttle::local_date_today();
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.usage.roll_to(&today);
+        VrccLocalUsage {
+            personal_used_today: state.personal_used_today(),
+            device_code_used_today: state.device_code_used_today(),
+            window_used: state.window_used(now),
+            backoff_remaining: state.backoff_remaining(now),
+            date: today,
+        }
     }
 
     /// 只允许 `/api/v1/` 下的相对路径。这是硬约束，不提供绕过开关。

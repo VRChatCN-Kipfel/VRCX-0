@@ -5,7 +5,7 @@ use std::sync::Arc;
 use vrcx_0_application::vrcc::{StoredCredential, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
-    VrccUsageSnapshot,
+    VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::VRCC_DEFAULT_CLIENT_ID;
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -54,6 +54,11 @@ impl DesktopVrccRuntime {
         Self {
             service: Arc::new(VrccService::new(port, VRCC_DEFAULT_CLIENT_ID)),
         }
+    }
+
+    /// 腕表摘要。纯内存读取，不发请求。
+    pub fn wrist_summary(&self, world_id: Option<&str>) -> Option<VrccWristSummary> {
+        self.service.wrist_summary(world_id)
     }
 
     pub fn connection(&self) -> VrccConnectionSnapshot {

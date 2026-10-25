@@ -116,20 +116,10 @@ pub struct WristRuntimeFooter {
 
 /// 腕表上的星遇同频摘要。
 ///
-/// 刻意只保留两个数字：未读几条、当前地图排第几。腕表空间有限，
-/// 塞更多只会变成看不清的噪声。
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
-)]
-#[serde(rename_all = "camelCase")]
-pub struct WristVrccSummary {
-    /// 未读提醒条数；0 表示没有。
-    pub unread: u32,
-    /// 当前所在地上图的地图榜名次；未上榜为 `None`。
-    pub map_rank: Option<i64>,
-    /// 当前地图的均分，一位小数（`x10` 存整数以免浮点比较）。
-    pub map_avg_x10: Option<i64>,
-}
+/// 星遇同频摘要。类型定义在契约层，因为填充它的是 `application` 的服务，
+/// 而那个 crate 不能反向依赖 `overlay-runtime`。这里只做再导出，避免两处
+/// 定义各写一份、迟早漂移。
+pub use vrcx_0_contracts::vrcc::VrccWristSummary as WristVrccSummary;
 
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,

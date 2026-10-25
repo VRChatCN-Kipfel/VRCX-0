@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use vrcx_0_contracts::vrcc::VrccBoardMap;
 
 /// 内存令牌仓库。
 #[derive(Default)]
@@ -67,6 +68,75 @@ fn usage_reports_used_not_remaining() {
     assert_eq!(usage.window_limit, 120);
     assert!(!usage.date.is_empty());
     // 结构里没有 "remaining" 这类字段，是刻意的。
+}
+
+#[test]
+fn usage_starts_at_zero_and_reflects_real_counters() {
+    // 新客户端还没发过请求，计数应当是真实的 0（而不是被写死的 0）。
+    let service = VrccService::new(Arc::new(MemoryStore::default()), "dev-test");
+    let usage = service.usage();
+    assert_eq!(usage.personal_used_today, 0);
+    assert_eq!(usage.device_code_used_today, 0);
+    assert_eq!(usage.window_used, 0);
+    assert_eq!(usage.backoff_remaining_ms, 0);
+}
+
+#[test]
+fn wrist_summary_is_none_before_any_data_arrives() {
+    // 「还没拿到数据」和「未读 0 条」是两件事，前者不该在腕表上显示数字。
+    let service = VrccService::new(Arc::new(MemoryStore::default()), "dev-test");
+    assert!(service.wrist_summary(None).is_none());
+    assert!(service.wrist_summary(Some("wrld_abc")).is_none());
+}
+
+#[test]
+fn wrist_summary_reports_map_rank_from_board_cache() {
+    let service = VrccService::new(Arc::new(MemoryStore::default()), "dev-test");
+    // 直接喂一份榜单，模拟页面拉过地图榜。
+    let board = VrccBoard {
+        board: Some("maps".into()),
+        min: Some(5),
+        maps: vec![
+            VrccBoardMap {
+                world: "wrld_target".into(),
+                rank: Some(3),
+                avg: Some(8.75),
+                ..Default::default()
+            },
+            VrccBoardMap {
+                world: "wrld_other".into(),
+                rank: Some(9),
+                avg: Some(6.0),
+                ..Default::default()
+            },
+        ],
+        at: Some(1),
+    };
+    service.note_boards(&board);
+
+    let summary = service
+        .wrist_summary(Some("wrld_target"))
+        .expect("榜单已加载，应当有摘要");
+    assert_eq!(summary.map_rank, Some(3));
+    // 均分放大 10 倍存整数，8.75 → 88（四舍五入到一位小数）。
+    assert_eq!(summary.map_avg_x10, Some(88));
+    // 没拉过 recent，未读数还没数据，保持 0（未连接时收不到提醒）。
+    assert_eq!(summary.unread, 0);
+
+    // 不在榜上的图不报名次，而不是报一个假名次。
+    let off_board = service
+        .wrist_summary(Some("wrld_missing"))
+        .expect("仍应有摘要");
+    assert_eq!(off_board.map_rank, None);
+    assert_eq!(off_board.map_avg_x10, None);
+}
+
+#[test]
+fn wrist_summary_unread_comes_from_recent_read_cursor() {
+    let service = VrccService::new(Arc::new(MemoryStore::default()), "dev-test");
+    service.note_recent(4);
+    let summary = service.wrist_summary(None).expect("有未读数据了");
+    assert_eq!(summary.unread, 4);
 }
 
 #[test]

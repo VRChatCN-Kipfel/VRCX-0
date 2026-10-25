@@ -17,6 +17,7 @@ use vrcx_0_application_game::{
     RuntimeSnapshotStore,
 };
 use vrcx_0_application_realtime::{FriendProjectionObserver, RealtimeHostRuntime};
+use vrcx_0_contracts::vrcc::VrccWristSummary;
 use vrcx_0_core::files::extract_file_id;
 use vrcx_0_core::friends::StateBucket;
 use vrcx_0_host_desktop::tts::{SystemTtsEngine, TtsEngine};
@@ -75,6 +76,12 @@ pub struct DesktopRuntimeServices {
     realtime_user_image_resolver_owner: Mutex<Option<Arc<dyn CachedNotificationUserImageResolver>>>,
     game_log_snapshot: RuntimeSnapshotStore,
     now_playing: Arc<Mutex<Arc<NowPlayingSnapshot>>>,
+    /// 星遇同频运行时，构造后注入。
+    ///
+    /// 和 `realtime_user_image_resolver_owner` 一样是"后挂"：
+    /// `DesktopRuntimeServices` 与 vrcc 运行时在装配时互相看不到，
+    /// 硬要同期构造会把两边的装配顺序绑死。
+    vrcc: Mutex<Option<Arc<crate::vrcc::DesktopVrccRuntime>>>,
 }
 
 impl DesktopRuntimeServices {
@@ -152,6 +159,7 @@ impl DesktopRuntimeServices {
             realtime_user_image_resolver_owner: Mutex::new(None),
             game_log_snapshot: RuntimeSnapshotStore::default(),
             now_playing: Arc::new(Mutex::new(Arc::new(NowPlayingSnapshot::default()))),
+            vrcc: Mutex::new(None),
         })
     }
 
@@ -187,6 +195,20 @@ impl DesktopRuntimeServices {
 
     pub fn set_frontend_tray_notification(&self, notify: bool) {
         self.notification_indicator.set_frontend_notify(notify);
+    }
+
+    /// 挂上星遇同频运行时，供腕表读取摘要。
+    ///
+    /// 后挂的原因同 `attach_realtime_runtime`：装配顺序上两边互相看不到。
+    /// 没挂上时腕表不显示这一块，不会有半截状态。
+    pub fn attach_vrcc_runtime(&self, vrcc: Arc<crate::vrcc::DesktopVrccRuntime>) {
+        match self.vrcc.lock() {
+            Ok(mut owner) => *owner = Some(vrcc),
+            Err(error) => tracing::warn!(
+                error = %error,
+                "failed to retain vrcc runtime"
+            ),
+        }
     }
 
     pub fn refresh_tray_notification(&self) {
@@ -376,6 +398,23 @@ impl VrOverlayRuntimeServices for DesktopRuntimeServices {
         session
             .last_game_started_at
             .filter(|_| session.is_game_running)
+    }
+
+    fn vrcc_wrist_summary(&self) -> Option<VrccWristSummary> {
+        // 没挂上就直接不显示，不造假摘要。
+        let vrcc = match self.vrcc.lock() {
+            Ok(guard) => guard.clone()?,
+            Err(error) => {
+                tracing::warn!(error = %error, "vrcc runtime lock poisoned");
+                return None;
+            }
+        };
+        // 玩家当前在哪张图由游戏日志给；取不到就只显示未读数。
+        let world =
+            vrcx_0_core::location::world_id_from_location(&self.game_log_snapshot().location);
+        let world = (!world.is_empty()).then_some(world.as_str());
+        let summary = vrcc.wrist_summary(world)?;
+        Some(summary)
     }
 }
 

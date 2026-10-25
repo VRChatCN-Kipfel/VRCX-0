@@ -4,12 +4,13 @@
 //! 网络细节在 `vrcx_0_integrations::vrcc`，持久化细节在 outbound-adapters，
 //! 这里只做组合与口径统一。
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
-    VrccUsageSnapshot,
+    VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{
     VrccClient, VrccError, VrccSession, PERSONAL_DAILY_LIMIT, WINDOW_LIMIT,
@@ -97,6 +98,20 @@ pub struct VrccService {
     store: Arc<dyn VrccTokenStore>,
     session: VrccSession,
     client: VrccClient,
+    /// 腕表摘要的缓存。
+    ///
+    /// 腕表每帧都会读它，所以这里必须是纯内存读取——不能在这里发请求。
+    /// 内容由页面会发的那两个请求顺手填充：`recent_notifications` 提供未读数，
+    /// `boards` 提供地图名次（开放数据，不占个人额度）。
+    ///
+    /// `None` 表示"还没拿到任何数据"，和"未读 0 条"是两件事：前者不该在腕表
+    /// 上显示一个数字，后者才该显示 0。
+    wrist: Arc<RwLock<Option<VrccWristSummary>>>,
+    /// 最近一次地图榜：world 映射到（名次，均分 ×10）。
+    ///
+    /// 缓存整个榜单而不是只缓存"当前地图"：玩家随时换图，而榜单是开放数据，
+    /// 一次请求就能覆盖上百张图，按图缓存没有意义。
+    boards: Arc<RwLock<HashMap<String, (i64, Option<i64>)>>>,
 }
 
 impl VrccService {
@@ -116,6 +131,61 @@ impl VrccService {
             store,
             session,
             client,
+            wrist: Arc::new(RwLock::new(None)),
+            boards: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// 腕表摘要。`world_id` 由调用方给（腕表的渲染侧知道玩家在哪张图）。
+    ///
+    /// 纯内存读取，不发请求。返回 `None` 的两种情况：还没拉到任何数据、
+    /// 缓存锁坏了。腕表在 `None` 时整块不显示。
+    ///
+    /// 这里**不判断是否已连接**：地图榜是开放数据，没连接也能拉到，玩家在
+    /// 腕表上看到"我在的图排第几"本身就是有用的。未读数在没有连接时保持 0，
+    /// 那是事实——没有连接就收不到提醒。
+    pub fn wrist_summary(&self, world_id: Option<&str>) -> Option<VrccWristSummary> {
+        let mut summary = self.wrist.read().ok()?.clone()?;
+        // 地图名次从榜单缓存现查：玩家换图后不必等下一次 boards 请求。
+        let rank = world_id.and_then(|world| {
+            self.boards
+                .read()
+                .ok()
+                .and_then(|boards| boards.get(world).copied())
+        });
+        summary.map_rank = rank.map(|(rank, _)| rank);
+        summary.map_avg_x10 = rank.and_then(|(_, avg)| avg);
+        Some(summary)
+    }
+
+    /// 拿到 `recent` 结果后更新未读数。
+    ///
+    /// 顺手把缓存从 `None` 变成 `Some`：这已经是真实数据了，腕表可以显示。
+    fn note_recent(&self, unread: u32) {
+        let Ok(mut wrist) = self.wrist.write() else {
+            return;
+        };
+        let entry = wrist.get_or_insert_with(VrccWristSummary::default);
+        entry.unread = unread;
+    }
+
+    /// 拿到地图榜后更新名次缓存。
+    ///
+    /// 榜单是开放数据，不带令牌也能拉；只要拉到了就认为腕表有数据可显示，
+    /// 这样"没连接但想看榜单"的场景也有内容。
+    fn note_boards(&self, board: &VrccBoard) {
+        let Ok(mut boards) = self.boards.write() else {
+            return;
+        };
+        boards.clear();
+        for map in &board.maps {
+            let Some(rank) = map.rank else { continue };
+            let avg_x10 = map.avg.map(|avg| (avg * 10.0).round() as i64);
+            boards.insert(map.world.clone(), (rank, avg_x10));
+        }
+        drop(boards);
+        if let Ok(mut wrist) = self.wrist.write() {
+            wrist.get_or_insert_with(VrccWristSummary::default);
         }
     }
 
@@ -127,18 +197,21 @@ impl VrccService {
         self.session.snapshot().into()
     }
 
-    /// 本地用量快照。措辞口径：只说「本客户端今日已用」。
+    /// 本地用量快照。
+    ///
+    /// 口径：只说「本客户端今日已用」多少。官方没有查询剩余额度的接口，
+    /// 服务器按令牌计数，我们看不到那个数字，所以不能显示「剩余」。
     pub fn usage(&self) -> VrccUsageSnapshot {
-        let today = vrcx_0_integrations::vrcc::local_date_today();
+        let usage = self.client.local_usage();
         VrccUsageSnapshot {
-            personal_used_today: 0,
+            personal_used_today: usage.personal_used_today,
             personal_daily_limit: PERSONAL_DAILY_LIMIT,
-            device_code_used_today: 0,
+            device_code_used_today: usage.device_code_used_today,
             device_code_daily_limit: vrcx_0_integrations::vrcc::DEVICE_CODE_DAILY_LIMIT,
-            window_used: 0,
+            window_used: usage.window_used as i64,
             window_limit: WINDOW_LIMIT as i64,
-            backoff_remaining_ms: 0,
-            date: today,
+            backoff_remaining_ms: usage.backoff_remaining.as_millis() as i64,
+            date: usage.date,
         }
     }
 
@@ -146,7 +219,10 @@ impl VrccService {
 
     /// 地图榜。不需要连接，也不计个人额度。
     pub async fn boards(&self, limit: u32) -> std::result::Result<VrccBoard, VrccError> {
-        self.client.boards(limit).await
+        let board = self.client.boards(limit).await?;
+        // 顺手填充腕表的排名缓存：这次请求本来就要发，不额外花额度。
+        self.note_boards(&board);
+        Ok(board)
     }
 
     /// 服务状态。
@@ -235,12 +311,23 @@ impl VrccService {
     ) -> std::result::Result<VrccRecentNotifications, VrccError> {
         self.ensure_connected()?;
         let result = self.client.recent_notifications(false).await?;
+        // 未读数按官方语义算：id 大于 read 的算未读。`read` 缺省时（账号上
+        // 还没记过已读），把返回的条目都当作未读——这是唯一诚实的解读。
+        let unread = match result.read {
+            Some(read) => result.items.iter().filter(|item| item.id > read).count() as u32,
+            None => result.items.len() as u32,
+        };
+        self.note_recent(unread);
         self.session
             .note_poll(vrcx_0_integrations::vrcc::now_millis(), None, None);
         Ok(result)
     }
 
     /// 增量轮询。游标与建议间隔都自动维护。
+    ///
+    /// 响应里的 `dot` 是「星轨相交尚未查看的新人数」，**不是未读提醒数**，
+    /// 所以这里不拿它更新腕表的 `unread`——两者混用会显示错误的数字。
+    /// 未读数只由 `recent_notifications` 按 `read` 游标算。
     pub async fn poll_notifications(
         &self,
     ) -> std::result::Result<vrcx_0_contracts::vrcc::VrccNotifications, VrccError> {
@@ -252,6 +339,8 @@ impl VrccService {
             result.last,
             result.every,
         );
+        // 有新提醒到达时，未读数会变；下次打开页面拉 recent 时会修正。
+        // 这里若把 items 长度加上去，会和 `read` 的语义打架。
         Ok(result)
     }
 

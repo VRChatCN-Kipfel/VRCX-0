@@ -20,7 +20,7 @@ pub const VRCC_DEFAULT_CLIENT: &str = "dev-vrcx0";
 // ---------------------------------------------------------------------------
 
 /// `GET /boards/maps`、`GET /maps`、`GET /me/maps` 共用的地图条目。
-#[derive(Clone, Debug, Deserialize, Serialize, specta::Type)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccBoardMap {
     /// 世界 ID，形如 `wrld_…`。
@@ -425,4 +425,26 @@ pub struct VrccConnectionSnapshot {
     pub last_poll_at: Option<i64>,
     /// 下一次建议轮询时间（毫秒）。
     pub next_poll_at: Option<i64>,
+}
+
+/// 腕表上显示的星遇同频摘要。
+///
+/// 定义在契约层而不是 `overlay-runtime`：填充它的是 `application` 层的服务，
+/// 而 `application` 不能反向依赖 `overlay-runtime`。放在这里两边都能用。
+///
+/// 只包含**不额外消耗额度**能拿到的数据：
+/// - `unread` 来自「最近的提醒」的结果（页面本来就会请求）
+/// - `map_rank` / `map_avg_x10` 来自「地图榜」的结果（开放数据，不计个人额度）
+///
+/// 刻意不去调 `me/maps/{world}` 查当前地图：那要花个人额度，而腕表是每帧
+/// 都要读的展示位，不该成为额度消耗的来源。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccWristSummary {
+    /// 未读提醒条数。0 表示没有未读。
+    pub unread: u32,
+    /// 当前所在地图在榜单上的名次；不在榜或榜单还没加载时为 `None`。
+    pub map_rank: Option<i64>,
+    /// 当前地图的均分，放大 10 倍存整数（避免浮点比较）。
+    pub map_avg_x10: Option<i64>,
 }

@@ -218,7 +218,7 @@ pub struct DesktopRuntimeHostState {
     world_collections: vrcx_0_outbound_adapters::LocalWorldCollectionAdapter,
     friend_log_name_store: vrcx_0_outbound_adapters::LocalFriendLogNameStore,
     notification_sync: vrcx_0_outbound_adapters::LocalNotificationSyncAdapter,
-    vrcc: crate::vrcc::DesktopVrccRuntime,
+    vrcc: Arc<crate::vrcc::DesktopVrccRuntime>,
 }
 
 struct DesktopRuntimeProfileExtension {
@@ -679,9 +679,9 @@ impl DesktopRuntimeHostState {
             Arc::clone(runtime.database()),
             Arc::clone(runtime.web_client()),
         );
-        let vrcc = crate::vrcc::DesktopVrccRuntime::new(
+        let vrcc = Arc::new(crate::vrcc::DesktopVrccRuntime::new(
             vrcx_0_outbound_adapters::LocalVrccTokenStore::new(Arc::clone(runtime.database())),
-        );
+        ));
         let hmd_membership_runtime = Arc::downgrade(runtime.realtime_runtime());
         desktop
             .vr_overlay_runtime
@@ -693,6 +693,8 @@ impl DesktopRuntimeHostState {
         desktop
             .services
             .attach_realtime_runtime(runtime.realtime_runtime());
+        // 腕表要显示星遇同频摘要，把运行时挂上；没挂时腕表不显示这一块。
+        desktop.services.attach_vrcc_runtime(Arc::clone(&vrcc));
         start_integration_api_input_task(
             Arc::clone(runtime.desktop_assembly().database()),
             runtime.desktop_assembly().event_bus().clone(),
