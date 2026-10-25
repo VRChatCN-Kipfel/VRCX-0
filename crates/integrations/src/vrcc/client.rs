@@ -696,6 +696,34 @@ mod tests {
         }
     }
 
+    /// 钉住一件事：`device/code` 的 `400` 只表示 `invalid_scope`，
+    /// 所以**不该**因为 400 就改用查询串重试。
+    ///
+    /// 参考实现（xingshi-app）里有「遇 400 就退回 `?scope=` 查询串」的逻辑，
+    /// 那是旧服务器的残留：官方 1.8.2 之前只认 JSON、表单回 400
+    /// `bad_request`。1.8.2 起正文可以是 JSON / 表单 / 查询串，
+    /// 而 `openapi.yaml` 里 `device/code` 的 400 只挂着 `invalid_scope` 一个例子。
+    ///
+    /// 照搬那个回退会有害：`scope` 拼错时会被误判成格式问题，多打一次请求，
+    /// 而真正的错因（权限名不合法）被掩过去。我们发 JSON——官方第一顺位
+    /// 支持的格式——所以没有理由为它准备回退。
+    #[test]
+    fn device_code_400_is_invalid_scope_not_a_format_problem() {
+        let invalid_scope = VrccError::Api {
+            status: 400,
+            error: "invalid_scope".to_string(),
+            need: Some("maps.rate".to_string()),
+            why: None,
+        };
+        // 分类上不属于「设备授权终态」：玩家可以改了 scope 再试，
+        // 这和 access_denied / expired_token 那种必须停下的情况不同。
+        assert!(!invalid_scope.is_device_auth_terminal());
+        // 也不是「等待中」。
+        assert!(!invalid_scope.is_authorization_pending());
+        // 缺的权限要能带出去，界面才能告诉玩家是哪个名字写错了。
+        assert_eq!(invalid_scope.needed_scope(), Some("maps.rate"));
+    }
+
     #[test]
     fn too_soon_is_not_a_quota_problem() {
         // 官方把 429 分成两种：too_soon 是问勤了，too_many 是额度用完。
