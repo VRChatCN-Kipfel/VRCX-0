@@ -138,12 +138,14 @@ pub struct VrccSessionSnapshot {
 
 impl From<VrccSessionSnapshot> for VrccConnectionSnapshot {
     fn from(snapshot: VrccSessionSnapshot) -> Self {
+        let client_is_dev = snapshot.client.trim().starts_with("dev-");
         VrccConnectionSnapshot {
             connected: snapshot.connected,
             star: snapshot.star,
             vrc_name: snapshot.vrc_name,
             scope: snapshot.scope,
             client: snapshot.client,
+            client_is_dev,
             last_poll_at: snapshot.last_poll_at,
             next_poll_at: snapshot
                 .last_poll_at

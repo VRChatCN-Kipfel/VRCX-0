@@ -7,7 +7,7 @@ use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
     VrccUsageSnapshot, VrccWristSummary,
 };
-use vrcx_0_integrations::vrcc::VRCC_DEFAULT_CLIENT_ID;
+use vrcx_0_integrations::vrcc::resolve_client_id;
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
 
 /// 把本地加密仓库适配成应用层端口。
@@ -50,9 +50,18 @@ pub struct DesktopVrccRuntime {
 
 impl DesktopVrccRuntime {
     pub fn new(store: LocalVrccTokenStore) -> Self {
+        Self::with_client_override(store, None)
+    }
+
+    /// 用指定的 `X-Client` 标识构造。
+    ///
+    /// `client_override` 来自配置：正式态把平台发的 `app_…` 填进去即可，
+    /// 不用重新编译。`None` 时按 `resolve_client_id` 的优先级回落到常量。
+    pub fn with_client_override(store: LocalVrccTokenStore, client_override: Option<&str>) -> Self {
         let port = Arc::new(TokenStoreAdapter { inner: store });
+        let client_id = resolve_client_id(client_override);
         Self {
-            service: Arc::new(VrccService::new(port, VRCC_DEFAULT_CLIENT_ID)),
+            service: Arc::new(VrccService::new(port, client_id)),
         }
     }
 

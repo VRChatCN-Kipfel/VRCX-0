@@ -12,8 +12,57 @@ pub const VRCC_API_BASE: &str = "https://vrcc.cc/api/v1/";
 /// 站点根，用来把接口给的**相对路径**（如 `/match/?tab=inbox`）拼成完整地址。
 pub const VRCC_SITE_ORIGIN: &str = "https://vrcc.cc";
 
-/// 默认客户端标识。申请到审核通过的 `app_…` 后改这里。
-pub const VRCC_DEFAULT_CLIENT: &str = "dev-vrcx0";
+/// 开发态客户端标识。
+///
+/// 官方对 `dev-` 开头的标识只做前缀判定（`client_unknown` 的定义是「不是登记
+/// 名单里的标识、不是 `client_id`、**也不是 `dev-` 开头**」），没有长度或字符
+/// 限制，所以这里可以带上项目名。已实测该值对公开端点返回 200。
+///
+/// `dev-` 标识在玩家同意页会显示「（测试中）」与「未登记客户端（仅测试用）」，
+/// 这是官方设计，不是问题。
+pub const VRCC_DEV_CLIENT: &str = "dev-VRCX-0-Galaxies";
+
+/// 正式态的应用**名称**。
+///
+/// 注意这不是 `X-Client` 的值。官方对应用名称的规定是「2–20 个字，不能带
+/// 「星遇同频」「VRCC」「VRChat」「官方」「管理员」」，`VRCX-0-Galaxies` 符合。
+/// 登记通过后拿到的 `client_id`（`app_` + 16 位十六进制）才是正式态的
+/// `X-Client`，届时用 [`VRCC_PROD_CLIENT`] 或运行时配置覆盖。
+pub const VRCC_APP_NAME: &str = "VRCX-0-Galaxies";
+
+/// 正式态客户端标识占位。
+///
+/// 官方 `client_id` 由平台发放，不能自己指定，所以这里先留空：
+/// 空值时回落用 [`VRCC_DEV_CLIENT`]。拿到 `app_…` 后改这一处，
+/// 或通过 [`crate::vrcc::resolve_client_id`] 的运行时覆盖传入。
+pub const VRCC_PROD_CLIENT: &str = "";
+
+/// 默认客户端标识：正式态没配就用开发态。
+///
+/// 调用方应当用 [`resolve_client_id`] 而不是直接读这个常量，
+/// 这样配置覆盖能生效。
+pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
+
+/// 决定实际要发的 `X-Client`。
+///
+/// 优先级：运行时覆盖 > 正式态常量 > 开发态常量。
+///
+/// 之所以允许运行时覆盖而不是只改常量：正式标识是平台发的，换它不该要求
+/// 重新编译；而且开发态和正式态的标识**不是同一个字符串的加前缀关系**
+/// （`dev-…` 与 `app_…` 是两种东西），写死一处常量迟早有人手改出错。
+pub fn resolve_client_id(override_id: Option<&str>) -> String {
+    let trimmed = override_id.map(str::trim).filter(|id| !id.is_empty());
+    match trimmed {
+        Some(id) => id.to_string(),
+        None if !VRCC_PROD_CLIENT.is_empty() => VRCC_PROD_CLIENT.to_string(),
+        None => VRCC_DEV_CLIENT.to_string(),
+    }
+}
+
+/// 当前标识是否为开发态（用于界面提示与日志）。
+pub fn is_dev_client(client_id: &str) -> bool {
+    client_id.trim().starts_with("dev-")
+}
 
 // ---------------------------------------------------------------------------
 // 开放数据 · 地图榜
@@ -550,6 +599,11 @@ pub struct VrccConnectionSnapshot {
     pub scope: Option<String>,
     /// 客户端标识。
     pub client: String,
+    /// 当前是否在用 `dev-` 开发态标识。
+    ///
+    /// 给界面用：`dev-` 标识在玩家同意页会被标成「（测试中）」，且只能要普通
+    /// 权限。界面上让开发者和测试者看到这件事，比事后排查 403 省事。
+    pub client_is_dev: bool,
     /// 上次成功轮询提醒的时间（毫秒）。
     pub last_poll_at: Option<i64>,
     /// 下一次建议轮询时间（毫秒）。

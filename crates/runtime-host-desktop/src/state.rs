@@ -679,8 +679,17 @@ impl DesktopRuntimeHostState {
             Arc::clone(runtime.database()),
             Arc::clone(runtime.web_client()),
         );
-        let vrcc = Arc::new(crate::vrcc::DesktopVrccRuntime::new(
+        // 正式态的 `X-Client`（平台发的 `app_…`）放在配置里，切换不用重新编译。
+        // 配置为空时按 `resolve_client_id` 回落到开发态标识。
+        let vrcc_client_override = runtime
+            .desktop_assembly()
+            .config()
+            .get_raw(vrcx_0_integrations::vrcc::VRCC_CLIENT_CONFIG_KEY)
+            .ok()
+            .flatten();
+        let vrcc = Arc::new(crate::vrcc::DesktopVrccRuntime::with_client_override(
             vrcx_0_outbound_adapters::LocalVrccTokenStore::new(Arc::clone(runtime.database())),
+            vrcc_client_override.as_deref(),
         ));
         let hmd_membership_runtime = Arc::downgrade(runtime.realtime_runtime());
         desktop

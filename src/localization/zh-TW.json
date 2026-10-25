@@ -846,7 +846,8 @@
             "device_code_used": "申请连接码",
             "window": "本分钟请求",
             "usage_note": "这是本客户端自己记的次数，不是服务器的剩余额度——官方没有查询剩余额度的接口。",
-            "disclaimer": "第三方客户端，不是星遇同频官方。"
+            "disclaimer": "第三方客户端，不是星遇同频官方。",
+            "client_dev": "测试中"
         },
         "error": {
             "unknown": "操作失败，请稍后再试"

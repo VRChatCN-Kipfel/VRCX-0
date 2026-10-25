@@ -596,9 +596,63 @@ impl VrccClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vrcx_0_contracts::vrcc::{
+        is_dev_client, resolve_client_id, VRCC_DEV_CLIENT, VRCC_PROD_CLIENT,
+    };
 
     fn client() -> VrccClient {
         VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())))
+    }
+
+    /// 标识解析的优先级：运行时覆盖 > 正式常量 > 开发常量。
+    ///
+    /// 这三者的关系值得钉住，因为正式标识是平台发的、**不是** `dev-` 那个字符串
+    /// 去掉前缀——`dev-…` 与 `app_…` 是两种东西。写死一处常量迟早有人手改出错。
+    #[test]
+    fn client_id_resolution_prefers_override_then_prod_then_dev() {
+        // 覆盖值优先。
+        assert_eq!(
+            resolve_client_id(Some("app_0123456789abcdef")),
+            "app_0123456789abcdef"
+        );
+        // 空白覆盖值不该被采用（配置项被清成空串是很常见的事）。
+        assert_eq!(resolve_client_id(Some("   ")), {
+            if VRCC_PROD_CLIENT.is_empty() {
+                VRCC_DEV_CLIENT.to_string()
+            } else {
+                VRCC_PROD_CLIENT.to_string()
+            }
+        });
+        assert_eq!(resolve_client_id(None), {
+            if VRCC_PROD_CLIENT.is_empty() {
+                VRCC_DEV_CLIENT.to_string()
+            } else {
+                VRCC_PROD_CLIENT.to_string()
+            }
+        });
+    }
+
+    /// 开发态判定只看 `dev-` 前缀，这是官方的判定方式。
+    #[test]
+    fn dev_client_is_detected_by_prefix() {
+        assert!(is_dev_client(VRCC_DEV_CLIENT));
+        assert!(is_dev_client("  dev-anything  "));
+        assert!(!is_dev_client("app_0123456789abcdef"));
+        assert!(!is_dev_client(""));
+    }
+
+    /// 开发态常量本身必须符合官方的 `dev-` 前缀要求——
+    /// 否则每个请求都会吃 `403 client_unknown`。
+    #[test]
+    fn dev_client_constant_is_a_valid_dev_id() {
+        assert!(
+            VRCC_DEV_CLIENT.starts_with("dev-"),
+            "dev client must start with `dev-`, got {VRCC_DEV_CLIENT:?}"
+        );
+        assert!(
+            VRCC_DEV_CLIENT.len() > 4,
+            "dev client must have a name after the prefix"
+        );
     }
 
     #[test]

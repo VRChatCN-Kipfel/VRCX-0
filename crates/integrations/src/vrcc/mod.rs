@@ -17,7 +17,16 @@ pub use throttle::{
     backoff_for, format_local_date, local_date_today, now_millis, DailyUsage, RateLimiter,
     DEVICE_CODE_DAILY_LIMIT, NOTIFICATIONS_MIN_GAP, PERSONAL_DAILY_LIMIT, WINDOW_LIMIT,
 };
-pub use vrcx_0_contracts::vrcc::{VRCC_API_BASE, VRCC_DEFAULT_CLIENT};
+pub use vrcx_0_contracts::vrcc::{
+    is_dev_client, resolve_client_id, VRCC_API_BASE, VRCC_APP_NAME, VRCC_DEFAULT_CLIENT,
+    VRCC_DEV_CLIENT, VRCC_PROD_CLIENT,
+};
+
+/// 配置表里存放 `X-Client` 覆盖值的键。
+///
+/// 正式态把平台发的 `app_…` 写进这里即可切换，不需要重新编译；
+/// 留空则按开发态标识走。
+pub const VRCC_CLIENT_CONFIG_KEY: &str = "vrccClientId";
 
 /// 默认客户端标识的别名，方便调用点读起来顺一点。
 pub const VRCC_DEFAULT_CLIENT_ID: &str = VRCC_DEFAULT_CLIENT;

@@ -15,7 +15,10 @@ use vrcx_0_integrations::vrcc::VrccClient;
 
 /// 建一个没有令牌的客户端。公开数据端点的 `authed = false`，用不到它。
 fn client() -> VrccClient {
-    VrccClient::new("dev-vrcx0", Arc::new(|| None))
+    VrccClient::new(
+        vrcx_0_integrations::vrcc::VRCC_DEV_CLIENT,
+        Arc::new(|| None),
+    )
 }
 
 /// 网络不通时把测试当作跳过，而不是让 CI 红。

@@ -7241,6 +7241,13 @@ export type VrccConnectionSnapshot = {
      */
     client: string;
     /**
+     * 当前是否在用 `dev-` 开发态标识。
+     *
+     * 给界面用：`dev-` 标识在玩家同意页会被标成「（测试中）」，且只能要普通
+     * 权限。界面上让开发者和测试者看到这件事，比事后排查 403 省事。
+     */
+    clientIsDev: boolean;
+    /**
      * 上次成功轮询提醒的时间（毫秒）。
      */
     lastPollAt: number | null;

@@ -79,10 +79,24 @@ export function VrccMePanel({
                             label={t('vrcc.me.scope')}
                             value={connection?.scope ?? '—'}
                         />
-                        <Row
-                            label={t('vrcc.me.client')}
-                            value={connection?.client ?? '—'}
-                        />
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-muted-foreground shrink-0">
+                                {t('vrcc.me.client')}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px]">
+                                {connection?.client ?? '—'}
+                            </span>
+                            {/* dev- 标识只能要普通权限，且在同意页会被标「测试中」。
+                                在这里点出来，比事后排查 403 scope_unreviewed 省事。 */}
+                            {connection?.clientIsDev && (
+                                <Badge
+                                    variant="secondary"
+                                    className="shrink-0 text-[10px]"
+                                >
+                                    {t('vrcc.me.client_dev')}
+                                </Badge>
+                            )}
+                        </div>
                         {connection?.nextPollAt && (
                             <Row
                                 label={t('vrcc.me.next_poll')}
