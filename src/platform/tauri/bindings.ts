@@ -321,6 +321,78 @@ const generatedCommands = {
     async appVrcStatusRefresh(): Promise<VrcStatusSnapshot> {
         return await TAURI_INVOKE('app__vrc_status_refresh');
     },
+    async appVrccConnection(): Promise<VrccConnectionSnapshot> {
+        return await TAURI_INVOKE('app__vrcc_connection');
+    },
+    /**
+     * 本地用量。口径是「本客户端今日已用 N/300」，不是「剩余」——
+     * 服务器按令牌算额度，我们看不见那个数字。
+     */
+    async appVrccUsage(): Promise<VrccUsageSnapshot> {
+        return await TAURI_INVOKE('app__vrcc_usage');
+    },
+    /**
+     * 地图榜。不需要连接。
+     */
+    async appVrccBoards(limit: number): Promise<VrccBoard> {
+        return await TAURI_INVOKE('app__vrcc_boards', { limit });
+    },
+    /**
+     * 服务探活。用来在页面上显示「星遇同频现在可用吗」。
+     */
+    async appVrccStatus(): Promise<VrccStatus> {
+        return await TAURI_INVOKE('app__vrcc_status');
+    },
+    /**
+     * 第一步：申请连接码。`scope` 传 `null` 表示用官方默认。
+     */
+    async appVrccDeviceAuthBegin(
+        scope: string | null
+    ): Promise<VrccDeviceAuthPromptOutput> {
+        return await TAURI_INVOKE('app__vrcc_device_auth_begin', { scope });
+    },
+    /**
+     * 第二步：问一次令牌。前端按返回的 `interval_secs` 定时重试。
+     */
+    async appVrccDeviceAuthPoll(
+        prompt: VrccDeviceAuthPromptOutput
+    ): Promise<VrccDeviceAuthStepOutput> {
+        return await TAURI_INVOKE('app__vrcc_device_auth_poll', { prompt });
+    },
+    /**
+     * 断开。先让服务器吊销，再清本地。
+     */
+    async appVrccDisconnect(): Promise<null> {
+        return await TAURI_INVOKE('app__vrcc_disconnect');
+    },
+    /**
+     * 最近的提醒（最近一天的最后几条）。
+     */
+    async appVrccRecentNotifications(): Promise<VrccRecentNotifications> {
+        return await TAURI_INVOKE('app__vrcc_recent_notifications');
+    },
+    /**
+     * 增量轮询。游标由后端维护，前端不用关心。
+     */
+    async appVrccPollNotifications(): Promise<VrccNotifications> {
+        return await TAURI_INVOKE('app__vrcc_poll_notifications');
+    },
+    /**
+     * 今天这一轮 + 轮次进度。需要 `today` 敏感权限（要审核）。
+     */
+    async appVrccToday(): Promise<VrccToday> {
+        return await TAURI_INVOKE('app__vrcc_today');
+    },
+    /**
+     * 把一行错误信息归类，并把缺的权限一并带回。
+     *
+     * 运行时的命令把 `VrccError` 折成了字符串（`AppError::Custom`），这里按
+     * 官方错误码表的关键字分类。这不是理想的形状——理想是让 `VrccError` 自己
+     * 跨过命令边界——但改那个要动 `AppError` 的变体，留到有明确需求时再做。
+     */
+    async appVrccClassifyError(message: string): Promise<VrccErrorKindOutput> {
+        return await TAURI_INVOKE('app__vrcc_classify_error', { message });
+    },
     async appNotificationHideAndExpire(
         input: NotificationHideExpireInput
     ): Promise<NotificationActionOutcome> {
@@ -7059,6 +7131,287 @@ export type VrcStatusSnapshot = {
     pollingIntervalMs: number;
     refreshing: boolean;
     error: string;
+};
+/**
+ * 地图榜 / 批量查地图 / 我打过的图，三者的外层结构一致。
+ */
+export type VrccBoard = {
+    board?: string | null;
+    /**
+     * 上总榜所需最少评分人数。
+     */
+    min?: number | null;
+    maps?: VrccBoardMap[];
+    /**
+     * 榜单快照时间（毫秒）。
+     */
+    at?: number | null;
+};
+/**
+ * `GET /boards/maps`、`GET /maps`、`GET /me/maps` 共用的地图条目。
+ */
+export type VrccBoardMap = {
+    /**
+     * 世界 ID，形如 `wrld_…`。
+     */
+    world: string;
+    name?: string | null;
+    author?: string | null;
+    /**
+     * 平均分（1–10）。
+     */
+    avg?: number | null;
+    /**
+     * 评分人数；官方要求满 5 人才进总榜。
+     */
+    raters?: number | null;
+    /**
+     * 名次，1 起。
+     */
+    rank?: number | null;
+    /**
+     * 口碑档位 `light` / `mid` / …
+     */
+    weight?: string | null;
+    /**
+     * vrcc.cc 上的地图页。
+     */
+    page?: string | null;
+    /**
+     * 封面图地址。
+     */
+    img?: string | null;
+};
+/**
+ * 连接状态投影。
+ */
+export type VrccConnectionSnapshot = {
+    /**
+     * 是否持有令牌。
+     */
+    connected: boolean;
+    /**
+     * 星号，已连接且拿到时才有。
+     */
+    star: number | null;
+    /**
+     * 公开的 VRChat 名字。
+     */
+    vrcName: string | null;
+    /**
+     * 令牌实际拿到的 scope。
+     */
+    scope: string | null;
+    /**
+     * 客户端标识。
+     */
+    client: string;
+    /**
+     * 上次成功轮询提醒的时间（毫秒）。
+     */
+    lastPollAt: number | null;
+    /**
+     * 下一次建议轮询时间（毫秒）。
+     */
+    nextPollAt: number | null;
+};
+/**
+ * 设备授权的起步结果。`device_code` 是唯一需要回传的字段，其余是给玩家看的。
+ *
+ * 它同时是 `device_auth_poll` 的入参，所以既要 `Serialize` 也要 `Deserialize`。
+ */
+export type VrccDeviceAuthPromptOutput = {
+    /**
+     * 给玩家看的码，形如 `ABCD-2345`。
+     */
+    userCode: string;
+    /**
+     * 手动输码的页面。
+     */
+    verificationUri: string | null;
+    /**
+     * 带码的同意链接，优先用这个。
+     */
+    verificationUriComplete: string | null;
+    /**
+     * 多少秒内有效。
+     */
+    expiresInSecs: number;
+    /**
+     * 官方建议的轮询间隔。
+     */
+    intervalSecs: number;
+    /**
+     * 内部用，换令牌时要回传。
+     */
+    deviceCode: string;
+    /**
+     * 这次要到的权限。
+     */
+    scope: string | null;
+};
+/**
+ * 轮询一次授权的三种结果。
+ */
+export type VrccDeviceAuthStepOutput =
+    /**
+     * 玩家还没点同意，`interval_secs` 后再问。
+     */
+    | { state: 'pending'; interval_secs: number }
+    /**
+     * 连上了。
+     */
+    | { state: 'connected'; connection: VrccConnectionSnapshot }
+    /**
+     * 玩家取消或缺码过期，这条流程结束。
+     */
+    | { state: 'terminal'; message: string };
+/**
+ * 错误分类，供前端决定显示「重新连接」还是「稍后再试」。
+ *
+ * 前端拿到的是 `AppError`（字符串），但「是否需要重新授权」这种判断不该
+ * 让前端去解析文案。这个类型把 `classify_vrcc_error` 的结论带过命令边界。
+ */
+export type VrccErrorKindOutput =
+    | 'needsReauth'
+    | 'missingScope'
+    | 'throttled'
+    | 'transport'
+    | 'other';
+/**
+ * 一条提醒。`url` 存在时说明它关联一个可打开的链接。
+ */
+export type VrccNotificationItem = {
+    id?: number;
+    title?: string | null;
+    body?: string | null;
+    url?: string | null;
+    /**
+     * 毫秒时间戳。
+     */
+    at?: number | null;
+};
+/**
+ * `GET /me/notifications`：带增量游标的轮询接口。
+ */
+export type VrccNotifications = {
+    /**
+     * 下一次轮询要回传的游标。
+     */
+    last?: number | null;
+    items?: VrccNotificationItem[];
+    /**
+     * 官方建议的轮询间隔（秒），通常 60。
+     */
+    every?: number | null;
+    /**
+     * 未读角标数。
+     */
+    dot?: number | null;
+};
+/**
+ * `GET /me/notifications/recent`：最近一天的最后几条。
+ */
+export type VrccRecentNotifications = {
+    items?: VrccNotificationItem[];
+    read?: number | null;
+};
+/**
+ * 「今天」的轮次信息。这一轮连了几颗、下一轮什么时候开始。
+ */
+export type VrccRound = {
+    /**
+     * 本轮开始时间（毫秒）。
+     */
+    at?: number | null;
+    /**
+     * 下一轮开始时间（毫秒）。
+     */
+    next?: number | null;
+    /**
+     * 本轮已连几颗。
+     */
+    used?: number | null;
+    /**
+     * 本轮最多能连几颗。
+     */
+    max?: number | null;
+    remind?: boolean | null;
+};
+/**
+ * 一张星卡：`GET /me/card` 里的条目，也用于「今天」。
+ */
+export type VrccStarCard = {
+    /**
+     * 星号。
+     */
+    n?: number;
+    name?: string | null;
+    vrc?: string | null;
+    at?: number | null;
+    mutual?: boolean | null;
+};
+/**
+ * `GET /status`：不需要 client 标识的探活接口。
+ */
+export type VrccStatus = {
+    /**
+     * 毫秒时间戳。
+     */
+    at?: number | null;
+    /**
+     * `ok` 表示正常。
+     */
+    state?: string | null;
+};
+/**
+ * `GET /me/today`：这一轮路过的星 + 轮次进度。
+ */
+export type VrccToday = {
+    /**
+     * 第几轮，形如 `#12`。
+     */
+    day?: string | null;
+    cards?: VrccStarCard[];
+    round?: VrccRound;
+};
+/**
+ * 本客户端的本地用量。**这不是服务器数据**：官方没有"查询剩余配额"的接口，
+ * 所以只能报我们自己记的计数，措辞必须诚实。
+ */
+export type VrccUsageSnapshot = {
+    /**
+     * 今日个人接口已用次数（本地计数）。
+     */
+    personalUsedToday: number;
+    /**
+     * 官方对四个个人接口的每日合计上限。
+     */
+    personalDailyLimit: number;
+    /**
+     * 今日 `/device/code` 已用次数（本地计数）。
+     */
+    deviceCodeUsedToday: number;
+    /**
+     * 官方对每网络地址每日拿码上限。
+     */
+    deviceCodeDailyLimit: number;
+    /**
+     * 限流窗口内已发请求数。
+     */
+    windowUsed: number;
+    /**
+     * 限流窗口容量（每分钟）。
+     */
+    windowLimit: number;
+    /**
+     * 若正在退避，还有多少毫秒恢复。
+     */
+    backoffRemainingMs: number;
+    /**
+     * 用量计数的日期（本地时区 `YYYY-MM-DD`）。
+     */
+    date: string;
 };
 export type VrchatAuthFileAnalysisInput = {
     fileId?: string;

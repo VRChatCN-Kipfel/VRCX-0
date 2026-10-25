@@ -17,7 +17,7 @@ pub const VRCC_DEFAULT_CLIENT: &str = "dev-vrcx0";
 // ---------------------------------------------------------------------------
 
 /// `GET /boards/maps`、`GET /maps`、`GET /me/maps` 共用的地图条目。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccBoardMap {
     /// 世界 ID，形如 `wrld_…`。
@@ -47,7 +47,7 @@ pub struct VrccBoardMap {
 }
 
 /// 地图榜 / 批量查地图 / 我打过的图，三者的外层结构一致。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccBoard {
     #[serde(default)]
@@ -63,7 +63,7 @@ pub struct VrccBoard {
 }
 
 /// 单张地图详情：`GET /maps/{world}`。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccMapDetail {
     #[serde(default)]
@@ -77,7 +77,7 @@ pub struct VrccMapDetail {
 // ---------------------------------------------------------------------------
 
 /// 通用的"我"：点亮编号 + VRChat 名字。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccMe {
     /// 星号（点亮编号）。
@@ -93,7 +93,7 @@ pub struct VrccMe {
 // ---------------------------------------------------------------------------
 
 /// `POST /device/code` 的返回：给玩家看的码 + 同意链接。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, specta::Type)]
 pub struct VrccDeviceCode {
     #[serde(rename = "device_code")]
     pub device_code: String,
@@ -115,7 +115,7 @@ pub struct VrccDeviceCode {
 }
 
 /// `POST /device/token` 成功后返回的令牌。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, specta::Type)]
 pub struct VrccTokenResponse {
     #[serde(rename = "access_token")]
     pub access_token: String,
@@ -132,7 +132,7 @@ pub struct VrccTokenResponse {
 // ---------------------------------------------------------------------------
 
 /// 一条提醒。`url` 存在时说明它关联一个可打开的链接。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccNotificationItem {
     #[serde(default)]
@@ -149,7 +149,7 @@ pub struct VrccNotificationItem {
 }
 
 /// `GET /me/notifications`：带增量游标的轮询接口。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccNotifications {
     /// 下一次轮询要回传的游标。
@@ -166,7 +166,7 @@ pub struct VrccNotifications {
 }
 
 /// `GET /me/notifications/recent`：最近一天的最后几条。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccRecentNotifications {
     #[serde(default)]
@@ -180,7 +180,7 @@ pub struct VrccRecentNotifications {
 // ---------------------------------------------------------------------------
 
 /// `GET /me/maps/{world}` 与打分接口共用的返回。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccMyMap {
     #[serde(default)]
@@ -211,7 +211,7 @@ pub struct VrccMyMap {
 // ---------------------------------------------------------------------------
 
 /// 一张星卡：`GET /me/card` 里的条目，也用于「今天」。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccStarCard {
     /// 星号。
@@ -228,7 +228,7 @@ pub struct VrccStarCard {
 }
 
 /// 「今天」的轮次信息。这一轮连了几颗、下一轮什么时候开始。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccRound {
     /// 本轮开始时间（毫秒）。
@@ -248,7 +248,7 @@ pub struct VrccRound {
 }
 
 /// `GET /me/today`：这一轮路过的星 + 轮次进度。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccToday {
     /// 第几轮，形如 `#12`。
@@ -265,7 +265,7 @@ pub struct VrccToday {
 // ---------------------------------------------------------------------------
 
 /// `GET /status`：不需要 client 标识的探活接口。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccStatus {
     /// 毫秒时间戳。
@@ -283,7 +283,7 @@ pub struct VrccStatus {
 /// 官方错误体：`{"error": "…", "need": "…", "why": "…"}`。
 ///
 /// 三个字段都可能缺，所以整体是 Option 链而不是结构体默认值。
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 pub struct VrccErrorBody {
     #[serde(default)]
     pub error: Option<String>,
@@ -300,7 +300,7 @@ pub struct VrccErrorBody {
 
 /// 本客户端的本地用量。**这不是服务器数据**：官方没有"查询剩余配额"的接口，
 /// 所以只能报我们自己记的计数，措辞必须诚实。
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccUsageSnapshot {
     /// 今日个人接口已用次数（本地计数）。
@@ -322,7 +322,7 @@ pub struct VrccUsageSnapshot {
 }
 
 /// 连接状态投影。
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccConnectionSnapshot {
     /// 是否持有令牌。
