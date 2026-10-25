@@ -73,7 +73,13 @@ impl VrccSession {
     }
 
     /// 连接成功：写入令牌与玩家身份。
-    pub fn connect(&self, token: String, star: Option<i64>, vrc_name: Option<String>, scope: Option<String>) {
+    pub fn connect(
+        &self,
+        token: String,
+        star: Option<i64>,
+        vrc_name: Option<String>,
+        scope: Option<String>,
+    ) {
         let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
         state.token = Some(token);
         state.star = star;
@@ -106,10 +112,7 @@ impl VrccSession {
     /// 按当前会话造一个客户端。
     pub fn client(&self) -> VrccClient {
         let session = self.clone();
-        VrccClient::new(
-            self.client_id.clone(),
-            Arc::new(move || session.token()),
-        )
+        VrccClient::new(self.client_id.clone(), Arc::new(move || session.token()))
     }
 }
 
@@ -158,7 +161,12 @@ mod tests {
         let session = VrccSession::new("dev-test");
         assert!(!session.snapshot().connected);
 
-        session.connect("tok".into(), Some(77), Some("拾光".into()), Some("profile".into()));
+        session.connect(
+            "tok".into(),
+            Some(77),
+            Some("拾光".into()),
+            Some("profile".into()),
+        );
         let snapshot = session.snapshot();
         assert!(snapshot.connected);
         assert_eq!(snapshot.star, Some(77));

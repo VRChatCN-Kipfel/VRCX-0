@@ -86,7 +86,10 @@ impl LocalVrccTokenStore {
         );
         vrcx_0_persistence::config::set_string(&self.db, VRCC_TOKEN_KEY, &sealed.stored)
             .map_err(crate::map_persistence_error)?;
-        self.save_optional_string(VRCC_STAR_KEY, credential.star.map(|v| v.to_string()).as_deref())?;
+        self.save_optional_string(
+            VRCC_STAR_KEY,
+            credential.star.map(|v| v.to_string()).as_deref(),
+        )?;
         self.save_optional_string(VRCC_VRC_NAME_KEY, credential.vrc_name.as_deref())?;
         self.save_optional_string(VRCC_SCOPE_KEY, credential.scope.as_deref())?;
         Ok(())
@@ -99,7 +102,12 @@ impl LocalVrccTokenStore {
 
     /// 清除凭据。断开连接时调用。
     pub fn clear(&self) -> crate::Result<()> {
-        for key in [VRCC_TOKEN_KEY, VRCC_STAR_KEY, VRCC_VRC_NAME_KEY, VRCC_SCOPE_KEY] {
+        for key in [
+            VRCC_TOKEN_KEY,
+            VRCC_STAR_KEY,
+            VRCC_VRC_NAME_KEY,
+            VRCC_SCOPE_KEY,
+        ] {
             vrcx_0_persistence::config::set_string(&self.db, key, "")
                 .map_err(crate::map_persistence_error)?;
         }

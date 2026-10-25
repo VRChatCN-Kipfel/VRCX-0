@@ -256,14 +256,18 @@ mod tests {
     fn per_key_gap_is_enforced() {
         let base = Instant::now();
         let mut limiter = RateLimiter::new();
-        assert!(limiter.check("notifications", NOTIFICATIONS_MIN_GAP, base).is_ok());
+        assert!(limiter
+            .check("notifications", NOTIFICATIONS_MIN_GAP, base)
+            .is_ok());
         limiter.record("notifications", base);
         // 25 秒内同一个接口不放行。
         assert!(limiter
             .check("notifications", NOTIFICATIONS_MIN_GAP, at(base, 24))
             .is_err());
         // 别的接口不受影响。
-        assert!(limiter.check("boards", NOTIFICATIONS_MIN_GAP, at(base, 1)).is_ok());
+        assert!(limiter
+            .check("boards", NOTIFICATIONS_MIN_GAP, at(base, 1))
+            .is_ok());
         // 满 25 秒放行。
         assert!(limiter
             .check("notifications", NOTIFICATIONS_MIN_GAP, at(base, 25))

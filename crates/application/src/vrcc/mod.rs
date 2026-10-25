@@ -173,7 +173,10 @@ impl VrccService {
     }
 
     /// 第二步：问一次令牌。按官方三种结果分类。
-    pub async fn poll_device_auth(&self, prompt: &VrccDeviceAuthPrompt) -> std::result::Result<VrccDeviceAuthStep, VrccError> {
+    pub async fn poll_device_auth(
+        &self,
+        prompt: &VrccDeviceAuthPrompt,
+    ) -> std::result::Result<VrccDeviceAuthStep, VrccError> {
         match self.client.device_token(&prompt.device_code).await {
             Ok(token) => {
                 let credential = StoredCredential {
@@ -182,9 +185,9 @@ impl VrccService {
                     vrc_name: token.me.as_ref().and_then(|me| me.vrc.clone()),
                     scope: token.scope.clone(),
                 };
-                self.store.save(&credential).map_err(|error| {
-                    VrccError::Transport(format!("保存令牌失败：{error}"))
-                })?;
+                self.store
+                    .save(&credential)
+                    .map_err(|error| VrccError::Transport(format!("保存令牌失败：{error}")))?;
                 self.session.connect(
                     credential.token,
                     credential.star,
@@ -193,11 +196,9 @@ impl VrccService {
                 );
                 Ok(VrccDeviceAuthStep::Connected(self.snapshot()))
             }
-            Err(error) if error.is_authorization_pending() => {
-                Ok(VrccDeviceAuthStep::Pending {
-                    interval_secs: prompt.interval_secs,
-                })
-            }
+            Err(error) if error.is_authorization_pending() => Ok(VrccDeviceAuthStep::Pending {
+                interval_secs: prompt.interval_secs,
+            }),
             Err(error) if error.is_device_auth_terminal() => {
                 Ok(VrccDeviceAuthStep::Terminal(error.to_string()))
             }
@@ -225,14 +226,13 @@ impl VrccService {
     // -- 提醒 --------------------------------------------------------------
 
     /// 拉最近的提醒。首次不传游标。
-    pub async fn recent_notifications(&self) -> std::result::Result<VrccRecentNotifications, VrccError> {
+    pub async fn recent_notifications(
+        &self,
+    ) -> std::result::Result<VrccRecentNotifications, VrccError> {
         self.ensure_connected()?;
         let result = self.client.recent_notifications(false).await?;
-        self.session.note_poll(
-            vrcx_0_integrations::vrcc::now_millis(),
-            None,
-            None,
-        );
+        self.session
+            .note_poll(vrcx_0_integrations::vrcc::now_millis(), None, None);
         Ok(result)
     }
 

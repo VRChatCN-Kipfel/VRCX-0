@@ -121,7 +121,8 @@ pub fn app__vrcc_classify_error(message: String) -> VrccErrorKindOutput {
     if lowered.contains("限流") || lowered.contains("额度") || lowered.contains("too_many") {
         return VrccErrorKindOutput::Throttled;
     }
-    if lowered.contains("暂时不可用") || lowered.contains("timeout") || lowered.contains("无法解析") {
+    if lowered.contains("暂时不可用") || lowered.contains("timeout") || lowered.contains("无法解析")
+    {
         return VrccErrorKindOutput::Transport;
     }
     VrccErrorKindOutput::Other

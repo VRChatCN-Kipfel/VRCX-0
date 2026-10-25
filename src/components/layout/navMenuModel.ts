@@ -113,6 +113,7 @@ export const routePathByName = Object.freeze({
     'my-groups': '/tools/my-groups',
     'community-themes': '/themes',
     themes: '/themes',
+    vrcc: '/vrcc',
     settings: '/settings'
 });
 

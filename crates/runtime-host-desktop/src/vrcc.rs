@@ -2,9 +2,7 @@
 
 use std::sync::Arc;
 
-use vrcx_0_application::vrcc::{
-    StoredCredential, VrccService, VrccTokenStore,
-};
+use vrcx_0_application::vrcc::{StoredCredential, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
     VrccUsageSnapshot,
@@ -72,17 +70,23 @@ impl DesktopVrccRuntime {
 
     /// 地图榜：开放数据，不需要连接。
     pub async fn boards(&self, limit: u32) -> Result<VrccBoard, String> {
-        self.service.boards(limit).await.map_err(|error| error.to_string())
+        self.service
+            .boards(limit)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn status(&self) -> Result<VrccStatus, String> {
-        self.service.status().await.map_err(|error| error.to_string())
+        self.service
+            .status()
+            .await
+            .map_err(|error| error.to_string())
     }
 
-    pub async fn begin_device_auth(&self, scope: Option<String>) -> Result<
-        vrcx_0_application::vrcc::VrccDeviceAuthPrompt,
-        String,
-    > {
+    pub async fn begin_device_auth(
+        &self,
+        scope: Option<String>,
+    ) -> Result<vrcx_0_application::vrcc::VrccDeviceAuthPrompt, String> {
         self.service
             .begin_device_auth(scope.as_deref())
             .await
@@ -123,6 +127,9 @@ impl DesktopVrccRuntime {
     }
 
     pub async fn today(&self) -> Result<VrccToday, String> {
-        self.service.today().await.map_err(|error| error.to_string())
+        self.service
+            .today()
+            .await
+            .map_err(|error| error.to_string())
     }
 }

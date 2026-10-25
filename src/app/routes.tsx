@@ -321,6 +321,15 @@ export const protectedRoutes: AppRouteDefinition[] = [
         )
     },
     {
+        path: '/vrcc',
+        titleKey: 'vrcc.title',
+        descriptionKey: 'vrcc.description',
+        element: lazyRouteElement(
+            () => import('@/features/vrcc/VrccPage'),
+            'VrccPage'
+        )
+    },
+    {
         path: '/community-themes',
         element: <Navigate to="/themes" replace />
     },

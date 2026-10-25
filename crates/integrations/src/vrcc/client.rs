@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use vrcx_0_contracts::vrcc::{
-    VrccBoard, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccNotifications, VrccRecentNotifications,
-    VrccStatus, VrccTokenResponse, VrccToday, VRCC_API_BASE, VRCC_DEFAULT_CLIENT,
+    VrccBoard, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccNotifications,
+    VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse, VRCC_API_BASE,
+    VRCC_DEFAULT_CLIENT,
 };
 
 use super::throttle::{
@@ -81,28 +82,24 @@ impl VrccError {
         if self.is_gone() {
             return true;
         }
-        matches!(
-            self,
-            VrccError::Api {
-                status: 401,
-                ..
-            }
-        ) || matches!(
-            self,
-            VrccError::Api {
-                status: 403,
-                error,
-                ..
-            } if matches!(
-                error.as_str(),
-                "client_mismatch"
-                    | "client_unknown"
-                    | "client_off"
-                    | "client_missing"
-                    | "scope"
-                    | "scope_unreviewed"
+        matches!(self, VrccError::Api { status: 401, .. })
+            || matches!(
+                self,
+                VrccError::Api {
+                    status: 403,
+                    error,
+                    ..
+                } if matches!(
+                    error.as_str(),
+                    "client_mismatch"
+                        | "client_unknown"
+                        | "client_off"
+                        | "client_missing"
+                        | "scope"
+                        | "scope_unreviewed"
+                )
             )
-        ) || matches!(self, VrccError::TokenMissing)
+            || matches!(self, VrccError::TokenMissing)
     }
 
     /// 缺哪个权限。前端据此提示「需要重新授权并勾上 X」。
@@ -192,9 +189,7 @@ impl VrccClient {
     }
 
     /// 用默认标识新建。申请到审核通过的 `app_…` 后在这里换。
-    pub fn with_default_client(
-        token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-    ) -> Self {
+    pub fn with_default_client(token: Arc<dyn Fn() -> Option<String> + Send + Sync>) -> Self {
         Self::new(VRCC_DEFAULT_CLIENT, token)
     }
 
@@ -294,9 +289,9 @@ impl VrccClient {
         let mut builder = self
             .http
             .request(
-                method.parse().map_err(|_| {
-                    VrccError::Transport(format!("不支持的请求方法 {method}"))
-                })?,
+                method
+                    .parse()
+                    .map_err(|_| VrccError::Transport(format!("不支持的请求方法 {method}")))?,
                 format!("{}{path}", self.base),
             )
             .header("X-Client", &self.client_id)
@@ -336,7 +331,10 @@ impl VrccClient {
         } else {
             let code = status.as_u16();
             let parsed: VrccErrorBody = serde_json::from_str(&text).unwrap_or_default();
-            let error = parsed.error.clone().unwrap_or_else(|| format!("http_{code}"));
+            let error = parsed
+                .error
+                .clone()
+                .unwrap_or_else(|| format!("http_{code}"));
             if code == 429 {
                 let wait = self.note_rate_limited();
                 return Err(VrccError::RateLimited(format!(
@@ -371,8 +369,15 @@ impl VrccClient {
 
     /// 服务探活。不需要 client 标识，也不计入个人额度。
     pub async fn status(&self) -> Result<VrccStatus, VrccError> {
-        self.request("GET", "status", None, false, "status", Duration::from_secs(30))
-            .await
+        self.request(
+            "GET",
+            "status",
+            None,
+            false,
+            "status",
+            Duration::from_secs(30),
+        )
+        .await
     }
 
     /// 单张地图详情。未上榜或未过审返回 `404 not_found`。
@@ -453,12 +458,22 @@ impl VrccClient {
             Some(cursor) => format!("me/notifications?since={cursor}"),
             None => "me/notifications".to_string(),
         };
-        self.request("GET", &path, None, true, "notifications", NOTIFICATIONS_MIN_GAP)
-            .await
+        self.request(
+            "GET",
+            &path,
+            None,
+            true,
+            "notifications",
+            NOTIFICATIONS_MIN_GAP,
+        )
+        .await
     }
 
     /// 最近一天的最后几条提醒。
-    pub async fn recent_notifications(&self, mark: bool) -> Result<VrccRecentNotifications, VrccError> {
+    pub async fn recent_notifications(
+        &self,
+        mark: bool,
+    ) -> Result<VrccRecentNotifications, VrccError> {
         self.spend_personal()?;
         let path = if mark {
             "me/notifications/recent?mark=1"
@@ -472,8 +487,15 @@ impl VrccClient {
     /// 今天这一轮路过的星 + 轮次进度。需要 `today` 权限（敏感，要审核）。
     pub async fn today(&self) -> Result<VrccToday, VrccError> {
         self.spend_personal()?;
-        self.request("GET", "me/today", None, true, "today", Duration::from_secs(30))
-            .await
+        self.request(
+            "GET",
+            "me/today",
+            None,
+            true,
+            "today",
+            Duration::from_secs(30),
+        )
+        .await
     }
 }
 
