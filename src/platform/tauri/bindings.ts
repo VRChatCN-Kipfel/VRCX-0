@@ -7207,6 +7207,14 @@ export type VrccBoardMap = {
      * 封面图地址。
      */
     img?: string | null;
+    /**
+     * 地图的简短口碑。
+     *
+     * **官方文档未记录这个字段**——`openapi.yaml` 的 `BoardMap` 里没有它，
+     * 但线上确实返回（实测 `text` / `by` / `up` / `went` 四个键，结构稳定）。
+     * 因为 schema 没有禁 `additionalProperties`，接收它是安全的；缺了也不报错。
+     */
+    hot?: VrccMapHot | null;
 };
 /**
  * 连接状态投影。
@@ -7304,6 +7312,29 @@ export type VrccErrorKindOutput =
     | 'throttled'
     | 'transport'
     | 'other';
+/**
+ * 地图榜条目上的「口碑」小段文字。
+ *
+ * 字段名全部按线上实返，不是文档（文档没有这一块）。
+ */
+export type VrccMapHot = {
+    /**
+     * 那句短评。
+     */
+    text?: string | null;
+    /**
+     * 出处（形如「某位炉边倾听者」）。
+     */
+    by?: string | null;
+    /**
+     * 点赞数。
+     */
+    up?: number | null;
+    /**
+     * 相关标记，线上为布尔。
+     */
+    went?: boolean | null;
+};
 /**
  * 「互相连上」的一颗星，对应 `GET /me/mutuals` 的条目。
  *

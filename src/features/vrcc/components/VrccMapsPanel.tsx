@@ -76,8 +76,17 @@ export function VrccMapsPanel({
                                         <div className="truncate text-sm font-medium">
                                             {map.name ?? map.world}
                                         </div>
+                                        {/* 有口碑短评就显示短评，没有才显示作者。
+                                            短评是官方数据里唯一一句「这图好在哪」，
+                                            对玩家比作者名有用，但只有一行位置。 */}
                                         <div className="text-muted-foreground truncate text-xs">
-                                            {map.author ?? '—'}
+                                            {map.hot?.text
+                                                ? `「${map.hot.text}」${
+                                                      map.hot.by
+                                                          ? ` · ${map.hot.by}`
+                                                          : ''
+                                                  }`
+                                                : (map.author ?? '—')}
                                         </div>
                                     </div>
                                     <div className="shrink-0 text-right">
