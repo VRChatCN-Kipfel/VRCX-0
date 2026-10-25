@@ -16,10 +16,13 @@ const SITE = 'https://vrcc.cc';
  */
 export function VrccMapsPanel({
     boards,
-    onRefresh
+    onRefresh,
+    onOpenWorld
 }: {
     boards: VrccBoard | null;
     onRefresh: () => void;
+    /** 点一行时打开 VRCX-0 自己的世界详情窗，不跳网页。 */
+    onOpenWorld: (worldId: string) => void;
 }) {
     const { t } = useTranslation();
     const maps = boards?.maps ?? [];
@@ -58,33 +61,43 @@ export function VrccMapsPanel({
                                 key={map.world}
                                 className="hover:bg-muted/40 group flex items-center gap-3 px-3 py-2"
                             >
-                                <span
-                                    className={
-                                        (map.rank ?? 99) <= 3
-                                            ? 'text-primary w-6 shrink-0 text-right text-sm font-bold tabular-nums'
-                                            : 'text-muted-foreground w-6 shrink-0 text-right text-sm tabular-nums'
-                                    }
+                                {/* 点整行打开 VRCX-0 自己的世界详情窗：这是
+                                    官方插件的做法，玩家熟悉，也不需要联网。 */}
+                                <button
+                                    type="button"
+                                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                                    onClick={() => onOpenWorld(map.world)}
                                 >
-                                    {map.rank ?? '—'}
-                                </span>
-                                <div className="min-w-0 flex-1">
-                                    <div className="truncate text-sm font-medium">
-                                        {map.name ?? map.world}
+                                    <span
+                                        className={
+                                            (map.rank ?? 99) <= 3
+                                                ? 'text-primary w-6 shrink-0 text-right text-sm font-bold tabular-nums'
+                                                : 'text-muted-foreground w-6 shrink-0 text-right text-sm tabular-nums'
+                                        }
+                                    >
+                                        {map.rank ?? '—'}
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="truncate text-sm font-medium">
+                                            {map.name ?? map.world}
+                                        </div>
+                                        <div className="text-muted-foreground truncate text-xs">
+                                            {map.author ?? '—'}
+                                        </div>
                                     </div>
-                                    <div className="text-muted-foreground truncate text-xs">
-                                        {map.author ?? '—'}
+                                    <div className="shrink-0 text-right">
+                                        <div className="text-sm font-semibold tabular-nums">
+                                            {map.avg != null
+                                                ? map.avg.toFixed(1)
+                                                : '—'}
+                                        </div>
+                                        <div className="text-muted-foreground text-[10px] tabular-nums">
+                                            {map.raters ?? 0}
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                    <div className="text-sm font-semibold tabular-nums">
-                                        {map.avg != null
-                                            ? map.avg.toFixed(1)
-                                            : '—'}
-                                    </div>
-                                    <div className="text-muted-foreground text-[10px] tabular-nums">
-                                        {map.raters ?? 0}
-                                    </div>
-                                </div>
+                                </button>
+                                {/* 外链单独留一个：想去网页看详情时用，
+                                    和「在 VRCX 里看」是两件事。 */}
                                 <a
                                     href={
                                         map.page ?? `${SITE}/maps/${map.world}`

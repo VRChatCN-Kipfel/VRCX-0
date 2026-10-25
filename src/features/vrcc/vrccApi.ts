@@ -76,11 +76,24 @@ export const vrccApi = {
 
     disconnect: () => call(() => commands.appVrccDisconnect()),
 
-    recentNotifications: () =>
-        call(() => commands.appVrccRecentNotifications()),
+    /**
+     * 最近的提醒。
+     *
+     * `mark` 传 true 表示玩家正在看这个列表，服务器会把已读同步到账号；
+     * 后台只为算数字时传 false，否则等于替玩家把提醒标成看过了。
+     */
+    recentNotifications: (mark = false) =>
+        call(() => commands.appVrccRecentNotifications(mark)),
 
     /** 增量轮询。游标由后端维护。 */
     pollNotifications: () => call(() => commands.appVrccPollNotifications()),
+
+    /**
+     * 当前所在地图在榜上的状态与自己的评分。
+     *
+     * 地图被下架或不对当前玩家开放时返回 null，此时**不要**显示打分入口。
+     */
+    myMap: () => call(() => commands.appVrccMyMap()),
 
     /** 今天这一轮。需要 today 敏感权限（审核后才可用）。 */
     today: () => call(() => commands.appVrccToday())
@@ -107,3 +120,6 @@ export type VrccDeviceAuthStep = Awaited<
 >;
 export type VrccStatus = Awaited<ReturnType<typeof commands.appVrccStatus>>;
 export type VrccToday = Awaited<ReturnType<typeof commands.appVrccToday>>;
+export type VrccMyMap = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccMyMap>>
+>;

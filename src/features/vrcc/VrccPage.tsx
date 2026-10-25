@@ -19,6 +19,7 @@ import { Button } from '@/ui/shadcn/button';
 import { Spinner } from '@/ui/shadcn/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/shadcn/tabs';
 
+import { VrccCurrentMapCard } from './components/VrccCurrentMapCard';
 import { VrccMapsPanel } from './components/VrccMapsPanel';
 import { VrccMePanel } from './components/VrccMePanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
@@ -35,6 +36,7 @@ export function VrccPage() {
         usage,
         boards,
         recent,
+        myMap,
         service,
         deviceAuth,
         deviceAuthBusy,
@@ -42,7 +44,8 @@ export function VrccPage() {
         reload,
         refreshBoards,
         beginDeviceAuth,
-        disconnect
+        disconnect,
+        openWorld
     } = useVrccController();
 
     const connected = connection?.connected ?? false;
@@ -149,9 +152,18 @@ export function VrccPage() {
                         </TabsList>
 
                         <TabsContent value="maps" className="min-h-0 flex-1">
+                            {/* 所在地图卡片放在榜单上方：玩家最关心的是
+                                «我现在这张图怎么样»，而不是全站排行。 */}
+                            {myMap && (
+                                <VrccCurrentMapCard
+                                    map={myMap}
+                                    onOpenWorld={openWorld}
+                                />
+                            )}
                             <VrccMapsPanel
                                 boards={boards}
                                 onRefresh={() => void refreshBoards()}
+                                onOpenWorld={openWorld}
                             />
                         </TabsContent>
 

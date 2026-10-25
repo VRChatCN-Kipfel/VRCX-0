@@ -366,10 +366,27 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_disconnect');
     },
     /**
-     * 最近的提醒（最近一天的最后几条）。
+     * 最近的提醒。
+     *
+     * `mark` 为 `true` 表示玩家正在看这个列表：服务器会把已读状态同步到账号，
+     * 其他设备（网页、手机 App）上的红点跟着消。后台只为算数字时传 `false`。
      */
-    async appVrccRecentNotifications(): Promise<VrccRecentNotifications> {
-        return await TAURI_INVOKE('app__vrcc_recent_notifications');
+    async appVrccRecentNotifications(
+        mark: boolean
+    ): Promise<VrccRecentNotifications> {
+        return await TAURI_INVOKE('app__vrcc_recent_notifications', { mark });
+    },
+    /**
+     * 当前所在地图在地图榜上的状态与我自己的评分。
+     *
+     * 地图 ID 由后端自己从游戏日志取，前端不用传：位置本来就只有后端知道，
+     * 让每个调用点自己算一遍只会多出一处可能算错的地方。
+     *
+     * 返回 `null` 的三种情况：不在任何地图里、地图被下架或不对当前玩家开放
+     * （官方要求此时不显示打分面板）、以及未连接。
+     */
+    async appVrccMyMap(): Promise<VrccMyMap | null> {
+        return await TAURI_INVOKE('app__vrcc_my_map');
     },
     /**
      * 增量轮询。游标由后端维护，前端不用关心。
@@ -7278,6 +7295,65 @@ export type VrccErrorKindOutput =
     | 'throttled'
     | 'transport'
     | 'other';
+/**
+ * `GET /me/maps/{world}`：玩家**当前所在地图**在地图榜上的状态与本人评分。
+ *
+ * 字段照官方 `MyMap`。三个布尔各有明确含义，客户端行为直接依赖它们：
+ *
+ * | 字段 | 为 `true` 时 |
+ * | --- | --- |
+ * | `board` | 已正式在榜上展示 |
+ * | `pending` | 已提交收录、等审核 |
+ * | `off` | **不给当前玩家看**（下架或年龄池不符）→ 客户端**必须隐藏**这张图的卡片与打分入口 |
+ *
+ * 三者皆 `false` 表示地图榜还没有这张图；玩家首次打分时会自动提交审核。
+ */
+export type VrccMyMap = {
+    world?: string | null;
+    name?: string | null;
+    /**
+     * 是否已正式在地图榜上展示。
+     */
+    board?: boolean | null;
+    /**
+     * 是否已提交收录、正在等待审核。
+     */
+    pending?: boolean | null;
+    /**
+     * 是否不给当前玩家看；为 `true` 时客户端应隐藏这张图。
+     */
+    off?: boolean | null;
+    avg?: number | null;
+    raters?: number | null;
+    /**
+     * 自己打的分（1–10）。
+     */
+    mine?: number | null;
+    /**
+     * 现在能不能打分。
+     */
+    can?: boolean | null;
+    /**
+     * 不能打分时缺什么：`verify` / `friend` / `go`。
+     */
+    need?: string | null;
+    /**
+     * 自己的短评。
+     */
+    words?: string | null;
+    /**
+     * 短评的审核状态：`wait` 审核中 / `ok` 已通过 / `hidden` 未通过；
+     * 没有短评时为 `null`。
+     */
+    wordsOk?: string | null;
+    /**
+     * 封面**相对路径**（接在 [`VRCC_SITE_ORIGIN`] 之后使用）。
+     *
+     * 官方给的示例是 `/api/match?xdimg=…`，也就是说这个图片来自网页端那套
+     * 内部接口。我们只把它当图片地址加载，不通过它取任何数据。
+     */
+    img?: string | null;
+};
 /**
  * 一条提醒，对应官方的 `Notice`。
  *

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { openWorldDialog } from '@/services/dialogService';
+import { toast } from '@/services/toastService';
+
 import {
     vrccApi,
     VrccError,
     type VrccBoard,
     type VrccConnection,
     type VrccDeviceAuthPrompt,
+    type VrccMyMap,
     type VrccRecentNotifications,
     type VrccStatus,
     type VrccUsage
@@ -28,6 +32,8 @@ type State = {
     usage: VrccUsage | null;
     boards: VrccBoard | null;
     recent: VrccRecentNotifications | null;
+    /** 当前所在地图在榜上的状态；null 表示不显示（未连接、无地图、或被隐藏）。 */
+    myMap: VrccMyMap | null;
     service: VrccStatus | null;
     loading: boolean;
     error: VrccError | null;
@@ -43,6 +49,7 @@ const initialState: State = {
     usage: null,
     boards: null,
     recent: null,
+    myMap: null,
     service: null,
     loading: true,
     error: null,
@@ -85,10 +92,30 @@ export function useVrccController() {
         patch({ boards });
     }, [patch]);
 
-    /** 最近的提醒。 */
-    const refreshRecent = useCallback(async () => {
-        const recent = await vrccApi.recentNotifications();
-        patch({ recent });
+    /**
+     * 最近的提醒。
+     *
+     * `mark` 只在玩家真正打开「提醒」页时为 true —— 那会把已读同步到账号，
+     * 网页和手机 App 上的红点跟着消。后台轮询绝不传 true。
+     */
+    const refreshRecent = useCallback(
+        async (mark = false) => {
+            const recent = await vrccApi.recentNotifications(mark);
+            patch({ recent });
+        },
+        [patch]
+    );
+
+    /**
+     * 当前所在地图在榜上的状态。
+     *
+     * 位置由后端自己取，前端不参与——地图 ID 只有后端知道。
+     * 官方要求：地图被下架或不对当前玩家开放时客户端不显示打分面板；
+     * 后端已经把那种情况转成 null 返回。
+     */
+    const refreshMyMap = useCallback(async () => {
+        const myMap = await vrccApi.myMap();
+        patch({ myMap });
     }, [patch]);
 
     const refreshService = useCallback(async () => {
@@ -111,6 +138,8 @@ export function useVrccController() {
             if (connection.connected) {
                 await refreshRecent();
             }
+            // 当前所在地图从 VRCX 自己的游戏日志拿，不额外请求 VRChat。
+            await refreshMyMap();
             patch({ loading: false });
         } catch (error) {
             patch({ loading: false, error: error as VrccError });
@@ -119,6 +148,7 @@ export function useVrccController() {
         patch,
         refreshBoards,
         refreshConnection,
+        refreshMyMap,
         refreshRecent,
         refreshService
     ]);
@@ -150,7 +180,17 @@ export function useVrccController() {
                 const notifications = await vrccApi.pollNotifications();
                 if (cancelled) return;
                 if (notifications.items?.length) {
-                    await refreshRecent();
+                    // 新提醒到达时弹一条 toast：官方插件会把提醒弹在 VRCX 里，
+                    // 这里用 VRCX-0 自己的 toast 做同样的事。
+                    for (const item of notifications.items) {
+                        toast.add({
+                            type: 'info',
+                            title: item.title ?? '星遇同频',
+                            description: item.body ?? undefined
+                        });
+                    }
+                    // 后台刷新**不**标记已读：玩家还没看到，替他标记是错的。
+                    await refreshRecent(false);
                 }
             } catch (error) {
                 if (
@@ -175,7 +215,24 @@ export function useVrccController() {
         };
     }, [state.connection?.connected, patch, refreshRecent]);
 
-    const setTab = useCallback((tab: VrccTab) => patch({ tab }), [patch]);
+    /**
+     * 切页签。
+     *
+     * 切到「提醒」时用 `mark=true` 重拉一次：这是玩家真正在看这个列表的时刻，
+     * 服务器据此把已读同步到账号，网页和手机 App 上的红点会跟着消。
+     * 官方的做法也是「打开最近的提醒」时才 mark。
+     */
+    const setTab = useCallback(
+        (tab: VrccTab) => {
+            patch({ tab });
+            if (tab === 'notifications' && state.connection?.connected) {
+                refreshRecent(true).catch(() => {
+                    // 标记已读失败不该打断看列表；列表内容已经在了。
+                });
+            }
+        },
+        [patch, refreshRecent, state.connection?.connected]
+    );
 
     /** 开始设备授权。 */
     const beginDeviceAuth = useCallback(async () => {
@@ -262,12 +319,25 @@ export function useVrccController() {
         }
     }, [patch, refreshConnection]);
 
+    /**
+     * 打开 VRCX-0 自己的世界详情窗。
+     *
+     * 对齐官方插件「加好友/看地图是打开 VRCX 自己的窗口，由你自己点」的做法：
+     * 我们只负责把窗口叫出来，真正的操作交给 VRCX 原生界面。
+     */
+    const openWorld = useCallback((worldId: string) => {
+        if (!worldId) return;
+        openWorldDialog({ worldId });
+    }, []);
+
     return {
         ...state,
         setTab,
         reload: load,
         refreshBoards,
+        refreshMyMap,
         beginDeviceAuth,
-        disconnect
+        disconnect,
+        openWorld
     };
 }
