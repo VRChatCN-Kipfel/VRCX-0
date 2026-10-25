@@ -49,6 +49,7 @@ pub(crate) fn test_wrist_frame_input(
             instance_duration: String::new(),
             online_duration: String::new(),
             local_time,
+            vrcc: None,
         },
         options: config.render,
         locale: config.locale.as_str().to_string(),

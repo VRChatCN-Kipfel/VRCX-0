@@ -5,6 +5,8 @@ use vrcx_0_application_core::{RuntimeAuthScope, TaskSupervisor, WebClient, World
 use vrcx_0_application_game::{NowPlayingSnapshot, RuntimeSnapshot};
 use vrcx_0_persistence::config::ConfigRepository;
 
+use crate::surfaces::wrist::WristVrccSummary;
+
 pub trait VrOverlayRuntimeServices: Send + Sync {
     fn config(&self) -> &ConfigRepository;
 
@@ -29,4 +31,12 @@ pub trait VrOverlayRuntimeServices: Send + Sync {
     fn now_playing(&self) -> NowPlayingSnapshot;
 
     fn game_started_at(&self) -> Option<String>;
+
+    /// 腕表上要显示的星遇同频摘要。
+    ///
+    /// 带默认实现：没接星遇同频的宿主（测试、headless）什么都不显示，
+    /// 不必为此改它们的实现。
+    fn vrcc_wrist_summary(&self) -> Option<WristVrccSummary> {
+        None
+    }
 }

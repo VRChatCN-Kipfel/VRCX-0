@@ -41,6 +41,7 @@ fn wrist_builder_keeps_renderer_model_free_of_application_entry_shape() {
             instance_duration: "12m".to_string(),
             online_duration: "2h 5m".to_string(),
             local_time: "12:34".to_string(),
+            vrcc: None,
         },
         options: WristOverlayRenderOptions::default(),
         locale: "zh-CN".to_string(),

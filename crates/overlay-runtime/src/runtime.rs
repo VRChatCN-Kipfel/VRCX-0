@@ -1210,6 +1210,7 @@ pub(super) fn build_wrist_frame_input(
                 .map(|started_at| elapsed_minutes_text(&started_at, captured_at_ms))
                 .unwrap_or_default(),
             local_time: local_time_text(config.dt_hour12),
+            vrcc: services.vrcc_wrist_summary(),
         },
         options: config.render,
         locale: config.locale.as_str().to_string(),
