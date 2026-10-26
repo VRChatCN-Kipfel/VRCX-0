@@ -14,6 +14,7 @@ use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
     VrccUsageSnapshot,
 };
+use vrcx_0_runtime_host_desktop::notification::DesktopNotificationAction;
 
 use crate::{error::AppError, state::AppState};
 
@@ -326,6 +327,35 @@ pub async fn app__vrcc_mutuals(
         .vrcc()
         .mutuals()
         .await
+        .map_err(AppError::Custom)
+}
+
+/// 把一条星遇同频提醒送到桌面通知渠道（Windows toast）。
+///
+/// 为什么要单独一个命令：vrcc 的提醒由**前端轮询**拿到，而 Windows toast 的
+/// 实现（`tauri_winrt_notification`）在 Rust 侧。前端拿到一条新提醒后调这个
+/// 命令，就能复用 VRCX-0 已有的桌面通知出口——包括点击通知回到窗口的那套
+/// `DesktopNotificationAction` 机制，不必自己再实现一遍。
+///
+/// 和 VRChat 的活动通知共用 `DesktopNotifier`，所以第三方主题、免打扰设置、
+/// 通知声音等既有开关对它同样生效。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_notify(
+    title: String,
+    body: Option<String>,
+    notice_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let owner_id = state
+        .runtime_host()
+        .active_owner_id()
+        .ok_or_else(|| AppError::Custom("没有已登录的 VRChat 账号".to_string()))?;
+    // 落点：点击通知回到星遇同频页签。带 notice_id 便于将来定位到具体一条。
+    let action = DesktopNotificationAction::open_vrcc(&owner_id, notice_id.as_deref());
+    state
+        .runtime_host()
+        .show_desktop_notification(&title, body.as_deref(), action.as_ref())
         .map_err(AppError::Custom)
 }
 

@@ -212,6 +212,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             commands::application::vrcc::app__vrcc_poll_notifications,
             commands::application::vrcc::app__vrcc_today,
             commands::application::vrcc::app__vrcc_mutuals,
+            commands::application::vrcc::app__vrcc_notify,
             commands::application::vrcc::app__vrcc_classify_error,
             commands::application::notification_chains::app__notification_hide_and_expire,
             commands::application::notification_chains::app__notification_request_invite_accept,

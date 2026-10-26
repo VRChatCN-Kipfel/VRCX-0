@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => ({
     classifyError: vi.fn(),
     toastAdd: vi.fn(),
     openWorldDialog: vi.fn(),
-    openUserDialog: vi.fn()
+    openUserDialog: vi.fn(),
+    subscribeNotices: vi.fn()
 }));
 
 vi.mock('@/services/toastService', () => ({
@@ -29,6 +30,16 @@ vi.mock('@/services/toastService', () => ({
 vi.mock('@/services/dialogService', () => ({
     openWorldDialog: mocks.openWorldDialog,
     openUserDialog: mocks.openUserDialog
+}));
+
+// 提醒改由后端轮询、前端订阅事件。测试里给一个能立刻退订的假订阅：
+// 不关心事件何时到，只关心订阅/退订的成对行为。
+vi.mock('@/platform/tauri/client', () => ({
+    tauriClient: {
+        events: {
+            subscribe: mocks.subscribeNotices
+        }
+    }
 }));
 
 vi.mock('@/platform/tauri/bindings', () => ({
@@ -98,6 +109,8 @@ beforeEach(() => {
     mocks.myMap.mockResolvedValue(null);
     mocks.mutuals.mockResolvedValue({ stars: [], n: 0 });
     mocks.classifyError.mockResolvedValue('other');
+    // 订阅立即返回一个退订函数，模拟 Tauri 正常挂上监听。
+    mocks.subscribeNotices.mockResolvedValue(() => {});
 });
 
 afterEach(() => {
@@ -139,6 +152,47 @@ describe('useVrccController', () => {
         );
         // 加载时只是为了拿数据，不该替玩家标记已读。
         expect(mocks.recentNotifications).toHaveBeenCalledWith(false);
+    });
+
+    it('已连接时订阅后端提醒事件，卸载时退订', async () => {
+        const unsubscribe = vi.fn();
+        mocks.subscribeNotices.mockResolvedValue(unsubscribe);
+
+        const { unmount } = renderHook(() => useVrccController());
+
+        await waitFor(() =>
+            expect(mocks.subscribeNotices).toHaveBeenCalledWith(
+                'vrccNoticesChanged',
+                expect.any(Function)
+            )
+        );
+        expect(unsubscribe).not.toHaveBeenCalled();
+
+        unmount();
+        // 必须退订：否则页面切走后监听还挂着，事件到达会打到已卸戴的组件上。
+        await waitFor(() => expect(unsubscribe).toHaveBeenCalled());
+    });
+
+    it('后端推来「提醒有变化」时刷新列表，且不标记已读', async () => {
+        let fire: (() => void) | null = null;
+        mocks.subscribeNotices.mockImplementation(
+            (_event: string, handler: () => void) => {
+                fire = handler;
+                return Promise.resolve(() => {});
+            }
+        );
+
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        await waitFor(() => expect(fire).not.toBeNull());
+
+        mocks.recentNotifications.mockClear();
+        act(() => fire?.());
+
+        // 后台发现的提醒不能替玩家标记已读。
+        await waitFor(() =>
+            expect(mocks.recentNotifications).toHaveBeenCalledWith(false)
+        );
     });
 
     it('地图被隐藏时后端返回 null，页面不显示卡片', async () => {

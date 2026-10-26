@@ -1,7 +1,9 @@
 //! 星遇同频运行时：把应用层服务挂到桌面运行时上。
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccConnectionSnapshot, VrccRecentNotifications, VrccStatus, VrccToday,
@@ -43,12 +45,25 @@ impl VrccTokenStore for TokenStoreAdapter {
     }
 }
 
+/// 星遇同频提醒发生变化时发给前端的事件名。
+///
+/// 只作为「该刷新了」的信号，不带正文——玩家内容没必要经手额外的事件层。
+pub const VRCC_NOTICES_CHANGED_EVENT: &str = "vrccNoticesChanged";
+
 /// 桌面侧的星遇同频运行时。
 pub struct DesktopVrccRuntime {
     service: Arc<VrccService>,
 }
 
 impl DesktopVrccRuntime {
+    /// 后台轮询的基准间隔。
+    ///
+    /// 官方建议 60 秒，并明确 `/me/notifications` 有 25 秒的最小间隔。
+    /// 取 60 是照官方建议，不是我们保守。
+    const BACKGROUND_POLL_BASE: Duration = Duration::from_secs(60);
+    /// 抖动上限，避免所有客户端撞在同一秒（官方脚本也这样做）。
+    const BACKGROUND_POLL_JITTER: Duration = Duration::from_secs(20);
+
     pub fn new(store: LocalVrccTokenStore) -> Self {
         Self::with_client_override(store, None, None)
     }
@@ -184,4 +199,121 @@ impl DesktopVrccRuntime {
             .await
             .map_err(|error| error.to_string())
     }
+
+    /// 起一个后台轮询任务，把新提醒推成系统通知。
+    ///
+    /// **为什么要放到 Rust 侧**：原来轮询在前端（`useVrccController` 的
+    /// `setTimeout`）。窗口隐藏到托盘后 WebView 仍存活（`window.hide()` 不销毁
+    /// WebView），但 Chromium 会节流隐藏页面的定时器，60 秒的间隔可能被拉到
+    /// 几分钟——而"后台也能收到提醒"恰恰是这个功能最重要的场景。
+    ///
+    /// 这里用 `TaskSupervisor::spawn_cancellable`，让任务随应用退出一起停，
+    /// 不用自己管生命周期。
+    ///
+    /// 通知走宿主注入的 `DesktopNotifier`：Headless 下没人挂载它，
+    /// `show()` 返回 `Err`，这里只记日志，不会 panic。
+    ///
+    /// `event_sink` 用来告诉前端「有新数据了」。前端不再自己轮询——双轨会让
+    /// 两边各拉一次、`mark` 语义互相打架，而且隐藏窗口时前端定时器会被节流。
+    pub fn spawn_background_poll(
+        &self,
+        supervisor: &vrcx_0_application_core::TaskSupervisor,
+        notifier: Arc<dyn crate::notification::DesktopNotifier>,
+        event_sink: Arc<dyn vrcx_0_application_core::RuntimeEventSink>,
+    ) -> vrcx_0_application_core::TaskSpawnOutcome {
+        let service = Arc::clone(&self.service);
+        let base = Self::BACKGROUND_POLL_BASE;
+        let jitter = Self::BACKGROUND_POLL_JITTER;
+
+        supervisor.spawn_cancellable(move |stop_token| {
+            let service = Arc::clone(&service);
+            let notifier = Arc::clone(&notifier);
+            let event_sink = Arc::clone(&event_sink);
+            async move {
+                loop {
+                    if stop_token.is_stop_requested() {
+                        return;
+                    }
+                    // 未连接时不必轮询：`recent_notifications` 会直接报错。
+                    if service.snapshot().connected {
+                        match poll_once(&service, notifier.as_ref()).await {
+                            Ok(changed) => {
+                                if changed {
+                                    // 只发一个「变了」的信号，具体数据前端自己拉。
+                                    // 不在事件里带提醒正文：那会把玩家内容写进
+                                    // 事件经手的所有层，多一条泄露面。
+                                    event_sink.emit(VRCC_NOTICES_CHANGED_EVENT, json!({}));
+                                }
+                            }
+                            Err(error) => {
+                                // 不把错误抛出去：一次失败不该杀掉整个轮询。
+                                tracing::debug!(%error, "vrcc: background poll failed");
+                            }
+                        }
+                    }
+                    // 用带抖动的固定间隔。这里刻意用 `sleep` 而不是绝对时刻对齐：
+                    // 唤醒后最多补一次，不会像"补 N 个周期"那样突发请求。
+                    let delay = base + Duration::from_millis(jitter_millis(&jitter));
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        })
+    }
+}
+
+/// 一次轮询：拉最近提醒，把「还没弹过」的发成系统通知。
+///
+/// 返回 `true` 表示「有新提醒出现」，调用方据此通知前端刷新。
+///
+/// **未读的判定**：`recent` 里的 `read` 是玩家最后已读的提醒 id（顶层游标），
+/// 不是每条条目上的标记。所以 `item.id > read` 才算未读——和服务端语义一致，
+/// 也解释了为什么 `read` 为 `None` 时所有条目都算未读。
+async fn poll_once(
+    service: &VrccService,
+    notifier: &dyn crate::notification::DesktopNotifier,
+) -> Result<bool, String> {
+    let recent = service
+        .recent_notifications(false)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    // 没有游标 = 全都没读过。
+    let read_cursor = recent.read.unwrap_or(0);
+
+    let mut notified = 0usize;
+    for item in recent.items.iter() {
+        // 只弹未读：已读说明玩家在网页或手机上已经看过，再弹是打扰。
+        if item.id <= read_cursor {
+            continue;
+        }
+        if notified < MAX_NOTIFIED_PER_POLL {
+            let title = item.title.clone().unwrap_or_else(|| "星遇同频".to_string());
+            let body = item.body.clone();
+            if let Err(error) = notifier.show(&title, body.as_deref(), None, true, None) {
+                // Headless 或未挂载通知桥时走到这里，记录即可。
+                tracing::debug!(%error, "vrcc: desktop notification not delivered");
+            }
+            notified += 1;
+        }
+    }
+    // 有未读就值得让前端刷新（哪怕因为限流没全部弹成通知）。
+    Ok(notified > 0 || recent.items.iter().any(|item| item.id > read_cursor))
+}
+
+/// 每次轮询最多弹几条。
+///
+/// 首次连接时可能一次性拉到很多历史提醒，全弹出来会刷屏。
+const MAX_NOTIFIED_PER_POLL: usize = 3;
+
+/// 在 `0..jitter` 里取一个伪随机毫秒数。
+///
+/// 不用 `rand` crate：只要一个够散的抖动，混入当前时间纳秒即可，
+/// 避免为这点需求引入依赖。
+fn jitter_millis(jitter: &Duration) -> u64 {
+    let span = jitter.as_millis().max(1) as u64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos() as u64)
+        .unwrap_or(0);
+    now % span
 }

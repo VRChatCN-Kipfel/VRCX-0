@@ -254,6 +254,7 @@ pub fn setup_app_with_data_dir(
         .set_notification_desktop_notifier(Arc::new(TauriDesktopNotifier::new(
             app.handle().clone(),
         )));
+
     let _ = state
         .runtime_host()
         .storage_remove(BACKGROUND_MODE_RESUME_ROUTE_STORAGE_KEY);

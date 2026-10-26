@@ -1710,6 +1710,57 @@ impl DesktopRuntimeHostState {
         &self.vrcc
     }
 
+    /// 直接把一条通知送到桌面通知渠道（Windows toast 等）。
+    ///
+    /// 给「数据源在自己的层里、没走 `RenderedNotification`」的调用方用，
+    /// 目前是星遇同频：它的提醒来自 vrcc.cc，和 VRChat 的活动通知是两个数据
+    /// 模型，塞不进 `NotificationDispatcher`，但应当共用同一个桌面出口。
+    pub fn show_desktop_notification(
+        &self,
+        title: &str,
+        body: Option<&str>,
+        action: Option<&crate::notification::DesktopNotificationAction>,
+    ) -> std::result::Result<(), String> {
+        self.desktop
+            .services
+            .show_desktop_notification(title, body, action)
+    }
+
+    /// 启动星遇同频的后台轮询。
+    ///
+    /// 放在 Rust 侧而不是前端，因为窗口隐藏到托盘后 WebView 虽然还活着
+    /// （`window.hide()` 不销毁 WebView），但 Chromium 会节流隐藏页面的定时器，
+    /// 60 秒的轮询可能被拉长到几分钟——而"后台也能收到提醒"正是这个功能的
+    /// 主要场景。
+    ///
+    /// 通知走宿主注入的 `DesktopNotifier`，Headless 下没人挂载它，
+    /// `show()` 返回 Err，轮询只记日志不中断。
+    ///
+    /// 注意这里**不要求** notifier 已挂载：没有通知渠道时轮询照跑，
+    /// 界面上的未读数与腕表摘要仍要靠它刷新，只是不弹系统通知。
+    pub fn start_vrcc_background_poll<E>(&self, event_sink: Arc<E>)
+    where
+        E: vrcx_0_application_core::RuntimeEventSink + 'static,
+    {
+        // 直接把 slot 当 notifier 用：它没挂桥时 `show()` 返回 `Ok(())`，
+        // 也就是「没有通知渠道」= 静默不弹，而不是失败。Headless 就是这种情况，
+        // 轮询仍然值得跑——未读数与腕表摘要都靠它刷新。
+        let outcome = self.vrcc.spawn_background_poll(
+            self.runtime.runtime_tasks(),
+            self.desktop.services.notifier_slot(),
+            event_sink,
+        );
+        match outcome {
+            vrcx_0_application_core::TaskSpawnOutcome::Scheduled => {
+                tracing::debug!("vrcc: background poll scheduled");
+            }
+            other => {
+                // 任务被拒绝（supervisor 正在停止）不是错误，但要知道。
+                tracing::debug!(?other, "vrcc: background poll not scheduled");
+            }
+        }
+    }
+
     pub async fn preview_shared_collection(
         &self,
         id: &str,

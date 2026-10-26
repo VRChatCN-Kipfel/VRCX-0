@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { tauriClient } from '@/platform/tauri/client';
 import { copyTextToClipboard } from '@/services/clipboardService';
 import { openUserDialog, openWorldDialog } from '@/services/dialogService';
 import i18n from '@/services/i18nService';
@@ -19,14 +20,11 @@ import {
     type VrccUsage
 } from './vrccApi';
 
-/** 提醒轮询的基准间隔。官方建议 60 秒。 */
-const POLL_BASE_MS = 60_000;
-/** 抖动上限：避免所有客户端在同一秒撞车（官方脚本也这么做）。 */
-const POLL_JITTER_MS = 20_000;
-
-function nextPollDelay(): number {
-    return POLL_BASE_MS + Math.random() * POLL_JITTER_MS;
-}
+/**
+ * 后端提醒轮询发出的事件名，与 Rust 侧
+ * `runtime-host-desktop::vrcc::VRCC_NOTICES_CHANGED_EVENT` 必须一致。
+ */
+const VRCC_NOTICES_CHANGED_EVENT = 'vrccNoticesChanged';
 
 export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'me';
 
@@ -82,7 +80,6 @@ const initialState: State = {
  */
 export function useVrccController() {
     const [state, setState] = useState<State>(initialState);
-    const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const authTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const mounted = useRef(true);
 
@@ -293,7 +290,6 @@ export function useVrccController() {
         void load();
         return () => {
             mounted.current = false;
-            if (pollTimer.current) clearTimeout(pollTimer.current);
             if (authTimer.current) clearTimeout(authTimer.current);
         };
         // `load` 故意不放进依赖：它自己会 `patch`，进依赖就是无限循环。
@@ -302,56 +298,56 @@ export function useVrccController() {
     }, []);
 
     /**
-     * 提醒轮询。只在已连接时跑，间隔带抖动。
+     * 订阅后端推来的「提醒有变化」事件。
      *
-     * 代际校验：每次轮询前确认组件还挂着，且仍是这个连接——断开或重新
-     * 授权后旧的回答不该覆盖新的状态。
+     * **轮询在 Rust 侧**（`DesktopVrccRuntime::spawn_background_poll`）。
+     * 原来这里自己 `setTimeout` 轮询，有两个问题：
+     *
+     * 1. 窗口隐藏到托盘后 Chromium 会节流隐藏页面的定时器，60 秒可能被拉到
+     *    几分钟——而"后台也能收到提醒"正是这个功能的主要场景。
+     * 2. 和 Rust 侧轮询并存会每个周期发两次请求，`mark` 语义也会打架。
+     *
+     * 现在后端发事件、前端只负责刷新状态。事件本身不带提醒正文（不把玩家
+     * 内容经手额外的事件层），所以收到后要自己拉一次列表。
      */
     useEffect(() => {
         if (!state.connection?.connected) {
             return;
         }
-        let cancelled = false;
+        let disposed = false;
+        let unsubscribe: (() => void) | null = null;
 
-        const tick = async () => {
-            try {
-                const notifications = await vrccApi.pollNotifications();
-                if (cancelled) return;
-                if (notifications.items?.length) {
-                    // 新提醒到达时弹一条 toast：官方插件会把提醒弹在 VRCX 里，
-                    // 这里用 VRCX-0 自己的 toast 做同样的事。
-                    for (const item of notifications.items) {
-                        toast.add({
-                            type: 'info',
-                            title: item.title ?? '星遇同频',
-                            description: item.body ?? undefined
-                        });
+        tauriClient.events
+            .subscribe(VRCC_NOTICES_CHANGED_EVENT, () => {
+                if (disposed) return;
+                // 后台发现的提醒不标记已读：玩家还没看到，替他标记是错的。
+                refreshRecent(false).catch((error) => {
+                    if (disposed) return;
+                    if (
+                        error instanceof VrccError &&
+                        error.kind === 'needsReauth'
+                    ) {
+                        reportError(error, 'poll');
                     }
-                    // 后台刷新**不**标记已读：玩家还没看到，替他标记是错的。
-                    await refreshRecent(false);
-                }
-            } catch (error) {
-                if (
-                    error instanceof VrccError &&
-                    error.kind === 'needsReauth'
-                ) {
-                    // 令牌失效：停下轮询，让玩家看到「重新连接」。
-                    if (!cancelled) reportError(error, 'poll');
+                });
+            })
+            .then((off) => {
+                if (disposed) {
+                    // 订阅回来时组件已经卸载：立刻退订，别留下悬空监听。
+                    off();
                     return;
                 }
-            }
-            if (!cancelled) {
-                pollTimer.current = setTimeout(tick, nextPollDelay());
-            }
-        };
-
-        pollTimer.current = setTimeout(tick, nextPollDelay());
+                unsubscribe = off;
+            })
+            .catch((error) => {
+                console.error('[vrcc] subscribe notices event failed:', error);
+            });
 
         return () => {
-            cancelled = true;
-            if (pollTimer.current) clearTimeout(pollTimer.current);
+            disposed = true;
+            unsubscribe?.();
         };
-    }, [state.connection?.connected, patch, refreshRecent, reportError]);
+    }, [state.connection?.connected, refreshRecent, reportError]);
 
     /**
      * 切页签。
