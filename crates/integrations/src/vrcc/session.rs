@@ -35,13 +35,24 @@ impl VrccSessionState {
 pub struct VrccSession {
     state: Arc<RwLock<VrccSessionState>>,
     client_id: String,
+    /// 宿主应用的代理设置，建客户端时用。
+    ///
+    /// 放在会话里而不是每次调用时传：同一会话下所有请求必须走同一条网络路径，
+    /// 否则会出现"某几个接口通、某几个不通"这种极难排查的状态。
+    proxy_url: Option<String>,
 }
 
 impl VrccSession {
     pub fn new(client_id: impl Into<String>) -> Self {
+        Self::with_proxy(client_id, None)
+    }
+
+    /// 带代理设置构造。`proxy_url` 来自宿主的统一代理配置。
+    pub fn with_proxy(client_id: impl Into<String>, proxy_url: Option<String>) -> Self {
         Self {
             state: Arc::new(RwLock::new(default_state())),
             client_id: client_id.into(),
+            proxy_url: proxy_url.filter(|url| !url.trim().is_empty()),
         }
     }
 
@@ -112,7 +123,11 @@ impl VrccSession {
     /// 按当前会话造一个客户端。
     pub fn client(&self) -> VrccClient {
         let session = self.clone();
-        VrccClient::new(self.client_id.clone(), Arc::new(move || session.token()))
+        VrccClient::new(
+            self.client_id.clone(),
+            Arc::new(move || session.token()),
+            self.proxy_url.as_deref(),
+        )
     }
 }
 

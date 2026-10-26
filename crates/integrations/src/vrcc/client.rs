@@ -19,6 +19,7 @@ use vrcx_0_contracts::vrcc::{
     VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
     VRCC_API_BASE, VRCC_DEFAULT_CLIENT,
 };
+use vrcx_0_core::proxy::with_remote_dns;
 
 use super::throttle::{
     backoff_for, DailyUsage, RateLimiter, NOTIFICATIONS_MIN_GAP, PERSONAL_DAILY_LIMIT,
@@ -196,15 +197,38 @@ pub struct VrccClient {
 
 impl VrccClient {
     /// 新建客户端。`token` 是个取令牌的回调，这样令牌续期不用重建客户端。
+    ///
+    /// `proxy_url` 走宿主应用统一的代理设置（`WebClient::proxy_url`）。
+    /// **必须传**：本机实测 `vrcc.cc` 直连会 DNS 超时，走代理才通。原来这里
+    /// 自己 `build()` 一个不带代理的客户端，结果请求发不出去，界面上表现为
+    /// 「接口暂时不可用」——看起来像服务挂了，其实是本地网络。
+    ///
+    /// 代理的构造方式照 `llm.rs` 的既有做法：`Proxy::all(with_remote_dns(url))`，
+    /// `socks5://` 会被改写成 `socks5h://` 让 DNS 也走代理。
     pub fn new(
         client_id: impl Into<String>,
         token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+        proxy_url: Option<&str>,
     ) -> Self {
-        let http = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
-            .read_timeout(READ_TIMEOUT)
-            .build()
-            .unwrap_or_default();
+            .read_timeout(READ_TIMEOUT);
+        match proxy_url.map(str::trim).filter(|url| !url.is_empty()) {
+            Some(proxy_url) => match reqwest::Proxy::all(with_remote_dns(proxy_url).as_ref()) {
+                Ok(proxy) => {
+                    builder = builder.proxy(proxy);
+                }
+                Err(error) => {
+                    // 代理串写错不该让整个客户端起不来：退回直连，
+                    // 并把原因记下来，否则症状会变成"接口不可用"。
+                    tracing::warn!(%error, proxy_url, "vrcc: invalid proxy url, using direct");
+                }
+            },
+            None => {
+                tracing::debug!("vrcc: no proxy configured, connecting directly");
+            }
+        }
+        let http = builder.build().unwrap_or_default();
         Self {
             http,
             base: VRCC_API_BASE.to_string(),
@@ -214,9 +238,12 @@ impl VrccClient {
         }
     }
 
-    /// 用默认标识新建。申请到审核通过的 `app_…` 后在这里换。
-    pub fn with_default_client(token: Arc<dyn Fn() -> Option<String> + Send + Sync>) -> Self {
-        Self::new(VRCC_DEFAULT_CLIENT, token)
+    /// 用默认标识新建。
+    pub fn with_default_client(
+        token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+        proxy_url: Option<&str>,
+    ) -> Self {
+        Self::new(VRCC_DEFAULT_CLIENT, token, proxy_url)
     }
 
     pub fn client_id(&self) -> &str {
@@ -409,7 +436,6 @@ impl VrccClient {
     }
 
     // -- 开放数据（不需要令牌） --------------------------------------------
-
     /// 地图榜。官方说明服务器最多 5 分钟更新一次，问得再勤也是同一份。
     pub async fn boards(&self, limit: u32) -> Result<VrccBoard, VrccError> {
         let limit = limit.clamp(1, 100);
@@ -460,13 +486,36 @@ impl VrccClient {
     /// `profile notifications maps`，`profile` 总会加上）。
     ///
     /// 所以这里传 `None` 表示「用官方默认」，而不是「不要权限」。
+    /// 申请连接码。
+    ///
+    /// 官方定义（`POST /api/v1/device/code`）：正文可以不带；要指定权限就带
+    /// `scope`。不写 `scope` 时按客户端登记状态取默认值（`dev-` 是
+    /// `profile notifications maps`，`profile` 总会加上）。
+    ///
+    /// **`scope` 走查询串，不走 JSON 正文。** 这一点是实测出来的，和官方
+    /// `openapi.yaml` 不一致：
+    ///
+    /// | 写法 | 实测结果 |
+    /// | --- | --- |
+    /// | 不带正文 | `200` |
+    /// | JSON 正文 `{"scope": …}` | `400 bad_request` |
+    /// | 查询串 `?scope=…` | `200` |
+    /// | 表单 `scope=…` | `200` |
+    ///
+    /// 文档说 400 只表示 `invalid_scope`，但要了 JSON 正文时现网回的是
+    /// `bad_request`——也就是说服务器根本没解析 JSON 里的 scope。参考实现
+    /// （`xingshi-app`）里「遇 400 退回查询串」的兼容逻辑是对的，这里直接
+    /// 从一开始就发查询串，省掉一次注定失败的往返。
     pub async fn device_code(&self, scope: Option<&str>) -> Result<VrccDeviceCode, VrccError> {
         self.spend_device_code()?;
-        let body = scope.map(|scope| json!({ "scope": scope }));
+        let path = match scope.map(str::trim).filter(|scope| !scope.is_empty()) {
+            Some(scope) => format!("device/code?scope={}", encode_query_value(scope)),
+            None => "device/code".to_string(),
+        };
         self.request(
             "POST",
-            "device/code",
-            body,
+            &path,
+            None,
             false,
             "device_code",
             Duration::from_secs(5),
@@ -593,6 +642,23 @@ impl VrccClient {
     }
 }
 
+/// 把 scope 编成查询串可用形式。
+///
+/// scope 是空格分隔的权限名（profile notifications maps），查询串里空格要
+/// 编成 %20（官方示例用的是 +，两者都收，%20 更不容易被别的层误解）。
+fn encode_query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,7 +667,7 @@ mod tests {
     };
 
     fn client() -> VrccClient {
-        VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())))
+        VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())), None)
     }
 
     /// 标识解析的优先级：运行时覆盖 > 正式常量 > 开发常量。
@@ -750,31 +816,50 @@ mod tests {
         }
     }
 
-    /// 钉住一件事：`device/code` 的 `400` 只表示 `invalid_scope`，
-    /// 所以**不该**因为 400 就改用查询串重试。
+    /// 钉住 `scope` 的编码方式。
     ///
-    /// 参考实现（xingshi-app）里有「遇 400 就退回 `?scope=` 查询串」的逻辑，
-    /// 那是旧服务器的残留：官方 1.8.2 之前只认 JSON、表单回 400
-    /// `bad_request`。1.8.2 起正文可以是 JSON / 表单 / 查询串，
-    /// 而 `openapi.yaml` 里 `device/code` 的 400 只挂着 `invalid_scope` 一个例子。
+    /// 相关内容：`device/code` 的 `scope` 必须走查询串——实测 JSON 正文里带
+    /// `scope` 会被回 `400 bad_request`，查询串与表单都回 `200`。
     ///
-    /// 照搬那个回退会有害：`scope` 拼错时会被误判成格式问题，多打一次请求，
-    /// 而真正的错因（权限名不合法）被掩过去。我们发 JSON——官方第一顺位
-    /// 支持的格式——所以没有理由为它准备回退。
+    /// scope 是空格分隔的权限名，查询串里空格必须编码。编码函数写成净函数，
+    /// 这样不依赖网络也能钉住行为。
     #[test]
-    fn device_code_400_is_invalid_scope_not_a_format_problem() {
+    fn scope_is_encoded_for_the_query_string() {
+        assert_eq!(
+            encode_query_value("profile notifications maps"),
+            "profile%20notifications%20maps"
+        );
+        // 权限名本身只含安全字符，不该被过度编码。
+        assert_eq!(encode_query_value("maps.rate"), "maps.rate");
+        // 其它字符一律编码，避免拼进 URL 时被误解。
+        assert_eq!(encode_query_value("a&b=c"), "a%26b%3Dc");
+    }
+
+    /// `device/code` 的 400 分类：不是终态、也不是「等待中」。
+    ///
+    /// 现网对「JSON 正文带 scope」回的是 `bad_request`，对不认识的权限名回
+    /// `invalid_scope`。两者都不是必须放弃授权流程的错误——玩家可以改了
+    /// scope 再试，和 `access_denied` / `expired_token` 那种必须停下的不同。
+    #[test]
+    fn device_code_bad_request_is_recoverable() {
+        for code in ["invalid_scope", "bad_request"] {
+            let error = VrccError::Api {
+                status: 400,
+                error: code.to_string(),
+                need: None,
+                why: None,
+            };
+            assert!(!error.is_device_auth_terminal(), "{code}");
+            assert!(!error.is_authorization_pending(), "{code}");
+            assert!(!error.needs_reauth(), "{code}");
+        }
+        // 缺的权限要能带出去，界面才能告诉玩家是哪个名字写错了。
         let invalid_scope = VrccError::Api {
             status: 400,
             error: "invalid_scope".to_string(),
             need: Some("maps.rate".to_string()),
             why: None,
         };
-        // 分类上不属于「设备授权终态」：玩家可以改了 scope 再试，
-        // 这和 access_denied / expired_token 那种必须停下的情况不同。
-        assert!(!invalid_scope.is_device_auth_terminal());
-        // 也不是「等待中」。
-        assert!(!invalid_scope.is_authorization_pending());
-        // 缺的权限要能带出去，界面才能告诉玩家是哪个名字写错了。
         assert_eq!(invalid_scope.needed_scope(), Some("maps.rate"));
     }
 

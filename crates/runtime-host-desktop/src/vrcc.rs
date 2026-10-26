@@ -50,18 +50,29 @@ pub struct DesktopVrccRuntime {
 
 impl DesktopVrccRuntime {
     pub fn new(store: LocalVrccTokenStore) -> Self {
-        Self::with_client_override(store, None)
+        Self::with_client_override(store, None, None)
     }
 
-    /// 用指定的 `X-Client` 标识构造。
+    /// 用指定的 `X-Client` 标识与代理构造。
     ///
     /// `client_override` 来自配置：正式态把平台发的 `app_…` 填进去即可，
     /// 不用重新编译。`None` 时按 `resolve_client_id` 的优先级回落到常量。
-    pub fn with_client_override(store: LocalVrccTokenStore, client_override: Option<&str>) -> Self {
+    ///
+    /// `proxy_url` 必须传宿主应用的统一代理（`runtime_host().proxy_url()`）：
+    /// 本机实测 `vrcc.cc` 直连 DNS 超时，不接代理时所有接口都会「暂时不可用」。
+    pub fn with_client_override(
+        store: LocalVrccTokenStore,
+        client_override: Option<&str>,
+        proxy_url: Option<&str>,
+    ) -> Self {
         let port = Arc::new(TokenStoreAdapter { inner: store });
         let client_id = resolve_client_id(client_override);
         Self {
-            service: Arc::new(VrccService::new(port, client_id)),
+            service: Arc::new(VrccService::with_proxy(
+                port,
+                client_id,
+                proxy_url.map(str::to_string),
+            )),
         }
     }
 

@@ -14,10 +14,17 @@ use std::sync::Arc;
 use vrcx_0_integrations::vrcc::VrccClient;
 
 /// 建一个没有令牌的客户端。公开数据端点的 `authed = false`，用不到它。
+///
+/// 走环境变量里的代理：本机实测 `vrcc.cc` 直连会 DNS 超时。
+/// 没有代理变量时退回直连，所以在有直连网络的环境（CI）里也能跑。
 fn client() -> VrccClient {
+    let proxy = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .ok();
     VrccClient::new(
         vrcx_0_integrations::vrcc::VRCC_DEV_CLIENT,
         Arc::new(|| None),
+        proxy.as_deref(),
     )
 }
 
@@ -100,5 +107,50 @@ async fn status_endpoint_reports_ok() {
         Some("ok"),
         "vrcc.cc status is not ok: {:?}",
         status
+    );
+}
+
+/// `device/code` 真实可用：带 scope 也要能拿到连接码。
+///
+/// 这条测试的存在理由是一次实际踩坑：文档说 `device/code` 认 JSON 正文里的
+/// `scope`，但现网对它回 `400 bad_request`，只有查询串和表单才工作。
+/// 当时只读文档就下了结论，结果应用里「开始连接」直接失败。
+///
+/// 这里用默认 scope（`None`）验证一次完整成功路径：能拿到 `user_code` 与
+/// `device_code`，权串里包含 `profile`（官方保证总会加上）。
+///
+/// 注意：这条测试**会真的向服务器申请一个连接码**。服务器对每网络地址每天
+/// 限 30 个，测试跑得勤会消耗额度，所以它只在 `VRCC_LIVE_DEVICE_CODE=1`
+/// 时执行——默认不跑，避免把开发额度烧光。
+#[tokio::test]
+async fn device_code_round_trip_works_with_scope_in_query() {
+    if std::env::var("VRCC_LIVE_DEVICE_CODE").ok().as_deref() != Some("1") {
+        eprintln!("skip: set VRCC_LIVE_DEVICE_CODE=1 to run (consumes daily quota)");
+        return;
+    }
+    let code = skip_if_offline!(
+        client()
+            .device_code(Some("profile notifications maps"))
+            .await
+    );
+
+    assert!(
+        code.user_code.contains('-'),
+        "user_code should look like ABCD-2345, got {:?}",
+        code.user_code
+    );
+    assert!(
+        !code.device_code.is_empty(),
+        "device_code must not be empty"
+    );
+    assert!(
+        code.expires_in.unwrap_or(0) > 0,
+        "expires_in should be positive"
+    );
+    // 官方保证 `profile` 总会加上。
+    let scope = code.scope.unwrap_or_default();
+    assert!(
+        scope.split_whitespace().any(|part| part == "profile"),
+        "scope should include `profile`, got {scope:?}"
     );
 }

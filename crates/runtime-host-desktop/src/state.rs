@@ -690,6 +690,9 @@ impl DesktopRuntimeHostState {
         let vrcc = Arc::new(crate::vrcc::DesktopVrccRuntime::with_client_override(
             vrcx_0_outbound_adapters::LocalVrccTokenStore::new(Arc::clone(runtime.database())),
             vrcc_client_override.as_deref(),
+            // 用宿主应用统一的代理设置：本机实测 vrcc.cc 直连 DNS 超时，
+            // 不接代理时所有接口都会表现为「暂时不可用」。
+            runtime.web_client().proxy_url(),
         ));
         let hmd_membership_runtime = Arc::downgrade(runtime.realtime_runtime());
         desktop

@@ -117,7 +117,19 @@ pub struct VrccService {
 impl VrccService {
     /// 从仓库恢复会话：有令牌就直接进入已连接状态。
     pub fn new(store: Arc<dyn VrccTokenStore>, client_id: impl Into<String>) -> Self {
-        let session = VrccSession::new(client_id);
+        Self::with_proxy(store, client_id, None)
+    }
+
+    /// 带代理设置构造。
+    ///
+    /// `proxy_url` 用宿主应用的统一代理设置。不传的话在本机这种需要代理才能
+    /// 访问外网的环境里，所有请求都会 DNS 超时。
+    pub fn with_proxy(
+        store: Arc<dyn VrccTokenStore>,
+        client_id: impl Into<String>,
+        proxy_url: Option<String>,
+    ) -> Self {
+        let session = VrccSession::with_proxy(client_id, proxy_url);
         if let Ok(Some(credential)) = store.load() {
             session.connect(
                 credential.token,
