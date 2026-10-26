@@ -14,6 +14,8 @@ import {
     PageTitle,
     PageToolbar
 } from '@/components/layout/PageScaffold';
+import { openExternalLink } from '@/services/shellIntegrationService';
+import { toast } from '@/services/toastService';
 import { Badge } from '@/ui/shadcn/badge';
 import { Button } from '@/ui/shadcn/button';
 import { Spinner } from '@/ui/shadcn/spinner';
@@ -39,6 +41,7 @@ export function VrccPage() {
         recent,
         myMap,
         mutuals,
+        mutualsError,
         service,
         deviceAuth,
         deviceAuthBusy,
@@ -53,7 +56,14 @@ export function VrccPage() {
 
     const connected = connection?.connected ?? false;
     const unread = recent?.items?.length ?? 0;
-    const serviceDown = service?.state !== 'ok';
+    // 只在这三种情况下才算「服务不可用」：没有状态对象、state 不是 ok、
+    // 或后端明确报告了故障。
+    //
+    // 不能写成 `service?.state !== 'ok'`：`service` 初值是 `null`，
+    // `null?.state` 是 `undefined`，`undefined !== 'ok'` 为真——于是请求
+    // 还没发出去，徽章就先亮「服务不可用」，玩家看到的是一个凭空出现的故障。
+    // 「还不知道」和「已经坏了」是两件事。
+    const serviceDown = service !== null && service.state !== 'ok';
 
     return (
         <PageScaffold>
@@ -183,6 +193,7 @@ export function VrccPage() {
                             <VrccMutualsPanel
                                 connected={connected}
                                 mutuals={mutuals}
+                                mutualsError={mutualsError}
                                 onOpenUser={openUser}
                             />
                         </TabsContent>
@@ -196,13 +207,24 @@ export function VrccPage() {
                                 deviceAuthMessage={deviceAuthMessage}
                                 onBegin={beginDeviceAuth}
                                 onDisconnect={disconnect}
-                                onOpenLink={(url) =>
-                                    window.open(
-                                        url,
-                                        '_blank',
-                                        'noopener,noreferrer'
-                                    )
-                                }
+                                onOpenLink={(url) => {
+                                    // 走系统的 `app__open_link`，不要用
+                                    // `window.open`：Tauri 的 WebView 会拦掉
+                                    // `window.open` 且什么都不做，按钮点了没反应。
+                                    void openExternalLink(url).catch(
+                                        (error: unknown) => {
+                                            toast.add({
+                                                type: 'error',
+                                                title:
+                                                    error instanceof Error
+                                                        ? error.message
+                                                        : t(
+                                                              'vrcc.error.unknown'
+                                                          )
+                                            });
+                                        }
+                                    );
+                                }}
                             />
                         </TabsContent>
                     </Tabs>

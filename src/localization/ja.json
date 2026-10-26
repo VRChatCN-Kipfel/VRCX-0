@@ -791,7 +791,7 @@
         "service_down": "Service unavailable",
         "go_connect": "Connect",
         "reconnect_hint": "Reconnect from the \"Me\" tab",
-        "missing_scope": "This needs the {{scope}} permission; tick it when you reconnect",
+        "missing_scope": "This needs the {scope} permission; tick it when you reconnect",
         "tab": {
             "maps": "Map board",
             "notifications": "Notifications",
@@ -799,7 +799,7 @@
             "mutuals": "Mutuals"
         },
         "maps": {
-            "hint": "Needs {{min}} ratings to reach the board",
+            "hint": "Needs {min} ratings to reach the board",
             "empty": "No board data yet",
             "open": "Open on vrcc.cc"
         },
@@ -836,14 +836,16 @@
             "auth_pending": "Waiting for approval",
             "auth_hint": "Open the link below in a browser, or enter the code manually:",
             "open_browser": "Open in browser",
-            "auth_expires": "Valid for {{minutes}} minutes, checked every {{sec}} seconds",
+            "auth_expires": "Valid for {minutes} minutes, checked every {sec} seconds",
             "usage": "This client usage",
             "personal_used": "Personal endpoints",
             "device_code_used": "Connection codes",
             "window": "Requests this minute",
             "usage_note": "These are counts this client kept itself, not remaining server quota — the API has no endpoint that reports remaining quota.",
             "disclaimer": "Third-party client. Not affiliated with vrcc.cc.",
-            "client_dev": "dev"
+            "client_dev": "dev",
+            "code_copied": "Code {code} copied",
+            "open_browser_failed": "Could not open the browser; open the VRCC site manually"
         },
         "error": {
             "unknown": "The action failed. Please try again."
@@ -853,7 +855,8 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; tick it when you reconnect.",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog"
+            "open_profile": "Open in the VRChat player dialog",
+            "unavailable": "This needs an extra permission this client does not have"
         }
     },
     "nav_menu": {

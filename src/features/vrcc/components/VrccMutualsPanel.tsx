@@ -19,10 +19,16 @@ import type { VrccMutuals } from '../vrccApi';
 export function VrccMutualsPanel({
     connected,
     mutuals,
+    mutualsError,
     onOpenUser
 }: {
     connected: boolean;
     mutuals: VrccMutuals | null;
+    /**
+     * 这项功能没开通的原因（`dev-` 标识必然要不到 `mutuals` 敏感权限）。
+     * 只在本页签显示——它是「某个功能没开通」，不是「整页坏了」。
+     */
+    mutualsError?: string | null;
     onOpenUser: (userId: string) => void;
 }) {
     const { t } = useTranslation();
@@ -42,7 +48,11 @@ export function VrccMutualsPanel({
         return (
             <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-2 px-6 text-center text-sm">
                 <Users className="size-6" />
-                <div className="leading-relaxed">{t('vrcc.mutuals.empty')}</div>
+                <div className="leading-relaxed">
+                    {mutualsError
+                        ? t('vrcc.mutuals.unavailable')
+                        : t('vrcc.mutuals.empty')}
+                </div>
                 <div className="text-[11px] leading-relaxed">
                     {t('vrcc.mutuals.needs_scope')}
                 </div>

@@ -795,7 +795,7 @@
         "service_down": "服务不可用",
         "go_connect": "去连接",
         "reconnect_hint": "去「我的」重新连接",
-        "missing_scope": "这一项需要 {{scope}} 权限，重新连接时勾上",
+        "missing_scope": "这一项需要 {scope} 权限，重新连接时勾上",
         "tab": {
             "maps": "地图榜",
             "notifications": "提醒",
@@ -803,7 +803,7 @@
             "mutuals": "连上"
         },
         "maps": {
-            "hint": "满 {{min}} 人评分才进总榜",
+            "hint": "满 {min} 人评分才进总榜",
             "empty": "暂无榜单数据",
             "open": "在星遇同频打开"
         },
@@ -840,14 +840,16 @@
             "auth_pending": "等待同意",
             "auth_hint": "在浏览器里打开下面的链接，或手动输入连接码：",
             "open_browser": "在浏览器打开",
-            "auth_expires": "{{minutes}} 分钟内有效，每 {{sec}} 秒检查一次",
+            "auth_expires": "{minutes} 分钟内有效，每 {sec} 秒检查一次",
             "usage": "本客户端用量",
             "personal_used": "个人接口",
             "device_code_used": "申请连接码",
             "window": "本分钟请求",
             "usage_note": "这是本客户端自己记的次数，不是服务器的剩余额度——官方没有查询剩余额度的接口。",
             "disclaimer": "第三方客户端，不是星遇同频官方。",
-            "client_dev": "测试中"
+            "client_dev": "测试中",
+            "code_copied": "授权码 {code} 已复制",
+            "open_browser_failed": "打不开浏览器，请手动打开星遇同频网页"
         },
         "error": {
             "unknown": "操作失败，请稍后再试"
@@ -857,7 +859,8 @@
             "empty": "还没有互相连上的星友",
             "needs_scope": "「互相连上」需要 mutuals 权限，重新连接时勾上。",
             "unnamed": "未命名",
-            "open_profile": "在 VRChat 玩家详情里打开"
+            "open_profile": "在 VRChat 玩家详情里打开",
+            "unavailable": "这一项需要额外权限，当前客户端还没开通"
         }
     },
     "nav_menu": {

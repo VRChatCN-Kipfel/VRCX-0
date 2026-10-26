@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { copyTextToClipboard } from '@/services/clipboardService';
 import { openUserDialog, openWorldDialog } from '@/services/dialogService';
 import i18n from '@/services/i18nService';
+import { openExternalLink } from '@/services/shellIntegrationService';
 import { toast } from '@/services/toastService';
 
 import {
@@ -38,6 +40,14 @@ type State = {
     myMap: VrccMyMap | null;
     /** 「互相连上」的星友；null 表示还没拉过或没权限。 */
     mutuals: VrccMutuals | null;
+    /**
+     * 「互相连上」这一项失败的原因。
+     *
+     * 单独放一个字段而不是共用全局 rror：它以 dev- 标识必然失败（敏感
+     * 权限要审核），那是**某个页签的功能没开通**，不是整个页面坏了。塞进
+     * 全局错误会让玩家以为连接出了问题。
+     */
+    mutualsError: string | null;
     service: VrccStatus | null;
     loading: boolean;
     error: VrccError | null;
@@ -55,6 +65,7 @@ const initialState: State = {
     recent: null,
     myMap: null,
     mutuals: null,
+    mutualsError: null,
     service: null,
     loading: true,
     error: null,
@@ -170,12 +181,26 @@ export function useVrccController() {
     /**
      * 「互相连上」的星友列表。
      *
-     * 需要 `mutuals` 敏感权限；`dev-` 标识会拿到 403 `scope_unreviewed`，
-     * 这时走 reportError 提示，而不是静默失败。
+     * 需要 `mutuals` 敏感权限。`dev-` 标识拿到的是 `403 scope`——这是
+     * **预期内**的结果（敏感权限要审核），不是故障。
+     *
+     * 所以失败时只把原因记到 `mutualsError` 供「连上」页签自己显示，
+     * 不走全局 `reportError`：那会把一条「某个可选功能没开通」渲染成
+     * 整页红色横幅，让玩家以为连接坏了。
      */
     const refreshMutuals = useCallback(async () => {
-        const mutuals = await vrccApi.mutuals();
-        patch({ mutuals });
+        try {
+            const mutuals = await vrccApi.mutuals();
+            patch({ mutuals, mutualsError: null });
+        } catch (error) {
+            if (error instanceof VrccError && error.kind === 'missingScope') {
+                // 权限没开通：静默记录，界面在自己的页签里说明。
+                patch({ mutuals: null, mutualsError: error.message });
+                return;
+            }
+            patch({ mutuals: null });
+            throw error;
+        }
     }, [patch]);
 
     const refreshService = useCallback(async () => {
@@ -188,29 +213,49 @@ export function useVrccController() {
         }
     }, [patch]);
 
-    /** 初次加载。 */
+    /**
+     * 初次加载。
+     *
+     * 分两段：本地状态（连接、用量、所在地图）先出来，页面立刻可用；
+     * 网络内容（地图榜、提醒、连上）各自异步加载。
+     *
+     * 原来是一路 `await` 串行，其中 `refreshBoards` 在没网时要等 12 秒超时，
+     * 期间 `loading` 一直是 true，整页卡在转圈上——一个可选区块拖住了整页。
+     * 网络请求失败该表现为那一块空着 + 一条错误提示，而不是「页面没加载完」。
+     */
     const load = useCallback(async () => {
         patch({ loading: true, error: null });
+        let connected = false;
         try {
+            // 只读本地状态：这两个不会因为网络卡住。
             const connection = await refreshConnection();
-            await refreshService();
-            await refreshBoards();
-            if (connection.connected) {
-                await refreshRecent();
-                // 「互相连上」要敏感权限，`dev-` 一定拿不到；单独兜住错误，
-                // 不让它拖垮整页加载——地图榜和提醒仍然可用。
-                try {
-                    await refreshMutuals();
-                } catch (error) {
-                    reportError(error, 'refreshMutuals');
-                }
-            }
-            // 当前所在地图从 VRCX 自己的游戏日志拿，不额外请求 VRChat。
-            await refreshMyMap();
-            patch({ loading: false });
+            connected = connection.connected;
         } catch (error) {
-            patch({ loading: false });
             reportError(error, 'load');
+        } finally {
+            // 骨架先落地：即使后面的请求全都失败，页面也是可用的。
+            patch({ loading: false });
+        }
+
+        // 以下全都可能发网络请求，一律不阻塞首屏。
+        void refreshService().catch((error) => {
+            reportError(error, 'refreshService');
+        });
+        void refreshBoards().catch((error) => {
+            reportError(error, 'refreshBoards');
+        });
+        // 所在地图要已连接才有意义，且它内部会查接口——同样不能挡首屏。
+        void refreshMyMap().catch((error) => {
+            reportError(error, 'refreshMyMap');
+        });
+        if (connected) {
+            void refreshRecent(false).catch((error) => {
+                reportError(error, 'refreshRecent');
+            });
+            // 「互相连上」要敏感权限，`dev-` 一定拿不到；单独兜住，不影响别的。
+            void refreshMutuals().catch((error) => {
+                reportError(error, 'refreshMutuals');
+            });
         }
     }, [
         patch,
@@ -231,9 +276,18 @@ export function useVrccController() {
      * 依赖里放一个"自己会改状态"的回调，就是无限循环。
      *
      * 用 ref 记住已经跑过，依赖数组留空。需要手动重载时走 `reload()`。
+     *
+     * **必须在这个 effect 里把 `mounted.current` 置回 true。** 严格模式下
+     * effect 会 挂载 → 清理 → 再挂载：清理时把它设成 false，而第二次挂载被
+     * `didLoad` 挡在前面直接 return，这个 ref 就永远停在 false。`patch` 的前置
+     * 判断是 `if (mounted.current)`，于是**请求照发、数据照回，但每次 setState
+     * 都被丢掉**——界面永远停在「加载中」，而后台日志里能看到完整的成功响应。
      */
     const didLoad = useRef(false);
     useEffect(() => {
+        // 先恢复挂载标记：清理函数会把它清掉，重挂载时（严格模式或
+        // 组件真的被卸载再挂回）需要重新打开，否则状态更新全部静默。
+        mounted.current = true;
         if (didLoad.current) return;
         didLoad.current = true;
         void load();
@@ -337,11 +391,30 @@ export function useVrccController() {
         try {
             const prompt = await vrccApi.beginDeviceAuth(null);
             patch({ deviceAuth: prompt, deviceAuthBusy: false });
-            // 优先把带码的链接丢给系统浏览器，玩家不用手输。
+
+            // 先把授权码放进剪贴板：玩家的下一步要么在网页上粘贴，
+            // 要么在手机上输——两种都要这个码，先给到手最省事。
+            // 很短的码（`ABCD-2345`）手工抄写极易错位。
+            void copyTextToClipboard(prompt.userCode, {
+                successMessage: i18n.t('vrcc.me.code_copied', {
+                    code: prompt.userCode
+                })
+            });
+
+            // 再用系统浏览器打开同意页。`window.open` 在 Tauri 里会被拦掉，
+            // 必须走 `app__open_link`。
             const target =
                 prompt.verificationUriComplete ?? prompt.verificationUri;
             if (target) {
-                window.open(target, '_blank', 'noopener,noreferrer');
+                void openExternalLink(target).catch((error: unknown) => {
+                    // 打不开浏览器不该让整个授权流程失败：码已经复制好了，
+                    // 玩家还能自己打开网页。给一条提示即可。
+                    console.error('[vrcc] openExternalLink failed:', error);
+                    toast.add({
+                        type: 'error',
+                        title: i18n.t('vrcc.me.open_browser_failed')
+                    });
+                });
             }
         } catch (error) {
             patch({ deviceAuthBusy: false });
