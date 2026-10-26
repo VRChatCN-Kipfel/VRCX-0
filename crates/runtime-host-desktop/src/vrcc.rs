@@ -65,13 +65,17 @@ impl DesktopVrccRuntime {
         client_override: Option<&str>,
         proxy_url: Option<&str>,
     ) -> Self {
+        let usage_store = Arc::new(vrcx_0_outbound_adapters::LocalVrccUsageStore::new(
+            Arc::clone(store.db()),
+        ));
         let port = Arc::new(TokenStoreAdapter { inner: store });
         let client_id = resolve_client_id(client_override);
         Self {
-            service: Arc::new(VrccService::with_proxy(
+            service: Arc::new(VrccService::with_usage_store(
                 port,
                 client_id,
                 proxy_url.map(str::to_string),
+                Some(usage_store),
             )),
         }
     }

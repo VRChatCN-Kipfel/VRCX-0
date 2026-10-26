@@ -185,6 +185,19 @@ pub struct VrccLocalUsage {
     pub date: String,
 }
 
+/// 日配额计数的持久化端口。
+///
+/// `integrations` 不依赖数据库，所以这里只定接口，实现在 `outbound-adapters`。
+/// 需要落盘的原因是：日配额是**按天**算的，重启后清零会让本地预扣完全失效，
+/// 玩家可能在毫不知情的情况下把 300 次 / 30 个码用完（服务器会回 `too_many`，
+/// 但要等到那一步才知道）。
+pub trait DailyUsageStore: Send + Sync {
+    /// 读取上次保存的计数。没有记录或读失败时返回 `None`。
+    fn load(&self) -> Option<DailyUsage>;
+    /// 保存计数。失败只该记日志，不该让请求失败。
+    fn save(&self, usage: &DailyUsage);
+}
+
 /// 一个可克隆的客户端句柄。
 #[derive(Clone)]
 pub struct VrccClient {
@@ -193,6 +206,8 @@ pub struct VrccClient {
     client_id: String,
     token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     state: Arc<std::sync::Mutex<VrccClientState>>,
+    /// 日配额的落盘端口；`None` 时只在内存里记。
+    usage_store: Option<Arc<dyn DailyUsageStore>>,
 }
 
 impl VrccClient {
@@ -235,7 +250,26 @@ impl VrccClient {
             client_id: client_id.into(),
             token,
             state: Arc::new(std::sync::Mutex::new(VrccClientState::default())),
+            usage_store: None,
         }
+    }
+
+    /// 接上日配额的落盘端口，并把上次的计数恢复进内存。
+    ///
+    /// 不恢复的后果是真的：日配额按天算，重启清零等于本地预扣形同虚设，
+    /// 玩家可能在界面上看到 `0/300` 而服务器那边早就用掉大半，
+    /// 直到撞上 `too_many` 才暴露——那时只能等第二天。
+    ///
+    /// 恢复时会把日期一起带进来，`roll_to` 会在下次取用量时判断是否跨天，
+    /// 所以跨天重启不会把昨天的数字带到今天。
+    pub fn with_usage_store(mut self, store: Arc<dyn DailyUsageStore>) -> Self {
+        if let Some(restored) = store.load() {
+            if let Ok(mut state) = self.state.lock() {
+                state.usage = restored;
+            }
+        }
+        self.usage_store = Some(store);
+        self
     }
 
     /// 用默认标识新建。
@@ -328,6 +362,9 @@ impl VrccClient {
                 "本客户端今日个人接口已用满 {PERSONAL_DAILY_LIMIT} 次"
             )));
         }
+        let snapshot = state.usage.clone();
+        drop(state);
+        self.persist_usage(&snapshot);
         Ok(())
     }
 
@@ -340,7 +377,20 @@ impl VrccClient {
                 "本客户端今日申请连接码次数已用尽".to_string(),
             ));
         }
+        let snapshot = state.usage.clone();
+        drop(state);
+        self.persist_usage(&snapshot);
         Ok(())
+    }
+
+    /// 把当前计数写回存储。
+    ///
+    /// 先放锁再落盘：写数据库可能耗时，不该在持有状态锁时做。
+    /// 写失败只记日志——配额记不准比让请求失败轻得多。
+    fn persist_usage(&self, usage: &DailyUsage) {
+        if let Some(store) = &self.usage_store {
+            store.save(usage);
+        }
     }
 
     /// 核心请求。`authed` 决定是否带 `Bearer`。

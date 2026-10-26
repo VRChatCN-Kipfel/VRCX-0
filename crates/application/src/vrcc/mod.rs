@@ -129,7 +129,23 @@ impl VrccService {
         client_id: impl Into<String>,
         proxy_url: Option<String>,
     ) -> Self {
-        let session = VrccSession::with_proxy(client_id, proxy_url);
+        Self::with_usage_store(store, client_id, proxy_url, None)
+    }
+
+    /// 完整构造：代理 + 日配额落盘。
+    ///
+    /// `usage_store` 不传时配额只在内存里记，**重启即清零**——本地预扣就失效了。
+    /// 生产装配必须传（见 `runtime-host-desktop`）。
+    pub fn with_usage_store(
+        store: Arc<dyn VrccTokenStore>,
+        client_id: impl Into<String>,
+        proxy_url: Option<String>,
+        usage_store: Option<Arc<dyn vrcx_0_integrations::vrcc::DailyUsageStore>>,
+    ) -> Self {
+        let mut session = VrccSession::with_proxy(client_id, proxy_url);
+        if let Some(usage_store) = usage_store {
+            session = session.with_usage_store(usage_store);
+        }
         if let Ok(Some(credential)) = store.load() {
             session.connect(
                 credential.token,

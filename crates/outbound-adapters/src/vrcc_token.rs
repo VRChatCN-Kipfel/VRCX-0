@@ -35,6 +35,14 @@ impl LocalVrccTokenStore {
         Self { db }
     }
 
+    /// 共享同一个数据库句柄。
+    ///
+    /// 给同一层的其它 vrcc 存储（日配额）复用连接用，避免为了拿一个
+    /// `DatabaseService` 再走一遍装配链。
+    pub fn db(&self) -> &Arc<DatabaseService> {
+        &self.db
+    }
+
     /// 读令牌。没有或解不开时返回 `None`。
     ///
     /// `open_secret` 对密文才解密，对明文（旧数据、未启用加密时写的）原样返回，

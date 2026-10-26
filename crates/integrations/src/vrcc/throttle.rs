@@ -113,7 +113,8 @@ pub fn backoff_for(attempt: u32) -> Duration {
 /// 按本地日期滚动的用量计数。
 ///
 /// 只记「已用」，不记「剩余」——服务器侧的额度是按令牌算的，我们看不见。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DailyUsage {
     date: String,
     personal: i64,
@@ -131,6 +132,23 @@ impl Default for DailyUsage {
 }
 
 impl DailyUsage {
+    /// 从落盘的快照恢复计数。
+    ///
+    /// 不用在这里判断日期是否已过期：下一次 `roll_to` 会负责清零，
+    /// 而 `roll_to` 每次取用量前都会被调用。
+    pub fn restore(date: &str, personal: i64, device_code: i64) -> Self {
+        Self {
+            date: date.to_string(),
+            personal: personal.max(0),
+            device_code: device_code.max(0),
+        }
+    }
+
+    /// 这份计数属于哪一天（本地时区 `YYYY-MM-DD`）。
+    pub fn date(&self) -> &str {
+        &self.date
+    }
+
     /// 换到 `today`（`YYYY-MM-DD`）时清零。返回是否发生了跨天。
     pub fn roll_to(&mut self, today: &str) -> bool {
         if self.date == today {

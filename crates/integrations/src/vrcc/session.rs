@@ -40,6 +40,8 @@ pub struct VrccSession {
     /// 放在会话里而不是每次调用时传：同一会话下所有请求必须走同一条网络路径，
     /// 否则会出现"某几个接口通、某几个不通"这种极难排查的状态。
     proxy_url: Option<String>,
+    /// 日配额计数的落盘端口；`None` 时只在内存里记（重启清零）。
+    usage_store: Option<Arc<dyn super::client::DailyUsageStore>>,
 }
 
 impl VrccSession {
@@ -53,6 +55,7 @@ impl VrccSession {
             state: Arc::new(RwLock::new(default_state())),
             client_id: client_id.into(),
             proxy_url: proxy_url.filter(|url| !url.trim().is_empty()),
+            usage_store: None,
         }
     }
 
@@ -123,11 +126,21 @@ impl VrccSession {
     /// 按当前会话造一个客户端。
     pub fn client(&self) -> VrccClient {
         let session = self.clone();
-        VrccClient::new(
+        let client = VrccClient::new(
             self.client_id.clone(),
             Arc::new(move || session.token()),
             self.proxy_url.as_deref(),
-        )
+        );
+        match &self.usage_store {
+            Some(store) => client.with_usage_store(Arc::clone(store)),
+            None => client,
+        }
+    }
+
+    /// 接上日配额的落盘端口。
+    pub fn with_usage_store(mut self, store: Arc<dyn super::client::DailyUsageStore>) -> Self {
+        self.usage_store = Some(store);
+        self
     }
 }
 
