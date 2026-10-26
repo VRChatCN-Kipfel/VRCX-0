@@ -79,7 +79,7 @@ impl From<VrccDeviceAuthStep> for VrccDeviceAuthStepOutput {
 ///
 /// 前端拿到的是 `AppError`（字符串），但「是否需要重新授权」这种判断不该
 /// 让前端去解析文案。这个类型把 `classify_vrcc_error` 的结论带过命令边界。
-#[derive(Debug, Clone, Copy, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum VrccErrorKindOutput {
     NeedsReauth,
@@ -106,10 +106,24 @@ impl From<VrccErrorKind> for VrccErrorKindOutput {
 /// 运行时的命令把 `VrccError` 折成了字符串（`AppError::Custom`），这里按
 /// 官方错误码表的关键字分类。这不是理想的形状——理想是让 `VrccError` 自己
 /// 跨过命令边界——但改那个要动 `AppError` 的变体，留到有明确需求时再做。
+///
+/// **顺序很重要**：先判 `MissingScope`，再判 `NeedsReauth`。
+/// 官方对「权限不够」用的错误码是 `scope` / `scope_unreviewed`，而后者的语义
+/// 是「这项权限要审核」，玩家重新授权也拿不到——它不该显示成「去重新连接」，
+/// 而该显示成「这项功能需要开通」。所以这两个码必须归到 `MissingScope`。
+///
+/// 早先这里漏了 `scope` 系列，于是一个必然失败的 `mutuals`（`dev-` 标识拿不到
+/// 敏感权限）被判成 `Other`，前端走了全局错误路径，渲染成整页红色横幅，
+/// 看起来像连接坏了。
 #[tauri::command(async)]
 #[specta::specta]
 pub fn app__vrcc_classify_error(message: String) -> VrccErrorKindOutput {
     let lowered = message.to_ascii_lowercase();
+    // `scope` 必须排在 `client_*` 前面：`scope_unreviewed` 里不含这些前缀，
+    // 但把顺序写死能防止以后再加关键字时误伤。
+    if lowered.contains("scope") {
+        return VrccErrorKindOutput::MissingScope;
+    }
     if lowered.contains("gone")
         || lowered.contains("client_mismatch")
         || lowered.contains("client_unknown")
@@ -313,4 +327,67 @@ pub async fn app__vrcc_mutuals(
         .mutuals()
         .await
         .map_err(AppError::Custom)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 权限不足必须判成 `MissingScope`，不能判成 `NeedsReauth`。
+    ///
+    /// 两者的界面含义完全不同：`MissingScope` 是「这项功能需要开通/审核」，
+    /// `NeedsReauth` 是「去重新连接」。`dev-` 标识访问 `mutuals` 拿到的是
+    /// `403 scope`，重新授权一万次也没用——判错会引导玩家做无用功。
+    #[test]
+    fn scope_errors_are_missing_scope_not_reauth() {
+        for message in [
+            // 线上实返：`星遇同频接口返回 HTTP 403（scope）`
+            "Tauri command failed: app__vrcc_mutuals: 星遇同频接口返回 HTTP 403（scope）",
+            "星遇同频接口返回 HTTP 403（scope_unreviewed）",
+            "HTTP 403 scope",
+        ] {
+            assert_eq!(
+                app__vrcc_classify_error(message.to_string()),
+                VrccErrorKindOutput::MissingScope,
+                "should be MissingScope: {message}"
+            );
+        }
+    }
+
+    /// `scope` 的判定要排在 `client_*` 之前。
+    ///
+    /// 反过来会怎样：一个同时提到 client 与 scope 的消息会被判成
+    /// `NeedsReauth`。目前线上不会同时出现，但顺序写死比依赖运气好。
+    #[test]
+    fn scope_wins_over_client_keywords() {
+        let message = "HTTP 403（scope）client_unknown";
+        assert_eq!(
+            app__vrcc_classify_error(message.to_string()),
+            VrccErrorKindOutput::MissingScope
+        );
+    }
+
+    #[test]
+    fn other_kinds_still_classify_correctly() {
+        assert_eq!(
+            app__vrcc_classify_error("星遇同频 token 缺失，请先连接".to_string()),
+            VrccErrorKindOutput::NeedsReauth
+        );
+        assert_eq!(
+            app__vrcc_classify_error("星遇同频接口返回 HTTP 404（gone）".to_string()),
+            VrccErrorKindOutput::NeedsReauth
+        );
+        assert_eq!(
+            app__vrcc_classify_error("星遇同频限流：HTTP 429".to_string()),
+            VrccErrorKindOutput::Throttled
+        );
+        assert_eq!(
+            app__vrcc_classify_error("星遇同频接口暂时不可用：error sending request".to_string()),
+            VrccErrorKindOutput::Transport
+        );
+        assert_eq!(
+            app__vrcc_classify_error("something unexpected".to_string()),
+            VrccErrorKindOutput::Other
+        );
+    }
 }

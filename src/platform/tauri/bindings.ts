@@ -415,6 +415,15 @@ const generatedCommands = {
      * 运行时的命令把 `VrccError` 折成了字符串（`AppError::Custom`），这里按
      * 官方错误码表的关键字分类。这不是理想的形状——理想是让 `VrccError` 自己
      * 跨过命令边界——但改那个要动 `AppError` 的变体，留到有明确需求时再做。
+     *
+     * **顺序很重要**：先判 `MissingScope`，再判 `NeedsReauth`。
+     * 官方对「权限不够」用的错误码是 `scope` / `scope_unreviewed`，而后者的语义
+     * 是「这项权限要审核」，玩家重新授权也拿不到——它不该显示成「去重新连接」，
+     * 而该显示成「这项功能需要开通」。所以这两个码必须归到 `MissingScope`。
+     *
+     * 早先这里漏了 `scope` 系列，于是一个必然失败的 `mutuals`（`dev-` 标识拿不到
+     * 敏感权限）被判成 `Other`，前端走了全局错误路径，渲染成整页红色横幅，
+     * 看起来像连接坏了。
      */
     async appVrccClassifyError(message: string): Promise<VrccErrorKindOutput> {
         return await TAURI_INVOKE('app__vrcc_classify_error', { message });
