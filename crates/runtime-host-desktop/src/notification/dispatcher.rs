@@ -18,6 +18,7 @@ use super::icon_cache::{IconRequest, RemoteIconCache};
 use super::overlay_transport::OverlayNotificationTransport;
 use super::policy::LocalNotificationPolicy;
 use super::tts::{notification_tts_memo_actor_user_id, send_tts_notification};
+use super::NotificationDeliveryCondition;
 use super::{NotificationDeliveryPlan, NotificationDeliveryPreferences};
 use vrcx_0_contracts::activity::ActivityKind;
 use vrcx_0_core::files::extract_file_id;
@@ -69,6 +70,21 @@ struct NotificationJob {
     current_user_id: String,
     /// 宿主统一代理；外部图标需要它才能取到。
     proxy_url: Option<String>,
+    /// 点击落点覆盖。
+    ///
+    /// `ActivityDelivery` 里没有「点这条通知去哪」的字段——主路径是按
+    /// `ActivityKind` 推断的（群公告→群主页，其余→用户主页）。站外提醒的
+    /// 落点是它自己的（打开星遇同频页签），推断不出来，所以由投递方给。
+    action_override: Option<DesktopNotificationAction>,
+    /// 已经在本地的图标路径，直接用作桌面通知的图。
+    ///
+    /// **为什么需要旁路**：通知层解析图片的入口是
+    /// [`resolve_local_image_with_budget`]，它只认「VRChat `file_` 资产」和
+    /// 「远程 http(s) URL」两种形态，**不接受本地路径**。星遇同频的图标是
+    /// 投递方自己下载并缓存的本地文件，走那条路会被当成非法输入丢掉。
+    /// 有了这个字段，投递方可以直接把「已经准备好的图」交进来，不必假装
+    /// 它是一个 URL 再让下游去解析一遍。
+    local_icon: Option<std::path::PathBuf>,
 }
 
 struct PreparedNotification {
@@ -170,6 +186,8 @@ impl ActivitySink for NotificationDispatcher {
             endpoint,
             current_user_id,
             proxy_url: self.output.proxy_url.clone(),
+            action_override: None,
+            local_icon: None,
         };
 
         if priority {
@@ -200,6 +218,95 @@ impl ActivitySink for NotificationDispatcher {
     }
 }
 
+impl NotificationDispatcher {
+    /// 投递一条**站外**通知（例如星遇同频的提醒）。
+    ///
+    /// ## 为什么不走 `emit_overlay_activity_delivery`
+    ///
+    /// 那条路按「VRChat 游戏状态」决定通道（`decide_notification_plan`）：
+    /// 桌面通知的默认条件是 `Never`、浮层要求 `is_steamvr_running`。那套判断
+    /// 对 VRChat 活动是对的——你人在游戏里才关心谁加入了——但站外提醒不是这个
+    /// 性质：它更像社交平台的动态提醒，关掉游戏照样该收到。
+    ///
+    /// 所以这里**只用暂停策略与通道偏好**，不碰游戏状态：
+    ///
+    /// - `policy.paused()` 照常生效：免打扰、隐私锁、忙碌时不打扰；
+    /// - 桌面通知只要玩家没关（`desktop_toast` 不是 `Never`）就发；
+    /// - 浮层不要求 `is_steamvr_running`，有没有头显由各个 overlay 通道自己判断。
+    ///
+    /// 除此之外——图标解析、TTS、有序投递、代理——全部复用主路径那一套，
+    /// 不再有第二条投递实现。
+    pub fn emit_external_notice(
+        &self,
+        delivery: ActivityDelivery,
+        action: Option<DesktopNotificationAction>,
+        local_icon: Option<&std::path::Path>,
+    ) {
+        let settings = self.output.policy.settings();
+        // 暂停时一条都不发，和主路径一致。
+        if self.output.policy.paused(&settings) {
+            return;
+        }
+        let plan = external_notice_plan(&delivery, &settings.preferences);
+        if !plan.has_local_transport() {
+            return;
+        }
+        let preferences = settings.preferences.clone();
+        let locale = settings.locale;
+        let (endpoint, current_user_id) = notification_session_identity(&self.auth_scope);
+        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
+        let job = NotificationJob {
+            delivery,
+            preferences,
+            plan,
+            locale,
+            endpoint,
+            current_user_id,
+            proxy_url: self.output.proxy_url.clone(),
+            action_override: action,
+            local_icon: local_icon.map(std::path::Path::to_path_buf),
+        };
+        let image_cache = Arc::clone(&self.image_cache);
+        let resolver = Arc::clone(&self.resolver);
+        let tasks = self.tasks.clone();
+        let completion_tx = self.completion_tx.clone();
+        self.tasks.spawn(async move {
+            let notification = prepare_notification(job, image_cache, resolver, tasks).await;
+            let _ = completion_tx.send(NotificationCompletion::Ready {
+                sequence,
+                notification: Box::new(notification),
+            });
+        });
+    }
+}
+
+/// 把 dispatcher 注册进 `ActivitySinkRegistry` 用的薄壳。
+///
+/// **为什么需要它**：dispatcher 有两个用途——注册成 `ActivitySink` 接 VRChat
+/// 活动，以及被 vrcc 直接调用来投递站外提醒。`ActivitySinkRegistry::add` 收的
+/// 是 `Arc<dyn ActivitySink>`，而 Rust 的孤儿规则不允许给 `Arc<NotificationDispatcher>`
+/// 这种外部泛型实现外部 trait，所以套一层本地类型。
+///
+/// 这个壳**不复制** dispatcher：里面是同一个 `Arc`，所以有序投递的序列号和
+/// 状态只有一份。
+pub struct NotificationSink(Arc<NotificationDispatcher>);
+
+impl NotificationSink {
+    pub(crate) fn new(dispatcher: Arc<NotificationDispatcher>) -> Self {
+        Self(dispatcher)
+    }
+}
+
+impl ActivitySink for NotificationSink {
+    fn emit_overlay_activity_snapshot(&self, snapshot: ActivitySnapshot) {
+        self.0.as_ref().emit_overlay_activity_snapshot(snapshot);
+    }
+
+    fn emit_overlay_activity_delivery(&self, delivery: ActivityDelivery) {
+        self.0.as_ref().emit_overlay_activity_delivery(delivery);
+    }
+}
+
 async fn run_ordered_output(
     mut completion_rx: mpsc::UnboundedReceiver<NotificationCompletion>,
     output: Arc<NotificationOutputContext>,
@@ -216,6 +323,48 @@ async fn run_ordered_output(
         for notification in buffer.push(sequence, notification) {
             dispatch_prepared_notification(&notification, output.as_ref());
         }
+    }
+}
+
+/// 站外提醒的通道计划。
+///
+/// 与 [`decide_notification_plan`] 的根本差别：**不读游戏状态**。
+///
+/// 那套判断是给 VRChat 活动设计的——你人没在游戏里就不必提示谁加入了——
+/// 而站外提醒（星遇同频的私聊、好友请求、星轨相交）不该因为「VRChat 没开着」
+/// 就被丢掉。玩家可能整天不开游戏，仍然是那个社交平台上活跃的一员。
+///
+/// 所以这里只响应「玩家愿不愿意收」，不看「游戏在不在跑」：
+///
+/// - 桌面：投递方说发就发。**不**套 `desktop_toast` 的条件值——它默认是
+///   `Never`（为 VRChat 活动准备的默认值），照读会让站外提醒默认全没，
+///   而那正是要避免的「功能静默消失」。
+/// - 浮层：不要求 `is_steamvr_running`，也不套 `overlay_toast` 的
+///   （默认 `GameRunning`）游戏条件。有没有画布由各 overlay 通道自己判断：
+///   XSOverlay / OVR Toolkit 没在跑时那些调用本来就不显示，不会出错。
+/// - TTS：跟随 `notification_tts`。它默认 `Never`，但这里的含义明确——
+///   不要念出来，尊重它。
+fn external_notice_plan(
+    delivery: &ActivityDelivery,
+    preferences: &NotificationDeliveryPreferences,
+) -> NotificationDeliveryPlan {
+    let xs = delivery.vr && preferences.xs_notifications;
+    let ovrt_hud = cfg!(windows) && delivery.vr && preferences.ovrt_hud_notifications;
+    let ovrt_wrist = cfg!(windows) && delivery.vr && preferences.ovrt_wrist_notifications;
+    let ovrt = ovrt_hud || ovrt_wrist;
+    let tts = delivery.tts
+        && !matches!(
+            preferences.notification_tts,
+            NotificationDeliveryCondition::Never
+        );
+
+    NotificationDeliveryPlan {
+        desktop: delivery.desktop,
+        xs,
+        ovrt,
+        ovrt_hud,
+        ovrt_wrist,
+        tts,
     }
 }
 
@@ -247,12 +396,20 @@ async fn prepare_notification(
     let (desktop_url, overlay_url) =
         notification_image_urls(job.plan, &job.preferences, friend_image, &render.image_url);
     let proxy = job.proxy_url.clone();
-    let desktop_image = match &desktop_url {
-        Some(url) => {
+    // 投递方已经备好本地图（站外提醒走这条）：直接用，不再走 URL 解析。
+    let pre_resolved = job
+        .local_icon
+        .as_ref()
+        .filter(|path| path.is_file())
+        .and_then(|path| path.to_str())
+        .map(str::to_string);
+    let desktop_image = match (&pre_resolved, &desktop_url) {
+        (Some(path), _) => Some(path.clone()),
+        (None, Some(url)) => {
             resolve_local_image_with_budget(&tasks, Arc::clone(&image_cache), url, proxy.as_deref())
                 .await
         }
-        None => None,
+        (None, None) => None,
     };
     let overlay_image = match &overlay_url {
         Some(_) if overlay_url == desktop_url => desktop_image.clone(),
@@ -293,16 +450,19 @@ fn prepare_rendered_notification(
     overlay_image: Option<String>,
 ) -> PreparedNotification {
     let owner_user_id = OwnerId::new(job.current_user_id);
-    let desktop_action = if job.delivery.entry.kind == ActivityKind::GroupInstanceOpened {
-        DesktopNotificationAction::open_group_profile(
-            &owner_user_id,
-            &job.delivery.entry.content.group_id,
-        )
-    } else {
-        DesktopNotificationAction::open_user_profile(
+    let desktop_action = match job.action_override {
+        // 投递方明确指定了落点，就用它的（站外提醒走这条）。
+        Some(action) => Some(action),
+        None if job.delivery.entry.kind == ActivityKind::GroupInstanceOpened => {
+            DesktopNotificationAction::open_group_profile(
+                &owner_user_id,
+                &job.delivery.entry.content.group_id,
+            )
+        }
+        None => DesktopNotificationAction::open_user_profile(
             &owner_user_id,
             &job.delivery.entry.actor_user_id,
-        )
+        ),
     };
     PreparedNotification {
         delivery: job.delivery,

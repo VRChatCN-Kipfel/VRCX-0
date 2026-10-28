@@ -201,7 +201,11 @@ pub struct DesktopRuntimeBundle {
 /// 是因为 `TaskSupervisor` 不对外暴露单个任务的句柄——只能靠任务自己看信号。
 struct VrccPollBinding {
     runtime: Arc<crate::vrcc::DesktopVrccRuntime>,
-    notifier: Arc<dyn crate::notification::DesktopNotifier>,
+    /// 站外提醒走通知分发器，和 VRChat 活动同一条投递链。
+    ///
+    /// 早先这里放的是 `DesktopNotifier`，直接调 `show()`——那等于绕过了
+    /// 免打扰、隐私锁、通道偏好、图标解析和有序投递。现在没有第二条路径。
+    dispatcher: Arc<crate::notification::NotificationDispatcher>,
     event_sink: Arc<dyn vrcx_0_application_core::RuntimeEventSink>,
     supervisor: vrcx_0_application_core::TaskSupervisor,
     /// 起任务时用它读出当前登录账号。
@@ -249,7 +253,7 @@ impl VrccPollBinding {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let outcome = self.runtime.spawn_background_poll(
             &self.supervisor,
-            Arc::clone(&self.notifier),
+            Arc::clone(&self.dispatcher),
             Arc::clone(&self.event_sink),
             owner.clone(),
             Arc::clone(&stop),
@@ -1862,7 +1866,7 @@ impl DesktopRuntimeHostState {
     {
         let binding = Arc::new(VrccPollBinding {
             runtime: Arc::clone(&self.vrcc),
-            notifier: self.desktop.services.notifier_slot(),
+            dispatcher: self.desktop.services.notification_dispatcher(),
             event_sink,
             supervisor: self.runtime.runtime_tasks().clone(),
             auth_scope: self.runtime.desktop_assembly().auth_scope().clone(),

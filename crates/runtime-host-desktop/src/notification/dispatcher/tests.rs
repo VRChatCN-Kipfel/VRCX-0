@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 
-use crate::notification::{NotificationDeliveryPreferences, NotificationTtsNameMode};
+use crate::notification::{
+    NotificationDeliveryCondition, NotificationDeliveryPreferences, NotificationTtsNameMode,
+};
 use serde_json::json;
 use vrcx_0_application_activity::notification::{
     render_delivery, OverlayLocale, RenderedNotification,
@@ -264,6 +266,8 @@ fn image_job(actor_user_id: &str) -> super::NotificationJob {
         current_user_id: "usr_self".into(),
         // 这个用例只验证 VRChat 头像解析，外部图标那条路不参与。
         proxy_url: None,
+        action_override: None,
+        local_icon: None,
     }
 }
 
@@ -365,4 +369,62 @@ async fn local_notifications_look_up_a_missing_world_name() {
         super::resolve_world_name_with_budget(&tasks, resolver, &image_job("usr_traveler")).await,
         None
     );
+}
+
+/// 站外提醒**不看游戏状态**：这是和 VRChat 活动最根本的区别。
+///
+/// 玩家可能整天不开 VRChat，但仍然是那个社交平台上活跃的一员。如果套用
+/// `decide_notification_plan`，桌面通知会读到默认值 `Never`（关），浮层会
+/// 要求 `is_steamvr_running`——站外提醒会默认静默消失。
+#[test]
+fn external_notices_ignore_game_state() {
+    let mut delivery = delivery();
+    delivery.desktop = true;
+    delivery.vr = true;
+    delivery.tts = true;
+    let mut preferences = NotificationDeliveryPreferences::default();
+
+    // 默认偏好下：桌面和浮层都必须发出去。
+    let plan = super::external_notice_plan(&delivery, &preferences);
+    assert!(plan.desktop, "站外提醒的桌面通知不该被默认吞掉");
+    // 浮层通道默认全关（玩家没开 XSOverlay / OVR Toolkit），但 `vr` 本身
+    // 不该被 VRChat 是否运行影响——这里钉住 TTS 和 desktop 已足够说明问题。
+
+    // 打开两个浮层通道后，即使「游戏没开」，也只由通道开关决定。
+    preferences.xs_notifications = true;
+    let plan = super::external_notice_plan(&delivery, &preferences);
+    assert!(
+        plan.xs || !cfg!(any(windows, target_os = "linux")),
+        "XSOverlay 开关打开就该发"
+    );
+
+    // TTS 默认 `Never`，这里的含义明确——不要念出来。
+    assert!(!plan.tts, "notification_tts=Never 时不该念");
+
+    preferences.notification_tts = NotificationDeliveryCondition::Always;
+    let plan = super::external_notice_plan(&delivery, &preferences);
+    assert!(plan.tts, "玩家要求念就该念");
+}
+
+/// 投递对象自己说不发桌面时，站外计划也不该发。
+///
+/// 这条保证 `external_notice_plan` 不会凭空多开通道。
+#[test]
+fn external_plan_respects_the_delivery_itself() {
+    let mut delivery = delivery();
+    delivery.desktop = false;
+    delivery.vr = false;
+    delivery.tts = false;
+    let preferences = NotificationDeliveryPreferences {
+        xs_notifications: true,
+        ovrt_hud_notifications: true,
+        ..NotificationDeliveryPreferences::default()
+    };
+
+    let plan = super::external_notice_plan(&delivery, &preferences);
+    assert!(!plan.desktop);
+    assert!(!plan.xs);
+    assert!(!plan.ovrt);
+    assert!(!plan.tts);
+    assert!(!plan.has_local_transport());
 }
