@@ -586,6 +586,44 @@ fn notice_row(
     })
 }
 
+/// 把这一轮的提醒写进通知中心。
+///
+/// 逐条写、单条失败只记日志：一条写不进去不该让整批作废，更不该影响本轮
+/// 已经发出去的系统通知。返回写成功的条数，只用于日志。
+///
+/// 重复写同一条是无害的：`notification_add_v2` 按 id 冲突合并，而
+/// `seen` 取两边较大的那个，所以不会把玩家已经读过的行又变回未读。
+fn persist_notices(
+    db: &DatabaseService,
+    owner: &vrcx_0_core::OwnerId,
+    items: &[vrcx_0_contracts::vrcc::VrccNotificationItem],
+) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+    let now = vrcx_0_core::time::now_iso();
+    let mut written = 0usize;
+    for item in items {
+        let row = notice_row(item, &now);
+        match vrcx_0_persistence::notifications::notification_add_v2(
+            db,
+            owner.as_str().to_string(),
+            row,
+        ) {
+            Ok(()) => written += 1,
+            Err(error) => {
+                // 只记编号，不记正文：提醒内容属于玩家数据。
+                tracing::warn!(
+                    notice_id = item.id,
+                    %error,
+                    "vrcc: notice could not be written to the notification centre"
+                );
+            }
+        }
+    }
+    written
+}
+
 /// 处理一批刚拉到的新提醒：挑出要弹的、交给通知分发器。
 ///
 /// 这个函数不发请求也不读时钟，是排查「为什么没弹」时最该被测试覆盖的一段。
