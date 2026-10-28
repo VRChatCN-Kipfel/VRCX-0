@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use vrcx_0_contracts::vrcc::{VrccBoardMap, VrccUnread};
+use vrcx_0_contracts::vrcc::{VrccBoardMap, VrccCrossingCards, VrccCrossings, VrccUnread};
 
 /// 内存令牌仓库。
 #[derive(Default)]
@@ -183,6 +183,28 @@ impl VrccRemote for FakeRemote {
         })
     }
     fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Err(VrccError::TokenMissing)
+        })
+    }
+
+    /// 星轨相交列表。假实现只用来验证「未连接时不发请求」与「mark 透传」，
+    /// 不做真实取数。
+    fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings> {
+        let _ = mark;
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Err(VrccError::TokenMissing)
+        })
+    }
+
+    fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards> {
+        let _ = mark;
         Box::pin(async move {
             if let Some(error) = self.take_error() {
                 return Err(error);
@@ -838,4 +860,133 @@ fn only_pre_send_failures_are_retriable() {
         say: None,
         until: None,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// 星轨相交
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn crossings_requires_connection() {
+    // 星轨相交是个人接口：没连接时不能发请求，直接报没令牌。
+    // 与 mutuals / today 共用同一条守卫，但值得单独钉住——它是新加的
+    // 敏感权限接口，漏掉守卫就会拿空令牌发出去，服务器回 401 让玩家
+    // 误以为自己的账号出了问题。
+    let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
+    let error = service.crossings(false).await.unwrap_err();
+    assert!(matches!(error, VrccError::TokenMissing));
+
+    let error = service.crossing_cards(false).await.unwrap_err();
+    assert!(matches!(error, VrccError::TokenMissing));
+}
+
+#[tokio::test]
+async fn crossings_passes_the_mark_flag_through() {
+    // `mark` 决定要不要把星轨相交标成已读、连带清掉网页与手机的红点。
+    // 应用层**不做判断**，只原样透传给端口——但这条链路必须通：如果哪
+    // 一层把 mark 丢成 false，玩家打开页面后红点永远消不掉，而且看不出
+    // 任何报错。这里用一个专门记录 mark 的远程实现来验证透传。
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[derive(Default)]
+    struct MarkRecorder {
+        crossings_mark: AtomicBool,
+        cards_mark: AtomicBool,
+    }
+
+    impl VrccRemote for Arc<MarkRecorder> {
+        fn boards<'a>(&'a self, _limit: u32, _sort: VrccBoardSort) -> VrccFuture<'a, VrccBoard> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn status<'a>(&'a self) -> VrccFuture<'a, VrccStatus> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn fetch_site_asset<'a>(&'a self, _path: &'a str) -> VrccFuture<'a, Vec<u8>> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements> {
+            Box::pin(async move { Ok(VrccAnnouncements::default()) })
+        }
+        fn device_code<'a>(&'a self, _scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn device_token<'a>(&'a self, _code: &'a str) -> VrccFuture<'a, VrccTokenResponse> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn revoke<'a>(&'a self) -> VrccFuture<'a, ()> {
+            Box::pin(async move { Ok(()) })
+        }
+        fn recent_notifications<'a>(&'a self, _mark: bool) -> VrccFuture<'a, VrccRecentNotifications> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn notifications<'a>(&'a self, _since: Option<i64>) -> VrccFuture<'a, VrccNotifications> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn my_map<'a>(&'a self, _world: &'a str) -> VrccFuture<'a, VrccMyMap> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn unread<'a>(&'a self) -> VrccFuture<'a, VrccUnread> {
+            Box::pin(async move { Ok(VrccUnread::default()) })
+        }
+        fn notes<'a>(&'a self) -> VrccFuture<'a, VrccNotes> {
+            Box::pin(async move { Ok(VrccNotes::default()) })
+        }
+        fn today<'a>(&'a self) -> VrccFuture<'a, VrccToday> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals> {
+            Box::pin(async move { Err(VrccError::TokenMissing) })
+        }
+        fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings> {
+            self.crossings_mark.store(mark, Ordering::SeqCst);
+            Box::pin(async move { Ok(VrccCrossings::default()) })
+        }
+        fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards> {
+            self.cards_mark.store(mark, Ordering::SeqCst);
+            Box::pin(async move { Ok(VrccCrossingCards::default()) })
+        }
+        fn connect(
+            &self,
+            _token: String,
+            _star: Option<i64>,
+            _vrc_name: Option<String>,
+            _scope: Option<String>,
+        ) {}
+        fn disconnect(&self) {}
+        fn expire(&self) {}
+        fn connection(&self) -> VrccConnection {
+            VrccConnection {
+                connected: true,
+                ..VrccConnection::default()
+            }
+        }
+        fn client_id(&self) -> String {
+            "dev-test".to_string()
+        }
+        fn local_usage(&self) -> VrccLocalUsage {
+            VrccLocalUsage::default()
+        }
+        fn note_poll(&self, _at_ms: i64, _cursor: Option<i64>, _every_secs: Option<i64>) {}
+        fn window_limit(&self) -> i64 {
+            120
+        }
+        fn device_code_limit(&self) -> i64 {
+            30
+        }
+    }
+
+    let recorder = Arc::new(MarkRecorder::default());
+    let service = VrccService::new(Arc::new(MemoryStore::default()), recorder.clone());
+
+    service.crossings(true).await.expect("mark=true 应该成功");
+    assert!(
+        recorder.crossings_mark.load(Ordering::SeqCst),
+        "mark 必须透传成 true，否则玩家打开页面后红点消不掉"
+    );
+
+    service.crossings(false).await.expect("mark=false 应该成功");
+    assert!(!recorder.crossings_mark.load(Ordering::SeqCst));
+
+    service.crossing_cards(true).await.expect("cards 应成功");
+    assert!(recorder.cards_mark.load(Ordering::SeqCst));
 }

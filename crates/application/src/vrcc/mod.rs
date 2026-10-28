@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
+    VrccCrossingCards, VrccCrossings,
     device_auth_scope, is_dev_client, VrccAnnouncements, VrccBoard, VrccBoardSort,
     VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals, VrccMyMap, VrccNotes,
     VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
@@ -101,6 +102,10 @@ pub trait VrccRemote: Send + Sync {
     fn notes<'a>(&'a self) -> VrccFuture<'a, VrccNotes>;
     fn today<'a>(&'a self) -> VrccFuture<'a, VrccToday>;
     fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals>;
+    /// 星轨相交列表。`mark` 只在玩家真正打开该页时为 true。
+    fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings>;
+    /// 星轨相交的完整星卡（1.13.0 起）。算第二份读的额度。
+    fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards>;
 
     // -- 本地状态（不联网） -------------------------------------------------
     /// 把令牌交给实现方持有。之后所有个人请求自动带上它。
@@ -825,6 +830,44 @@ impl VrccService {
         self.ensure_connected()?;
         self.remote
             .mutuals()
+            .await
+            .map_err(|error| self.settle(error))
+    }
+
+    /// 星轨相交：在同房间偶遇过的玩家列表（需要 `crossings` 敏感权限）。
+    ///
+    /// `mark` 只在玩家真正打开「星轨相交」页时为 true —— 它会把已读同步到
+    /// 账号，网页和手机上的红点跟着消。后台只为算未读数时**必须**传 false，
+    /// 否则等于替玩家把提醒标成看过了。
+    ///
+    /// 与 `mutuals` 的区别：互相连上是**双向已连线**的星友，星轨相交只是
+    /// **同房间擦肩**，大多数还没连线。所以界面要按 `linked` / `mutual`
+    /// 两个状态区分展示与可执行动作。
+    ///
+    /// 返回里的 `why` 必须由调用方处理：`hide` 时**不应显示**该模块
+    /// （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
+    pub async fn crossings(
+        &self,
+        mark: bool,
+    ) -> std::result::Result<VrccCrossings, VrccError> {
+        self.ensure_connected()?;
+        self.remote
+            .crossings(mark)
+            .await
+            .map_err(|error| self.settle(error))
+    }
+
+    /// 星轨相交的完整星卡（`/me/crossings/cards`，1.13.0 起）。
+    ///
+    /// 比列表重，且算**第二份读**的额度（与 `/me/today`、`/me/notes` 分开计），
+    /// 所以只应在玩家打开星轨相交页时按需拉取，不要进后台轮询。
+    pub async fn crossing_cards(
+        &self,
+        mark: bool,
+    ) -> std::result::Result<VrccCrossingCards, VrccError> {
+        self.ensure_connected()?;
+        self.remote
+            .crossing_cards(mark)
             .await
             .map_err(|error| self.settle(error))
     }
