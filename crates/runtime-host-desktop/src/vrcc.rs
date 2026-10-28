@@ -295,11 +295,13 @@ impl DesktopVrccRuntime {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> vrcx_0_application_core::TaskSpawnOutcome {
         let service = Arc::clone(&self.service);
+        let db = Arc::clone(&self.db);
         let base = Self::BACKGROUND_POLL_BASE;
         let jitter = Self::BACKGROUND_POLL_JITTER;
 
         supervisor.spawn_cancellable(move |stop_token| {
             let service = Arc::clone(&service);
+            let db = Arc::clone(&db);
             let dispatcher = Arc::clone(&dispatcher);
             let event_sink = Arc::clone(&event_sink);
             let owner = owner.clone();
@@ -347,6 +349,7 @@ impl DesktopVrccRuntime {
                         match poll_once(
                             &service,
                             dispatcher.as_ref(),
+                            &db,
                             &notified,
                             &mut notice_icon,
                             &owner,
@@ -359,6 +362,7 @@ impl DesktopVrccRuntime {
                                 tracing::debug!(
                                     round,
                                     fresh = outcome.fresh,
+                                    persisted = outcome.persisted,
                                     unread = ?outcome.unread,
                                     toast_attempted = outcome.toast_attempted,
                                     changed = outcome.changed,
@@ -418,6 +422,8 @@ struct PollOutcome {
     toast_attempted: usize,
     /// `me/unread` 的合计；服务器还没有这个接口时为 `None`。
     unread: Option<i64>,
+    /// 写进通知中心的条数。和 `fresh` 不同：这里包含超出弹窗上限的那几条。
+    persisted: usize,
     /// 是否需要让前端刷新。
     changed: bool,
 }
@@ -452,6 +458,7 @@ impl PollOutcome {
 async fn poll_once(
     service: &VrccService,
     dispatcher: &crate::notification::NotificationDispatcher,
+    db: &DatabaseService,
     notified: &NotifiedIds,
     icon: &mut NoticeIcon,
     owner: &vrcx_0_core::OwnerId,
@@ -464,6 +471,17 @@ async fn poll_once(
         Err(error) => return Err(error),
     };
 
+    // 落库要放在选通知之前：系统通知每轮最多弹 `MAX_NOTIFIED_PER_POLL` 条，
+    // 但**这一轮拉到的每一条**都该进通知中心，否则超出的那几条就凭空消失了
+    // ——游标已经过去，下一轮不会再给。
+    let persisted = persist_notices(db, owner, &fresh);
+    if persisted > 0 {
+        tracing::debug!(
+            persisted,
+            "vrcc: notices written to the notification centre"
+        );
+    }
+
     // 只有真有新提醒时才去解析图标：没新提醒就不该产生任何额外流量。
     let icon_path = if fresh.is_empty() {
         None
@@ -475,6 +493,7 @@ async fn poll_once(
     // 于是「拿到什么样的数据 → 弹哪些通知」可以脱离服务端直接测。
     let mut outcome =
         handle_recent_notices(&fresh, dispatcher, notified, icon_path, Some(owner.clone()));
+    outcome.persisted = persisted;
 
     match service.refresh_unread().await {
         Ok(Some((counts, changed))) => {
@@ -707,6 +726,7 @@ fn handle_recent_notices(
         fresh: items.len(),
         toast_attempted,
         unread: None,
+        persisted: 0,
         changed: !items.is_empty(),
     }
 }
@@ -1149,6 +1169,7 @@ mod tests {
             toast_attempted: 1,
             unread: Some(3),
             changed: true,
+            ..PollOutcome::default()
         };
         assert_eq!(outcome.event_to_emit(), Some(VRCC_NOTICES_CHANGED_EVENT));
     }
