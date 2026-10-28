@@ -201,14 +201,47 @@ impl DesktopVrccRuntime {
     }
 
     /// 最近的提醒。`mark` 为 `true` 时同时把已读状态同步到账号（跨设备）。
+    ///
+    /// 拿到结果后顺手让通知中心里那几行跟上服务端的已读游标，见
+    /// [`Self::settle_notice_rows`]。
     pub async fn recent_notifications(
         &self,
         mark: bool,
     ) -> Result<VrccRecentNotifications, VrccFailure> {
-        self.service
+        let recent = self
+            .service
             .recent_notifications(mark)
             .await
-            .map_err(|error| VrccFailure::from_error(&error))
+            .map_err(|error| VrccFailure::from_error(&error))?;
+        self.settle_notice_rows(mark, recent.read);
+        Ok(recent)
+    }
+
+    /// 让通知中心里那几行跟上服务端的已读游标。
+    ///
+    /// 服务端的 `read` 是唯一的已读权威：`id > read` 才算未读。玩家打开
+    /// 「提醒」页时前端传 `mark=true`，服务器把 `read` 推到最新；本地那些行
+    /// 到这里就该跟着变已读，否则角标只增不减。
+    ///
+    /// `read` 缺失（账号上还没记过已读）时只在 `viewed` 为真这一种情况下
+    /// 全部标已读——那表示玩家确实看过了整张列表，而不是「不知道」。
+    fn settle_notice_rows(&self, viewed: bool, read: Option<i64>) {
+        let Some(owner) = (self.owner)() else {
+            return;
+        };
+        let cutoff = match read {
+            Some(read) => read,
+            None if viewed => i64::MAX,
+            None => return,
+        };
+        if let Err(error) = vrcx_0_persistence::notifications::notification_mark_seen_up_to(
+            &self.db,
+            owner.as_str().to_string(),
+            Self::NOTICE_ROW_ID_PREFIX,
+            cutoff,
+        ) {
+            tracing::warn!(%error, "vrcc: could not settle notification-centre rows");
+        }
     }
 
     pub async fn poll_notifications(
