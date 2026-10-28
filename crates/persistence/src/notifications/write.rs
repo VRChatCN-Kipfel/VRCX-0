@@ -336,6 +336,47 @@ fn notification_v1_mark_seen(
     Ok(())
 }
 
+/// 把某个 id 前缀下、编号不超过 `read` 的行标为已读（只认 v2 表）。
+///
+/// `id` 的形态是 `<prefix><数字>`（例如 `vrcc_42`）。比较用
+/// `CAST(substr(...) AS INTEGER)` 而不是字符串序：`vrcc_9` 在字符串序里
+/// 大于 `vrcc_10`，按数字比才是调用方要的「不超过」。
+///
+/// 调用方给出 `read`（外部系统的已读游标）时，本地就能跟着收敛，
+/// 不必逐条判断要标哪些。
+pub fn notification_mark_seen_up_to(
+    db: &DatabaseService,
+    user_id: String,
+    id_prefix: &str,
+    read: i64,
+) -> Result<(), Error> {
+    let user_id = normalize_text(user_id);
+    let id_prefix = normalize_text(id_prefix);
+    if user_id.is_empty() || id_prefix.is_empty() {
+        return Ok(());
+    }
+    let user_prefix = normalize_user_table_prefix(&user_id)?;
+    ensure_realtime_tables(db, &user_prefix)?;
+    let table = format!("{user_prefix}_notifications_v2");
+    // `prefix_len` 在 SQL 里出现两次（取前缀、取后缀），所以从长度算偏移，
+    // 不在语句里写死前缀的字符数。
+    let sql = format!(
+        "UPDATE {table} SET seen = 1 \
+         WHERE seen = 0 \
+           AND substr(id, 1, @prefix_len) = @prefix \
+           AND CAST(substr(id, @prefix_len + 1) AS INTEGER) <= @read"
+    );
+    db.execute_non_query(
+        &sql,
+        &ParamsBuilder::new()
+            .set("prefix_len", id_prefix.chars().count() as i64)
+            .set("prefix", id_prefix)
+            .set("read", read)
+            .build(),
+    )?;
+    Ok(())
+}
+
 pub fn notification_update_expired(
     db: &DatabaseService,
     user_id: String,
