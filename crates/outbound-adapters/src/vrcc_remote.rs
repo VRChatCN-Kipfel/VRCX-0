@@ -12,6 +12,7 @@
 
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
+    VrccCrossingCards, VrccCrossings,
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMutuals, VrccMyMap, VrccNotes,
     VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
     VrccUnread,
@@ -98,6 +99,16 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals> {
         Box::pin(async move { self.client().mutuals().await })
+    }
+
+    /// 星轨相交列表。`mark` 原样透传：要不要标已读是应用层的决定
+    /// （只有玩家真的打开该页才标），这一层不做判断。
+    fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings> {
+        Box::pin(async move { self.client().crossings(mark).await })
+    }
+
+    fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards> {
+        Box::pin(async move { self.client().crossing_cards(mark).await })
     }
 
     fn connect(
