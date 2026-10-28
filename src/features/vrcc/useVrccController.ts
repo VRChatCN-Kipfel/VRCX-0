@@ -682,7 +682,7 @@ export function useVrccController() {
         startDeviceAuthCooldown();
         patch({ deviceAuthBusy: true, deviceAuthMessage: null, error: null });
         try {
-            const prompt = await vrccApi.beginDeviceAuth(null);
+            const prompt = await vrccApi.beginDeviceAuth();
             patch({ deviceAuth: prompt, deviceAuthBusy: false });
 
             // 先把授权码放进剪贴板：玩家的下一步要么在网页上粘贴，

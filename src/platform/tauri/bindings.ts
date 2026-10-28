@@ -356,7 +356,7 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_announcements');
     },
     /**
-     * 第一步：申请连接码。`scope` 传 `null` 表示用官方默认。
+     * 第一步：申请连接码。`scope` 传 `null` 时按当前 `X-Client` 选权限。
      */
     async appVrccDeviceAuthBegin(
         scope: string | null

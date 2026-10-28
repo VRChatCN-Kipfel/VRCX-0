@@ -803,7 +803,7 @@
         "service_down": "Service unavailable",
         "go_connect": "Connect",
         "reconnect_hint": "Reconnect from the \"Me\" tab",
-        "missing_scope": "This needs the {scope} permission; tick it when you reconnect",
+        "missing_scope": "This needs the {scope} permission; reconnect once to get it",
         "tab": {
             "maps": "Map board",
             "notifications": "Notifications",
@@ -878,7 +878,7 @@
         "mutuals": {
             "need_connect": "Connect to Xingyu Tongpin to see who you are mutually linked with",
             "empty": "No mutual links yet",
-            "needs_scope": "Mutual links need the mutuals permission; tick it when you reconnect.",
+            "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
             "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",

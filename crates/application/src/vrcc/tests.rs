@@ -52,6 +52,8 @@ struct FakeRemote {
     unread: Mutex<Option<VrccUnread>>,
     /// 记录 `note_poll` 收到的参数。
     notes_polled: Mutex<Vec<(Option<i64>, Option<i64>)>>,
+    /// 记录 `device_code` 收到的 `scope`。
+    device_code_scopes: Mutex<Vec<Option<String>>>,
 }
 
 impl FakeRemote {
@@ -106,7 +108,11 @@ impl VrccRemote for FakeRemote {
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements> {
         Box::pin(async move { Err(VrccError::Transport("fake".into())) })
     }
-    fn device_code<'a>(&'a self, _scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {
+    fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {
+        self.device_code_scopes
+            .lock()
+            .unwrap()
+            .push(scope.map(str::to_string));
         Box::pin(async move { Err(VrccError::Transport("fake".into())) })
     }
     fn device_token<'a>(&'a self, _code: &'a str) -> VrccFuture<'a, VrccTokenResponse> {
@@ -569,6 +575,42 @@ async fn connected_guard_blocks_personal_calls_when_disconnected() {
     // 未连接时不应发请求，直接报没令牌。
     let error = service.recent_notifications(false).await.unwrap_err();
     assert!(matches!(error, VrccError::TokenMissing));
+}
+
+/// 不传 `scope` 时要按标识显式地要：交给服务器默认的话，自助登记的
+/// `app_…` 只有 `profile`，提醒和「连上」全是 `403 scope`。
+#[tokio::test]
+async fn device_auth_asks_for_the_scope_that_fits_the_client() {
+    let cases = [
+        ("dev-test", "profile notifications maps"),
+        ("app_0123456789abcdef", "profile notifications maps mutuals"),
+    ];
+    for (client, expected) in cases {
+        let remote = FakeRemote::new();
+        remote.connection.lock().unwrap().client = client.to_string();
+        let service = VrccService::new(Arc::new(MemoryStore::default()), remote.clone());
+
+        let _ = service.begin_device_auth(None).await;
+        let _ = service.begin_device_auth(Some("  ")).await;
+
+        let asked = remote.device_code_scopes.lock().unwrap().clone();
+        assert_eq!(
+            asked,
+            vec![Some(expected.to_string()), Some(expected.to_string())],
+            "{client}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn device_auth_keeps_an_explicit_scope() {
+    let remote = FakeRemote::new();
+    let service = VrccService::new(Arc::new(MemoryStore::default()), remote.clone());
+
+    let _ = service.begin_device_auth(Some("profile card")).await;
+
+    let asked = remote.device_code_scopes.lock().unwrap().clone();
+    assert_eq!(asked, vec![Some("profile card".to_string())]);
 }
 
 #[tokio::test]

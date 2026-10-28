@@ -798,7 +798,7 @@
         "service_down": "服務無法使用",
         "go_connect": "去連線",
         "reconnect_hint": "去「我的」重新連線",
-        "missing_scope": "這一項需要 {scope} 權限，重新連線時勾選",
+        "missing_scope": "這一項需要 {scope} 權限，重新連線一次即可",
         "tab": {
             "maps": "地圖榜",
             "notifications": "提醒",
@@ -873,7 +873,7 @@
         "mutuals": {
             "need_connect": "連線星遇同頻後，這裡會顯示互相連上的星友",
             "empty": "還沒有互相連上的星友",
-            "needs_scope": "「互相連上」需要 mutuals 權限，重新連線時勾選。",
+            "needs_scope": "「互相連上」需要 mutuals 權限，重新連線一次即可（開發版標識拿不到這項）。",
             "unnamed": "未命名",
             "open_profile": "在 VRChat 玩家詳情裡開啟",
             "unavailable": "這一項需要額外權限，當前客戶端還沒開通",

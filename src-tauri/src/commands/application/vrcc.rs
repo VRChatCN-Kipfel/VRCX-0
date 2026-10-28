@@ -140,7 +140,7 @@ pub async fn app__vrcc_status(state: State<'_, AppState>) -> Result<VrccStatus, 
 
 // -- 设备授权 ---------------------------------------------------------------
 
-/// 第一步：申请连接码。`scope` 传 `null` 表示用官方默认。
+/// 第一步：申请连接码。`scope` 传 `null` 时按当前 `X-Client` 选权限。
 #[tauri::command]
 #[specta::specta]
 pub async fn app__vrcc_device_auth_begin(

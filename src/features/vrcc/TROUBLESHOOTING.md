@@ -149,6 +149,11 @@ vrcc: token gone, background poll idle until reconnect
 `dev-` 标识只能要普通权限。`mutuals`、`today`、`crossings` 等敏感权限需要
 应用登记并通过审核后，换成 `app_…` 标识才能用。**这是预期行为，不是缺陷。**
 
+用 `app_…` 标识、「我的」里权限只有 `profile`：这是旧版本连上的令牌。旧版本
+申请连接码时没带 `scope`，服务器对自助登记的应用默认只给 `profile`。更新后在
+「我的」里重新连接一次就好。同意页没有勾选框，玩家只能全部同意或取消，所以要哪些
+权限只取决于客户端发的 `scope`（见 `device_auth_scope`）。
+
 ### 症状：`接口暂时不可用` / `error sending request`
 
 网络层。检查：

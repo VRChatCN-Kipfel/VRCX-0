@@ -1102,6 +1102,43 @@ mod tests {
         assert!(!is_dev_client(""));
     }
 
+    /// 不写 `scope` 时自助登记的 `app_…` 只有 `profile`，所以两种标识都要
+    /// 显式地要；`dev-` 要了敏感权限会连码都拿不到。
+    #[test]
+    fn device_auth_scope_depends_on_the_client_kind() {
+        use vrcx_0_contracts::vrcc::{
+            device_auth_scope, VRCC_DEVICE_AUTH_SCOPE, VRCC_DEV_DEVICE_AUTH_SCOPE,
+        };
+        assert_eq!(
+            device_auth_scope(VRCC_DEV_CLIENT),
+            VRCC_DEV_DEVICE_AUTH_SCOPE
+        );
+        assert_eq!(
+            device_auth_scope("app_0123456789abcdef"),
+            VRCC_DEVICE_AUTH_SCOPE
+        );
+        assert!(!VRCC_DEV_DEVICE_AUTH_SCOPE.contains("mutuals"));
+        for scope in [VRCC_DEVICE_AUTH_SCOPE, VRCC_DEV_DEVICE_AUTH_SCOPE] {
+            assert!(scope.starts_with("profile notifications maps"));
+        }
+    }
+
+    #[test]
+    fn scope_grants_reads_the_token_scope() {
+        use vrcx_0_contracts::vrcc::scope_grants;
+        assert!(!scope_grants(Some("profile"), "notifications"));
+        assert!(scope_grants(
+            Some("profile notifications maps"),
+            "notifications"
+        ));
+        assert!(scope_grants(Some("profile,notifications"), "notifications"));
+        assert!(scope_grants(Some("profile+notifications"), "notifications"));
+        // 只认整项，不认前缀：`maps.rate` 不等于 `maps`。
+        assert!(!scope_grants(Some("profile maps.rate"), "maps"));
+        // 旧存档没记权限：交给服务器判断。
+        assert!(scope_grants(None, "notifications"));
+    }
+
     /// 开发态常量本身必须符合官方的 `dev-` 前缀要求——
     /// 否则每个请求都会吃 `403 client_unknown`。
     #[test]

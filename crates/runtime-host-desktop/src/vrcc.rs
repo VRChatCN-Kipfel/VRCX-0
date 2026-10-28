@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
+    scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
     VrccRecentNotifications, VrccStatus, VrccToday, VrccUnread, VrccUsageSnapshot,
     VrccWristSummary,
 };
@@ -303,7 +303,17 @@ impl DesktopVrccRuntime {
                     round = round.wrapping_add(1);
                     // 未连接时不必轮询：个人接口会直接报错。
                     // owner 由任务自身固定持有（见 spawn 的注释），不必再判空。
-                    if service.snapshot().connected {
+                    let snapshot = service.snapshot();
+                    if snapshot.connected
+                        && !scope_grants(snapshot.scope.as_deref(), "notifications")
+                    {
+                        // 令牌没有提醒权限（旧版本连上的只有 `profile`）：每轮都只会
+                        // 换来 `403 scope`。玩家重新连接、拿到新令牌后自动恢复。
+                        tracing::debug!(
+                            round,
+                            "vrcc: background poll skipped (token lacks notifications)"
+                        );
+                    } else if snapshot.connected {
                         match poll_once(
                             &service,
                             dispatcher.as_ref(),

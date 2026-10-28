@@ -230,9 +230,36 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 /// - 开 Issue 登记的客户端又会默认带上本功能用不到的 `crossings` 和
 ///   `maps.rate`，违反官方《使用要求》第 10 条「只申请用得到的权限」。
 ///
-/// 这里只列当前界面真正用到的两项。`mutuals`（互相连上）是敏感权限，
-/// 需要单独审核，拿到正式 `app_` 标识后再加。
-pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps";
+/// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）。
+/// `mutuals` 是敏感权限，只有正式标识能要，`dev-` 用
+/// [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用 [`device_auth_scope`] 选。
+pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals";
+
+/// `dev-` 标识申请的权限：只能要普通权限，要了敏感的 `device/code`
+/// 会直接回答 `403 scope_unreviewed`，连码都拿不到。
+pub const VRCC_DEV_DEVICE_AUTH_SCOPE: &str = "profile notifications maps";
+
+/// 按当前 `X-Client` 选设备授权要的权限。
+pub fn device_auth_scope(client_id: &str) -> &'static str {
+    if is_dev_client(client_id) {
+        VRCC_DEV_DEVICE_AUTH_SCOPE
+    } else {
+        VRCC_DEVICE_AUTH_SCOPE
+    }
+}
+
+/// 令牌的权限串里有没有 `needed`。
+///
+/// 不知道权限（旧存档没记）时当作有，交给服务器判断。官方用空格分开，
+/// 也认逗号和 `+`。
+pub fn scope_grants(scope: Option<&str>, needed: &str) -> bool {
+    match scope {
+        None => true,
+        Some(scope) => scope
+            .split(|c: char| c.is_whitespace() || c == ',' || c == '+')
+            .any(|item| item == needed),
+    }
+}
 
 /// 实际要发的 `X-Client`。
 ///

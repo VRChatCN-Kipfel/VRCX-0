@@ -1,15 +1,6 @@
 import { commands } from '@/platform/tauri/bindings';
 
 /**
- * 申请设备授权时显式请求的权限集合。
- *
- * 与 Rust 侧 `VRCC_DEVICE_AUTH_SCOPE` 保持一致：只列界面真正用到的
- * `profile` / `notifications` / `maps`。`mutuals`（互相连上）是敏感权限，
- * 需要单独审核，拿到正式 `app_` 标识后再加。
- */
-const DEVICE_AUTH_SCOPE = 'profile notifications maps';
-
-/**
  * 星遇同频（vrcc.cc）前端数据层。
  *
  * 所有调用都走生成的绑定，不手写命令名。这一层只做两件事：
@@ -112,15 +103,14 @@ export const vrccApi = {
     /** 公告和停站。不需要连接。服务器还没有这个接口时为 null。 */
     announcements: () => call(() => commands.appVrccAnnouncements()),
 
-    /** 第一步设备授权：拿码。`scope` 传 null 用官方默认。 */
     /**
-     * 开始设备授权。
+     * 第一步设备授权：拿码。
      *
-     * **必须显式带 `scope`**：不写的话拿到哪些权限完全取决于客户端怎么登记
-     * （自助登记只有 `profile`，开会话登记的又会带上用不到的敏感权限）。
-     * 这里只要当前界面真正用到的两项；`mutuals` 等敏感权限拿到正式标识后再加。
+     * 要哪些权限由 Rust 侧按当前 `X-Client` 决定（`device_auth_scope`）：
+     * `dev-` 只能要普通权限，正式标识再加上「连上」用的 `mutuals`。
+     * 前端不再自己写一份，`scope` 只在确实要别的权限时才传。
      */
-    beginDeviceAuth: (scope: string | null = DEVICE_AUTH_SCOPE) =>
+    beginDeviceAuth: (scope: string | null = null) =>
         call(() => commands.appVrccDeviceAuthBegin(scope)),
 
     /** 第二步：问一次令牌。返回 pending / connected / terminal。 */

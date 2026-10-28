@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
-    is_dev_client, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot,
-    VrccDeviceCode, VrccError, VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications,
-    VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse, VrccUnread,
-    VrccUsageSnapshot, VrccWristSummary,
+    device_auth_scope, is_dev_client, VrccAnnouncements, VrccBoard, VrccBoardSort,
+    VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals, VrccMyMap, VrccNotes,
+    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
+    VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -579,13 +579,19 @@ impl VrccService {
 
     /// 第一步：申请连接码。
     ///
-    /// `scope` 传 `None` 表示用官方默认（`dev-` 是
-    /// `profile notifications maps`）。
+    /// `scope` 传 `None` 时按当前标识选（见 [`device_auth_scope`]）。
+    /// 不能交给服务器默认：自助登记的 `app_…` 不写只有 `profile`，
+    /// 提醒、所在地图、「连上」全都会 `403 scope`。
     pub async fn begin_device_auth(
         &self,
         scope: Option<&str>,
     ) -> std::result::Result<VrccDeviceAuthPrompt, VrccError> {
-        let code = self.remote.device_code(scope).await?;
+        let client_id = self.remote.client_id();
+        let scope = scope
+            .map(str::trim)
+            .filter(|scope| !scope.is_empty())
+            .unwrap_or_else(|| device_auth_scope(&client_id));
+        let code = self.remote.device_code(Some(scope)).await?;
         Ok(VrccDeviceAuthPrompt {
             user_code: code.user_code,
             verification_uri: code.verification_uri,

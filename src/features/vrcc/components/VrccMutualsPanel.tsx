@@ -55,7 +55,7 @@ export function VrccMutualsPanel({
                 </div>
                 {/* 只有真的因为缺权限失败时才提示去开权限。
                     已经有 `mutuals` 权限、只是确实没连上人的玩家，
-                    看到「重新连接时勾上」只会困惑。 */}
+                    看到「重新连接一次」只会困惑。 */}
                 {mutualsError && (
                     <div className="text-[11px] leading-relaxed">
                         {t('vrcc.mutuals.needs_scope')}
