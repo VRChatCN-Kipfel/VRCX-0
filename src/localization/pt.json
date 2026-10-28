@@ -800,7 +800,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Cruzar"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -889,6 +890,31 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Conecte sua conta estelar para ver com quem você se cruzou.",
+            "unavailable": "Os cruzamentos não estão disponíveis para esta conta.",
+            "needs_scope": "Esta função precisa da permissão crossings. Reconecte e conceda-a.",
+            "empty": "Ainda não há cruzamentos. Pessoas encontradas no mesmo mundo do VRChat aparecerão aqui.",
+            "count": "{{count}} cruzamentos",
+            "quota": "Restam {{left}} de {{max}} hoje",
+            "refresh": "Atualizar",
+            "unnamed": "Estrela sem nome",
+            "fresh": "Novo",
+            "linked": "Você a conectou",
+            "mutual": "Conectados nos dois sentidos",
+            "not_linked": "Ainda não conectado",
+            "open_profile": "Abrir perfil do jogador",
+            "open_page": "Ver no vrcc.cc",
+            "why": {
+                "verify": "Verifique sua conta do VRChat para usar os cruzamentos.",
+                "wait": "Sua conta do VRChat está aguardando verificação.",
+                "queued": "Um pedido de amizade do assistente VRCC está na fila.",
+                "sent": "Um pedido de amizade do assistente VRCC foi enviado. Aceite no VRChat.",
+                "gone": "Você removeu o assistente VRCC dos seus amigos do VRChat.",
+                "friend": "Adicione o assistente VRCC como amigo no VRChat para usar os cruzamentos.",
+                "unknown": "Os cruzamentos estão temporariamente indisponíveis."
+            }
         }
     },
     "nav_menu": {

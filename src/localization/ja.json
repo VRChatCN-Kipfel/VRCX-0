@@ -799,7 +799,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "星軌交差"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -888,6 +889,31 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "星遇同頻アカウントに接続すると、すれ違った人が見られます。",
+            "unavailable": "このアカウントでは星軌交差を利用できません。",
+            "needs_scope": "この機能には crossings 権限が必要です。再接続時に許可してください。",
+            "empty": "まだすれ違いの記録はありません。同じ VRChat ワールドで出会った人がここに表示されます。",
+            "count": "{{count}} 件のすれ違い",
+            "quota": "今日はあと {{left}} / {{max}} 件",
+            "refresh": "更新",
+            "unnamed": "名前のない星",
+            "fresh": "新着",
+            "linked": "あなたがつながりました",
+            "mutual": "双方向でつながっています",
+            "not_linked": "まだつながっていません",
+            "open_profile": "プレイヤー詳細を開く",
+            "open_page": "vrcc.cc で見る",
+            "why": {
+                "verify": "星軌交差を使うには VRChat アカウントの認証が必要です。",
+                "wait": "VRChat アカウントは認証待ちです。",
+                "queued": "ボット「VRCC の小助手」のフレンド申請が待機中です。",
+                "sent": "ボット「VRCC の小助手」のフレンド申請を送信しました。VRChat で承認してください。",
+                "gone": "VRChat でボットのフレンドを削除しました。",
+                "friend": "星軌交差を使うには、ボット「VRCC の小助手」を VRChat のフレンドに追加してください。",
+                "unknown": "星軌交差は一時的に利用できません。"
+            }
         }
     },
     "nav_menu": {

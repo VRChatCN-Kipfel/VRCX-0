@@ -626,7 +626,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Croisements"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -715,6 +716,31 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Connectez votre compte étoile pour voir qui vous avez croisé.",
+            "unavailable": "Les croisements ne sont pas disponibles pour ce compte.",
+            "needs_scope": "Cette fonction nécessite l'autorisation crossings. Reconnectez-vous et accordez-la.",
+            "empty": "Aucun croisement pour l'instant. Les personnes rencontrées dans le même monde VRChat apparaîtront ici.",
+            "count": "{{count}} croisements",
+            "quota": "{{left}} sur {{max}} restants aujourd'hui",
+            "refresh": "Actualiser",
+            "unnamed": "Étoile sans nom",
+            "fresh": "Nouveau",
+            "linked": "Vous êtes lié",
+            "mutual": "Connectés dans les deux sens",
+            "not_linked": "Pas encore connecté",
+            "open_profile": "Ouvrir le profil du joueur",
+            "open_page": "Voir sur vrcc.cc",
+            "why": {
+                "verify": "Vérifiez votre compte VRChat pour utiliser les croisements.",
+                "wait": "Votre compte VRChat attend une vérification.",
+                "queued": "Une demande d'ami de l'assistant VRCC est en attente.",
+                "sent": "Une demande d'ami de l'assistant VRCC a été envoyée. Acceptez-la dans VRChat.",
+                "gone": "Vous avez supprimé l'assistant VRCC de vos amis VRChat.",
+                "friend": "Ajoutez l'assistant VRCC comme ami VRChat pour utiliser les croisements.",
+                "unknown": "Les croisements sont temporairement indisponibles."
+            }
         }
     },
     "nav_menu": {

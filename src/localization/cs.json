@@ -808,7 +808,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Křížení"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -897,6 +898,31 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Připojte svůj hvězdný účet, abyste viděli, s kým jste se míjeli.",
+            "unavailable": "Křížení nejsou pro tento účet dostupná.",
+            "needs_scope": "Tato funkce vyžaduje oprávnění crossings. Připojte se znovu a povolte ho.",
+            "empty": "Zatím žádná křížení. Lidé potkaní ve stejném světě VRChat se objeví zde.",
+            "count": "Křížení: {{count}}",
+            "quota": "Dnes zbývá {{left}} z {{max}}",
+            "refresh": "Obnovit",
+            "unnamed": "Nepojmenovaná hvězda",
+            "fresh": "Nové",
+            "linked": "Už jste se propojili",
+            "mutual": "Propojeno obousměrně",
+            "not_linked": "Zatím nepřipojeno",
+            "open_profile": "Otevřít profil hráče",
+            "open_page": "Zobrazit na vrcc.cc",
+            "why": {
+                "verify": "Ověřte svůj účet VRChat, abyste mohli používat křížení.",
+                "wait": "Váš účet VRChat čeká na ověření.",
+                "queued": "Žádost o přátelství od asistenta VRCC je ve frontě.",
+                "sent": "Žádost o přátelství od asistenta VRCC byla odeslána. Přijměte ji ve VRChatu.",
+                "gone": "Odstranili jste asistenta VRCC z přátel ve VRChatu.",
+                "friend": "Přidejte asistenta VRCC jako přítele ve VRChatu, abyste mohli používat křížení.",
+                "unknown": "Křížení jsou dočasně nedostupná."
+            }
         }
     },
     "nav_menu": {

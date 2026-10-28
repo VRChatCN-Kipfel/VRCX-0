@@ -808,7 +808,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Пересечения"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -897,6 +898,31 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Подключите звёздный аккаунт, чтобы видеть, с кем вы пересекались.",
+            "unavailable": "Пересечения недоступны для этого аккаунта.",
+            "needs_scope": "Для этой функции нужно разрешение crossings. Переподключитесь и разрешите его.",
+            "empty": "Пересечений пока нет. Люди, встреченные в одном мире VRChat, появятся здесь.",
+            "count": "Пересечений: {{count}}",
+            "quota": "Сегодня осталось {{left}} из {{max}}",
+            "refresh": "Обновить",
+            "unnamed": "Безымянная звезда",
+            "fresh": "Новое",
+            "linked": "Вы связались",
+            "mutual": "Связь в обе стороны",
+            "not_linked": "Ещё не связано",
+            "open_profile": "Открыть профиль игрока",
+            "open_page": "Открыть на vrcc.cc",
+            "why": {
+                "verify": "Подтвердите аккаунт VRChat, чтобы использовать пересечения.",
+                "wait": "Ваш аккаунт VRChat ожидает подтверждения.",
+                "queued": "Запрос в друзья от помощника VRCC в очереди.",
+                "sent": "Запрос в друзья от помощника VRCC отправлен. Примите его в VRChat.",
+                "gone": "Вы удалили помощника VRCC из друзей VRChat.",
+                "friend": "Добавьте помощника VRCC в друзья VRChat, чтобы использовать пересечения.",
+                "unknown": "Пересечения временно недоступны."
+            }
         }
     },
     "nav_menu": {

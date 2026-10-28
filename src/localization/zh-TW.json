@@ -803,7 +803,8 @@
             "maps": "地圖榜",
             "notifications": "提醒",
             "me": "我的",
-            "mutuals": "連上"
+            "mutuals": "連上",
+            "crossings": "星軌相交"
         },
         "maps": {
             "hint": "滿 {min} 人評分才進總榜",
@@ -892,6 +893,31 @@
         "announcement": {
             "open": "查看",
             "dismiss": "關閉這條公告"
+        },
+        "crossings": {
+            "need_connect": "連接星遇同頻帳號後，就能看到和你擦肩而過的人。",
+            "unavailable": "這個帳號暫時用不了星軌相交。",
+            "needs_scope": "這項功能需要 crossings 權限。重新連接時勾選它。",
+            "empty": "還沒有擦肩記錄。在同一個 VRChat 房間裡遇到過的星友會出現在這裡。",
+            "count": "{{count}} 條擦肩記錄",
+            "quota": "今天還能連 {{left}} / {{max}} 顆",
+            "refresh": "重新整理",
+            "unnamed": "未命名星",
+            "fresh": "新",
+            "linked": "你已連向 TA",
+            "mutual": "已雙向連上",
+            "not_linked": "還沒連上",
+            "open_profile": "開啟玩家詳情",
+            "open_page": "在 vrcc.cc 上查看",
+            "why": {
+                "verify": "先驗證 VRChat 帳號才能使用星軌相交。",
+                "wait": "你的 VRChat 帳號正在等待驗證。",
+                "queued": "機器人「VRCC 的小幫手」的好友邀請正在排隊。",
+                "sent": "機器人「VRCC 的小幫手」的好友邀請已送出，請在 VRChat 裡同意。",
+                "gone": "你在 VRChat 裡刪除了機器人好友。",
+                "friend": "先把機器人「VRCC 的小幫手」加為 VRChat 好友，才能使用星軌相交。",
+                "unknown": "星軌相交暫時不可用。"
+            }
         }
     },
     "nav_menu": {

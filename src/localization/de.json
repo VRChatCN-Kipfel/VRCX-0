@@ -800,7 +800,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Kreuzungen"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -889,6 +890,31 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Verbinde dein Stern-Konto, um zu sehen, wen du getroffen hast.",
+            "unavailable": "Kreuzungen sind für dieses Konto nicht verfügbar.",
+            "needs_scope": "Diese Funktion benötigt die Berechtigung crossings. Verbinde dich neu und erlaube sie.",
+            "empty": "Noch keine Kreuzungen. Personen, die du in derselben VRChat-Welt getroffen hast, erscheinen hier.",
+            "count": "{{count}} Kreuzungen",
+            "quota": "Heute noch {{left}} von {{max}}",
+            "refresh": "Aktualisieren",
+            "unnamed": "Unbenannter Stern",
+            "fresh": "Neu",
+            "linked": "Du hast sie verbunden",
+            "mutual": "In beide Richtungen verbunden",
+            "not_linked": "Noch nicht verbunden",
+            "open_profile": "Spielerprofil öffnen",
+            "open_page": "Auf vrcc.cc ansehen",
+            "why": {
+                "verify": "Verifiziere dein VRChat-Konto, um Kreuzungen zu nutzen.",
+                "wait": "Dein VRChat-Konto wartet auf Verifizierung.",
+                "queued": "Eine Freundschaftsanfrage des VRCC-Assistenten steht in der Warteschlange.",
+                "sent": "Eine Freundschaftsanfrage des VRCC-Assistenten wurde gesendet. Bestätige sie in VRChat.",
+                "gone": "Du hast den VRCC-Assistenten aus deinen VRChat-Freunden entfernt.",
+                "friend": "Füge den VRCC-Assistenten als VRChat-Freund hinzu, um Kreuzungen zu nutzen.",
+                "unknown": "Kreuzungen sind vorübergehend nicht verfügbar."
+            }
         }
     },
     "nav_menu": {
