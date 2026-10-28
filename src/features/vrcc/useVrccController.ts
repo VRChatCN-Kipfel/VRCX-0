@@ -15,6 +15,8 @@ import {
     type VrccBoard,
     type VrccBoardSort,
     type VrccConnection,
+    type VrccCrossingCards,
+    type VrccCrossings,
     type VrccDeviceAuthPrompt,
     type VrccMutuals,
     type VrccMyMap,
@@ -55,7 +57,7 @@ const BOARD_REUSE_MS = 60_000;
  */
 const DEVICE_AUTH_COOLDOWN_SECS = 5;
 
-export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'me';
+export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'crossings' | 'me';
 
 /** 「提醒」页签里看哪一个：最近的提醒，还是通知中心。 */
 export type VrccNotificationsView = 'recent' | 'notes';
@@ -94,6 +96,29 @@ type State = {
      * 全局错误会让玩家以为连接出了问题。
      */
     mutualsError: string | null;
+    /**
+     * 「星轨相交」列表；null 表示还没拉过或没权限。
+     *
+     * 与 mutuals 的区别：mutuals 是**双向已连线**的星友，crossings 只是
+     * **同房间擦肩**的人，大多数还没连线。
+     */
+    crossings: VrccCrossings | null;
+    /** 星轨相交的完整星卡（1.13.0 起）；null 表示没拉过或不支持。 */
+    crossingCards: VrccCrossingCards | null;
+    /**
+     * 「星轨相交」这一项失败的原因。
+     *
+     * 与 mutualsError 同理单独放：`dev-` 标识必然拿不到 `crossings`
+     * 敏感权限，那是**某个功能没开通**，不是整个页面坏了。
+     */
+    crossingsError: string | null;
+    /**
+     * 服务端说的「星轨相交」不可用原因（`why`）。
+     *
+     * `hide` 必须让整个模块消失（16-17 岁星池，或玩家关了星轨相交），
+     * 不能当成普通空列表。
+     */
+    crossingsWhy: string | null;
     service: VrccStatus | null;
     loading: boolean;
     error: VrccError | null;
@@ -126,6 +151,10 @@ const initialState: State = {
     myMap: null,
     mutuals: null,
     mutualsError: null,
+    crossings: null,
+    crossingCards: null,
+    crossingsError: null,
+    crossingsWhy: null,
     service: null,
     loading: true,
     error: null,
@@ -349,6 +378,54 @@ export function useVrccController() {
         }
     }, [patch]);
 
+    /**
+     * 「星轨相交」列表与完整星卡。
+     *
+     * 需要 `crossings` 敏感权限。`dev-` 标识拿到的是 `403 scope`——预期内
+     * 的结果（敏感权限要审核），不是故障，所以只记到 `crossingsError`
+     * 供该页签自己显示，不走全局 `reportError`。
+     *
+     * `mark` 只在玩家真的打开这一页时为 true：它会把已读同步到账号，
+     * 网页和手机上的红点跟着消。别的场景一律 false。
+     *
+     * 返回的 `why` 必须原样存下来：`hide` 时整个模块都不该显示。
+     */
+    const refreshCrossings = useCallback(
+        async (mark = false) => {
+            try {
+                // 星卡是 1.13.0 才有的接口；旧服务器会给 404。那只影响
+                // 「今天还能连几颗」这一小块，不该让整个列表失败。
+                const [crossings, cards] = await Promise.all([
+                    vrccApi.crossings(mark),
+                    vrccApi.crossingCards(mark).catch(() => null)
+                ]);
+                patch({
+                    crossings,
+                    crossingCards: cards,
+                    crossingsError: null,
+                    crossingsWhy: crossings?.why ?? null
+                });
+                return crossings;
+            } catch (error) {
+                if (
+                    error instanceof VrccError &&
+                    error.kind === 'missingScope'
+                ) {
+                    // 权限没开通：静默记录，界面在自己的页签里说明。
+                    patch({
+                        crossings: null,
+                        crossingCards: null,
+                        crossingsError: error.message
+                    });
+                    return null;
+                }
+                patch({ crossings: null, crossingCards: null });
+                throw error;
+            }
+        },
+        [patch]
+    );
+
     const refreshService = useCallback(async () => {
         try {
             const service = await vrccApi.status();
@@ -413,6 +490,11 @@ export function useVrccController() {
             void refreshMutuals().catch((error) => {
                 reportError(error, 'refreshMutuals');
             });
+            // 「星轨相交」同样要敏感权限，同样单独兜住。
+            // 这里传 mark=false：初次加载不是「玩家在看」。
+            void refreshCrossings(false).catch((error) => {
+                reportError(error, 'refreshCrossings');
+            });
             void refreshUnread(true).catch((error) => {
                 reportError(error, 'refreshUnread');
             });
@@ -422,7 +504,9 @@ export function useVrccController() {
         refreshAnnouncements,
         refreshBoards,
         refreshConnection,
+        refreshCrossings,
         refreshMutuals,
+        refreshCrossings,
         refreshMyMap,
         refreshRecent,
         refreshService,

@@ -28,6 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/shadcn/tabs';
 import { VrccCurrentMapCard } from './components/VrccCurrentMapCard';
 import { VrccMapsPanel } from './components/VrccMapsPanel';
 import { VrccMePanel } from './components/VrccMePanel';
+import { VrccCrossingsPanel } from './components/VrccCrossingsPanel';
 import { VrccMutualsPanel } from './components/VrccMutualsPanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
 import { useVrccController } from './useVrccController';
@@ -95,6 +96,11 @@ export function VrccPage() {
         myMap,
         mutuals,
         mutualsError,
+        crossings,
+        crossingCards,
+        crossingsError,
+        crossingsWhy,
+        refreshCrossings,
         service,
         deviceAuth,
         deviceAuthBusy,
@@ -277,6 +283,9 @@ export function VrccPage() {
                             <TabsTrigger value="mutuals">
                                 {t('vrcc.tab.mutuals')}
                             </TabsTrigger>
+                            <TabsTrigger value="crossings">
+                                {t('vrcc.tab.crossings')}
+                            </TabsTrigger>
                             <TabsTrigger value="me">
                                 {t('vrcc.tab.me')}
                             </TabsTrigger>
@@ -324,6 +333,34 @@ export function VrccPage() {
                                 mutuals={mutuals}
                                 mutualsError={mutualsError}
                                 onOpenUser={openUser}
+                            />
+                        </TabsContent>
+                        <TabsContent
+                            value="crossings"
+                            className="min-h-0 flex-1"
+                        >
+                            {/* mark=true：玩家真的在看这一页，服务器可以把
+                                已读同步到账号、清掉网页与手机上的红点。 */}
+                            <VrccCrossingsPanel
+                                connected={connected}
+                                crossings={crossings}
+                                cards={crossingCards}
+                                crossingsError={crossingsError}
+                                crossingsWhy={crossingsWhy}
+                                onOpenLink={openLink}
+                                onRefresh={() => {
+                                    void refreshCrossings(true).catch(
+                                        (error: unknown) => {
+                                            toast.add({
+                                                type: 'error',
+                                                title:
+                                                    error instanceof Error
+                                                        ? error.message
+                                                        : t('vrcc.error.unknown')
+                                            });
+                                        }
+                                    );
+                                }}
                             />
                         </TabsContent>
 

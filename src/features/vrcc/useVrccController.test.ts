@@ -302,6 +302,83 @@ describe('useVrccController', () => {
         consoleSpy.mockRestore();
     });
 
+    it('crossings 缺权限时只记在页签里，不弹 toast、不拖垮整页', async () => {
+        // 与 mutuals 同一个道理：`dev-` 标识拿不到 `crossings` 敏感权限，
+        // 线上实返 `403 scope`。这是预期结果，不是故障——只在「星轨相交」
+        // 页签里说明，不该渲染成整页红色横幅。
+        mocks.crossings.mockRejectedValue(
+            Object.assign(new Error('HTTP 403 scope'), {
+                vrcc: { kind: 'missingScope', need: 'crossings' }
+            })
+        );
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        await waitFor(() => expect(result.current.crossingsError).not.toBeNull());
+
+        expect(result.current.crossingsError).toContain('403');
+        expect(result.current.crossings).toBeNull();
+        expect(mocks.toastAdd).not.toHaveBeenCalled();
+        // 地图榜与连接状态照旧可用。
+        expect(result.current.boards).not.toBeNull();
+        expect(result.current.connection?.connected).toBe(true);
+    });
+
+    it('crossings 把 why=hide 原样带出来，交给界面隐藏整个模块', async () => {
+        // `hide` 意味着玩家不该看到这个模块（16-17 岁星池，或玩家在隐私
+        // 设置里关了星轨相交）。官方要求客户端不显示，所以控制器必须把
+        // 这个字段原样留在 state 里，不能吞掉——吞掉就会变成一个普通空列表，
+        // 等于向不该看到的人确认「这里有星轨相交」这个事实。
+        mocks.crossings.mockResolvedValue({
+            stars: [],
+            n: 0,
+            why: 'hide',
+            me: null
+        });
+        mocks.crossingCards.mockResolvedValue({
+            cards: [],
+            seen: null,
+            left: null,
+            max: null
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        await waitFor(() => expect(result.current.crossingsWhy).toBe('hide'));
+        expect(result.current.crossings?.stars).toHaveLength(0);
+    });
+
+    it('crossings 初次加载不带 mark，打开页签刷新才 mark=true', async () => {
+        // `mark=1` 会把星轨相交标成已读、连带清掉网页与手机的红点。
+        // 初次加载不是「玩家在看」，必须传 false；只有玩家主动打开这一页
+        // 才算看过。这条链路错了，玩家会莫名其妙丢红点。
+        mocks.crossings.mockResolvedValue({
+            stars: [],
+            n: 0,
+            why: null,
+            me: null
+        });
+        mocks.crossingCards.mockResolvedValue({
+            cards: [],
+            seen: null,
+            left: 3,
+            max: 5
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+
+        // 初次加载：mark=false。
+        expect(mocks.crossings).toHaveBeenCalledWith(false);
+        expect(mocks.crossingCards).toHaveBeenCalledWith(false);
+
+        // 玩家主动刷新：mark=true。
+        await act(async () => {
+            await result.current.refreshCrossings(true);
+        });
+        expect(mocks.crossings).toHaveBeenCalledWith(true);
+        expect(mocks.crossingCards).toHaveBeenCalledWith(true);
+        // 星卡的额度读数被记下来了。
+        expect(result.current.crossingCards?.left).toBe(3);
+    });
+
     it('mutuals 缺权限时只记在页签里，不弹 toast、不拖垮整页', async () => {
         // `dev-` 标识拿不到 `mutuals` 敏感权限，线上实返 `403 scope`。
         // 这是**预期内**的结果，不是故障：界面只在「连上」页签里说明，
