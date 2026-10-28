@@ -232,3 +232,105 @@ fn a_malformed_hot_comment_does_not_break_the_whole_board() {
 
     assert!(board.maps[2].hot.is_none());
 }
+
+/// 星轨相交：列表要能解析，且 `why` 的七种取值都要分类正确（外加未知值）。
+///
+/// `why` 的分类**直接影响界面行为**：`hide` 要求客户端把整个模块藏起来
+/// （16–17 岁星池、或玩家在隐私设置里关了星轨相交），而 `verify` / `wait`
+/// 只是「还没准备好」，要显示原因而不是隐藏。两者搞反的后果不对称——
+/// 把 `hide` 当 `verify` 会向不该看到的人暴露「这里有星轨相交」这个事实。
+#[test]
+fn crossings_parse_and_the_why_reasons_classify_correctly() {
+    use vrcx_0_contracts::vrcc::{VrccCrossingWhy, VrccCrossings};
+
+    // 正常一条：有擦肩记录，还没连线。
+    let list: VrccCrossings = parse(
+        r#"{"stars":[
+            {"n":77,"name":"拾光旅人","line":"放慢脚步逛世界","group":"g1","star":31,
+             "intro":"平时喜欢在安静的世界拍照、听音乐","vrc":null,
+             "linked":false,"mutual":false,"at":1792830000000,"fresh":true},
+            {"n":78,"name":"已连上的","group":"g1","vrc":"StarTraveler",
+             "linked":true,"mutual":true,"at":1792830000001,"fresh":false}
+        ],"n":2,"why":null,"me":{"n":12,"name":"夜航星"}}"#,
+    );
+
+    assert_eq!(list.stars.len(), 2);
+    assert_eq!(list.why, None);
+
+    let first = &list.stars[0];
+    assert_eq!(first.n, 77);
+    assert_eq!(first.name.as_deref(), Some("拾光旅人"));
+    assert_eq!(first.line.as_deref(), Some("放慢脚步逛世界"));
+    assert_eq!(first.intro.as_deref(), Some("平时喜欢在安静的世界拍照、听音乐"));
+    assert!(!first.linked && !first.mutual);
+    assert!(first.fresh);
+    // 未双向连线时 `vrc` 是 null——这是「连上才解锁」的信息。
+    assert!(first.vrc.is_none());
+
+    let second = &list.stars[1];
+    assert!(second.linked && second.mutual);
+    assert_eq!(second.vrc.as_deref(), Some("StarTraveler"));
+
+    assert_eq!(list.me.as_ref().and_then(|me| me.n), Some(12));
+    assert_eq!(list.me.as_ref().and_then(|me| me.name.as_deref()), Some("夜航星"));
+
+    // 七种 why 取值 + 未知值 + 缺省值。
+    assert_eq!(VrccCrossingWhy::parse(None), VrccCrossingWhy::Available);
+    assert_eq!(VrccCrossingWhy::parse(Some("")), VrccCrossingWhy::Available);
+    assert_eq!(VrccCrossingWhy::parse(Some("hide")), VrccCrossingWhy::Hidden);
+    assert_eq!(
+        VrccCrossingWhy::parse(Some("verify")),
+        VrccCrossingWhy::Unverified
+    );
+    assert_eq!(
+        VrccCrossingWhy::parse(Some("wait")),
+        VrccCrossingWhy::WaitingVerify
+    );
+    assert_eq!(VrccCrossingWhy::parse(Some("queued")), VrccCrossingWhy::Queued);
+    assert_eq!(VrccCrossingWhy::parse(Some("sent")), VrccCrossingWhy::Sent);
+    assert_eq!(VrccCrossingWhy::parse(Some("gone")), VrccCrossingWhy::Gone);
+    assert_eq!(
+        VrccCrossingWhy::parse(Some("friend")),
+        VrccCrossingWhy::NotFriend
+    );
+    // 服务器以后加的新原因：认得成 Unknown，但不能解析失败。
+    assert_eq!(
+        VrccCrossingWhy::parse(Some("something-new")),
+        VrccCrossingWhy::Unknown
+    );
+
+    // 只有 `hide` 要求整个模块隐藏。
+    assert!(!VrccCrossingWhy::Hidden.should_show());
+    for reason in [
+        VrccCrossingWhy::Available,
+        VrccCrossingWhy::Unverified,
+        VrccCrossingWhy::WaitingVerify,
+        VrccCrossingWhy::Queued,
+        VrccCrossingWhy::Sent,
+        VrccCrossingWhy::Gone,
+        VrccCrossingWhy::NotFriend,
+        VrccCrossingWhy::Unknown,
+    ] {
+        assert!(reason.should_show(), "{reason:?} should stay visible");
+    }
+
+    // 需要先去 VRChat 侧准备的那几种，提示要走向「去验证/去加机器人」
+    // 而不是「去开权限」。
+    for reason in [
+        VrccCrossingWhy::Unverified,
+        VrccCrossingWhy::WaitingVerify,
+        VrccCrossingWhy::Queued,
+        VrccCrossingWhy::Sent,
+        VrccCrossingWhy::Gone,
+        VrccCrossingWhy::NotFriend,
+    ] {
+        assert!(reason.needs_vrchat_setup(), "{reason:?} needs setup");
+    }
+    assert!(!VrccCrossingWhy::Available.needs_vrchat_setup());
+    assert!(!VrccCrossingWhy::Hidden.needs_vrchat_setup());
+
+    // 旧服务器/空列表也要能解析（字段全缺省）。
+    let empty: VrccCrossings = parse(r#"{"stars":[],"n":0,"why":null,"me":null}"#);
+    assert!(empty.stars.is_empty());
+    assert!(empty.me.is_none());
+}
