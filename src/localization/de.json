@@ -1952,7 +1952,8 @@
                 "decline": "Ablehnen",
                 "delete_log": "Benachrichtigung löschen",
                 "decline_with_message": "Mit Nachricht ablehnen",
-                "ignore_locally": "Lokal ignorieren"
+                "ignore_locally": "Lokal ignorieren",
+                "open_vrcc": "Open Xingyu Tongpin"
             },
             "filters": {
                 "requestInvite": "Einladung anfragen",
@@ -2021,6 +2022,9 @@
                 "votetokick": "Kick-Abstimmung",
                 "twitchdrop": {
                     "fulfilled": "Twitch-Drop erhalten"
+                },
+                "vrcc": {
+                    "notice": "Notice"
                 }
             },
             "description": {

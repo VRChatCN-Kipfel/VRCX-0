@@ -1949,7 +1949,8 @@
                 "decline": "断る",
                 "delete_log": "通知を削除",
                 "decline_with_message": "メッセージを添えて断る",
-                "ignore_locally": "ローカルで無視"
+                "ignore_locally": "ローカルで無視",
+                "open_vrcc": "Open Xingyu Tongpin"
             },
             "filters": {
                 "requestInvite": "招待リクエスト",
@@ -2018,6 +2019,9 @@
                 "votetokick": "投票キック",
                 "twitchdrop": {
                     "fulfilled": "Twitch ドロップの受け取り"
+                },
+                "vrcc": {
+                    "notice": "Notice"
                 }
             },
             "description": {

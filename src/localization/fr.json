@@ -1761,7 +1761,8 @@
                 "decline": "Décliner",
                 "delete_log": "Supprimer les notifications",
                 "decline_with_message": "Décliner avec un message",
-                "ignore_locally": "Ignorer localement"
+                "ignore_locally": "Ignorer localement",
+                "open_vrcc": "Open Xingyu Tongpin"
             },
             "filters": {
                 "requestInvite": "Demande d'invitation",
@@ -1829,6 +1830,9 @@
                 "votetokick": "Vote pour expulser",
                 "twitchdrop": {
                     "fulfilled": "Drop twitch reçu"
+                },
+                "vrcc": {
+                    "notice": "Notice"
                 }
             },
             "description": {

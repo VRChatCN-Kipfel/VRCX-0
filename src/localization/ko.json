@@ -1896,7 +1896,8 @@
                 "decline": "거절",
                 "delete_log": "알림 삭제",
                 "decline_with_message": "메시지로 거절",
-                "ignore_locally": "로컬에서만 무시"
+                "ignore_locally": "로컬에서만 무시",
+                "open_vrcc": "Open Xingyu Tongpin"
             },
             "filters": {
                 "requestInvite": "참가 요청",
@@ -1965,6 +1966,9 @@
                 "votetokick": "투표 추방",
                 "twitchdrop": {
                     "fulfilled": "Twitch 드롭 지급"
+                },
+                "vrcc": {
+                    "notice": "Notice"
                 }
             },
             "description": {

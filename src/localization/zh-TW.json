@@ -1953,7 +1953,8 @@
                 "decline": "拒絕",
                 "delete_log": "刪除通知",
                 "decline_with_message": "拒絕並附上訊息",
-                "ignore_locally": "僅在本機忽略"
+                "ignore_locally": "僅在本機忽略",
+                "open_vrcc": "開啟星遇同頻"
             },
             "filters": {
                 "requestInvite": "請求邀請",
@@ -2022,6 +2023,9 @@
                 "votetokick": "投票踢出",
                 "twitchdrop": {
                     "fulfilled": "Twitch Drop 已發放"
+                },
+                "vrcc": {
+                    "notice": "提醒"
                 }
             },
             "description": {

@@ -1968,7 +1968,8 @@
                 "decline": "Отклонить",
                 "delete_log": "Удалить уведомление",
                 "decline_with_message": "Отклонить с сообщением",
-                "ignore_locally": "Игнорировать локально"
+                "ignore_locally": "Игнорировать локально",
+                "open_vrcc": "Open Xingyu Tongpin"
             },
             "filters": {
                 "requestInvite": "Запрос на приглашение",
@@ -2037,6 +2038,9 @@
                 "votetokick": "Голосование за исключение",
                 "twitchdrop": {
                     "fulfilled": "Twitch Drop получен"
+                },
+                "vrcc": {
+                    "notice": "Notice"
                 }
             },
             "description": {
