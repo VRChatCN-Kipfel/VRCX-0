@@ -135,6 +135,8 @@ impl DesktopRuntimeServices {
                 tts: Arc::clone(&tts),
                 tasks: deps.tasks.clone(),
                 policy: Arc::clone(&notification_policy),
+                // 外部图标（非 VRChat 资产）要自己联网取，必须走同一套代理。
+                proxy_url: deps.web.proxy_url().map(ToString::to_string),
             }));
         deps.activity_sinks.add(notification_sink);
         Ok(Self {

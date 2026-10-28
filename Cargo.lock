@@ -9799,6 +9799,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "fs4",
+ "reqwest",
  "serde",
  "serde_json",
  "specta",

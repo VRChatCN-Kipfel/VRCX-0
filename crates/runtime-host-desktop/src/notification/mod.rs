@@ -2,6 +2,7 @@ mod delivery;
 mod desktop;
 mod dispatcher;
 mod do_not_disturb;
+mod icon_cache;
 mod indicator;
 mod overlay_transport;
 #[cfg(windows)]

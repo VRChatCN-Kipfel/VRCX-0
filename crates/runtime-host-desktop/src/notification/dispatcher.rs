@@ -14,6 +14,7 @@ use vrcx_0_host_desktop::tts::TtsEngine;
 use vrcx_0_persistence::DatabaseService;
 
 use super::desktop::{send_desktop_notification, DesktopNotificationAction, DesktopNotifier};
+use super::icon_cache::{IconRequest, RemoteIconCache};
 use super::overlay_transport::OverlayNotificationTransport;
 use super::policy::LocalNotificationPolicy;
 use super::tts::{notification_tts_memo_actor_user_id, send_tts_notification};
@@ -45,6 +46,8 @@ pub(crate) struct NotificationDispatcherDeps {
     pub tts: Arc<dyn TtsEngine>,
     pub tasks: TaskSupervisor,
     pub policy: Arc<LocalNotificationPolicy>,
+    /// 宿主统一代理，给外部图标用。
+    pub proxy_url: Option<String>,
 }
 
 struct NotificationOutputContext {
@@ -53,6 +56,8 @@ struct NotificationOutputContext {
     desktop: Arc<dyn DesktopNotifier>,
     tts: Arc<dyn TtsEngine>,
     policy: Arc<LocalNotificationPolicy>,
+    /// 宿主统一代理。外部图标（非 VRChat 资产）靠它才能取到。
+    proxy_url: Option<String>,
 }
 
 struct NotificationJob {
@@ -62,6 +67,8 @@ struct NotificationJob {
     locale: OverlayLocale,
     endpoint: String,
     current_user_id: String,
+    /// 宿主统一代理；外部图标需要它才能取到。
+    proxy_url: Option<String>,
 }
 
 struct PreparedNotification {
@@ -122,6 +129,7 @@ impl NotificationDispatcher {
             desktop: deps.desktop,
             tts: deps.tts,
             policy: deps.policy,
+            proxy_url: deps.proxy_url,
         });
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
         let worker_output = Arc::clone(&output);
@@ -161,6 +169,7 @@ impl ActivitySink for NotificationDispatcher {
             locale,
             endpoint,
             current_user_id,
+            proxy_url: self.output.proxy_url.clone(),
         };
 
         if priority {
@@ -237,13 +246,19 @@ async fn prepare_notification(
     );
     let (desktop_url, overlay_url) =
         notification_image_urls(job.plan, &job.preferences, friend_image, &render.image_url);
+    let proxy = job.proxy_url.clone();
     let desktop_image = match &desktop_url {
-        Some(url) => resolve_local_image_with_budget(&tasks, Arc::clone(&image_cache), url).await,
+        Some(url) => {
+            resolve_local_image_with_budget(&tasks, Arc::clone(&image_cache), url, proxy.as_deref())
+                .await
+        }
         None => None,
     };
     let overlay_image = match &overlay_url {
         Some(_) if overlay_url == desktop_url => desktop_image.clone(),
-        Some(url) => resolve_local_image_with_budget(&tasks, image_cache, url).await,
+        Some(url) => {
+            resolve_local_image_with_budget(&tasks, image_cache, url, proxy.as_deref()).await
+        }
         None => None,
     };
     prepare_rendered_notification(job, render, desktop_image, overlay_image)
@@ -434,18 +449,41 @@ async fn resolve_local_image_with_budget(
     tasks: &TaskSupervisor,
     image_cache: Arc<ImageCache>,
     image_url: &str,
+    proxy_url: Option<&str>,
 ) -> Option<String> {
-    let request = local_image_request(image_url)?;
-    let (result_tx, result_rx) = oneshot::channel();
-    tasks.spawn(async move {
-        let result = fetch_local_image(image_cache, request).await;
-        let _ = result_tx.send(result);
-    });
-    tokio::time::timeout(NOTIFICATION_IMAGE_FIRST_SEND_BUDGET, result_rx)
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .flatten()
+    // VRChat 资产（`file_` + 版本）走既有 `ImageCache`：那套能拿到原图的
+    // 规范地址、按版本失效，是更准的一条路。
+    if let Some(request) = local_image_request(image_url) {
+        let (result_tx, result_rx) = oneshot::channel();
+        tasks.spawn(async move {
+            let result = fetch_local_image(image_cache, request).await;
+            let _ = result_tx.send(result);
+        });
+        let resolved = tokio::time::timeout(NOTIFICATION_IMAGE_FIRST_SEND_BUDGET, result_rx)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten();
+        if resolved.is_some() {
+            return resolved;
+        }
+    }
+    // 不是 VRChat 资产（外部事件给的是普通 CDN 地址，不含 `file_`）：
+    // 交给通用图标缓存按 URL 抓一次并落盘。
+    resolve_remote_icon(image_url, proxy_url).await
+}
+
+/// 用通用缓存解析一张远程图标。
+///
+/// 代理来自宿主统一设置：本机实测 `vrcc.cc` 直连会 DNS 超时，不走代理时图标
+/// 必然失败，而失败是静默的（通知照发、就是没图），很难从现象反推原因。
+async fn resolve_remote_icon(image_url: &str, proxy_url: Option<&str>) -> Option<String> {
+    let url = image_url.trim();
+    // 非 http(s) 的一律不碰网络。
+    IconRequest::parse(url)?;
+    let cache = RemoteIconCache::in_app_data()?.with_proxy(proxy_url);
+    let path = cache.resolve_default(url).await?;
+    path.to_str().map(str::to_string)
 }
 
 async fn fetch_local_image(

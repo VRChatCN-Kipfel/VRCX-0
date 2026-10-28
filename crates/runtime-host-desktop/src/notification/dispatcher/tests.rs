@@ -262,6 +262,8 @@ fn image_job(actor_user_id: &str) -> super::NotificationJob {
         locale: OverlayLocale::default(),
         endpoint: "https://api.example.test/api/1".into(),
         current_user_id: "usr_self".into(),
+        // 这个用例只验证 VRChat 头像解析，外部图标那条路不参与。
+        proxy_url: None,
     }
 }
 
