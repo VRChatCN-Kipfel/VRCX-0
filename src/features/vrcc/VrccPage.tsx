@@ -7,8 +7,9 @@ import {
     Unplug,
     X
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router';
 
 import {
     PageBody,
@@ -30,7 +31,7 @@ import { VrccMapsPanel } from './components/VrccMapsPanel';
 import { VrccMePanel } from './components/VrccMePanel';
 import { VrccMutualsPanel } from './components/VrccMutualsPanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
-import { useVrccController } from './useVrccController';
+import { useVrccController, type VrccTab } from './useVrccController';
 import type {
     VrccAnnouncement,
     VrccRecentNotifications,
@@ -74,6 +75,18 @@ function unreadCount(
     return (recent?.items ?? []).filter((item) => (item.id ?? 0) > read).length;
 }
 
+const VRCC_TABS: readonly VrccTab[] = [
+    'maps',
+    'notifications',
+    'mutuals',
+    'me'
+];
+
+/** 页面认的页签名。未知值一律忽略，不让它把界面切到一个不存在的页签。 */
+function isVrccTab(value: string | null): value is VrccTab {
+    return value !== null && (VRCC_TABS as readonly string[]).includes(value);
+}
+
 export function VrccPage() {
     const { t } = useTranslation();
     const {
@@ -112,6 +125,27 @@ export function VrccPage() {
 
     const connected = connection?.connected ?? false;
     const unreadTotal = connected ? unreadCount(unread, recent) : 0;
+    // 从通知中心点进来时带的页签名。
+    const [searchParams, setSearchParams] = useSearchParams();
+    const requestedTab = searchParams.get('tab');
+    const appliedRequestedTab = useRef(false);
+    useEffect(() => {
+        // 等连接就绪再应用：`setTab` 在未连接时会直接返回，那时「提醒」页
+        // 该做的已读同步也一并跳过了，页签会落过去而同步没发生。
+        if (
+            appliedRequestedTab.current ||
+            !connected ||
+            !isVrccTab(requestedTab)
+        ) {
+            return;
+        }
+        appliedRequestedTab.current = true;
+        setTab(requestedTab);
+        // 参数用掉就清掉，免得玩家手动切页签时又被它拽回去。
+        const remaining = new URLSearchParams(searchParams);
+        remaining.delete('tab');
+        setSearchParams(remaining, { replace: true });
+    }, [connected, requestedTab, searchParams, setSearchParams, setTab]);
     const stop = announcements?.stop ?? null;
     const [dismissedAnnouncement, setDismissedAnnouncement] = useState(
         readDismissedAnnouncement
