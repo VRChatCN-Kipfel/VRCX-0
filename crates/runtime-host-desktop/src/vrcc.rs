@@ -86,6 +86,21 @@ impl DesktopVrccRuntime {
     /// 图标缓存文件名，落在应用数据目录。
     const NOTICE_ICON_FILE: &str = "vrcc-notice-icon.png";
 
+    /// 通知中心里那一行的 id 前缀。
+    ///
+    /// 行 id 的形态是 `<前缀><提醒编号>`，写库和回标已读都用同一个形态。
+    /// 前缀让这些行和 VRChat 自己的提醒（`not_…`）在同一个 id 空间里不撞车。
+    const NOTICE_ROW_ID_PREFIX: &str = "vrcc_";
+    /// 通知中心里那一行的类型。
+    ///
+    /// 前端按 `view.notification.filters.<type>` 取标签，所以这个名字同时
+    /// 是本地化键的一部分，改这里要一起改文案。
+    const NOTICE_ROW_TYPE: &str = "vrcc.notice";
+    /// 点击这一行时跳到的位置。前端按 scheme 分派，见 `openNotificationLink`。
+    const NOTICE_ROW_LINK: &str = "vrcc:notifications";
+    /// 行的发送者与标题。两者都取这个名字是有意的，见 `notice_row`。
+    const NOTICE_ROW_SENDER: &str = "星遇同频";
+
     /// 构造运行时。
     ///
     /// `X-Client` 由 [`resolve_client_id`] 在**构建期**定死，这里不接受任何
@@ -517,6 +532,58 @@ impl NotifiedIds {
         }
         fresh
     }
+}
+
+/// 把一条提醒写成通知中心的一行。
+///
+/// 纯函数：不碰库、不读时钟（时间由调用方给）。行的形状在这里收口，
+/// 于是「写进去会长什么样」可以脱离数据库单独验。
+///
+/// `fallback_created_at` 用于提醒没带 `at` 的场合。`at` 是毫秒时间戳，
+/// 而列里要的是 RFC3339：`created_at` 既参与 SQL 排序，也被前端 `Date.parse`
+/// 读，写成裸数字两边都不认。
+fn notice_row(
+    notice: &vrcx_0_contracts::vrcc::VrccNotificationItem,
+    fallback_created_at: &str,
+) -> serde_json::Value {
+    let created_at = notice
+        .at
+        .and_then(chrono::DateTime::from_timestamp_millis)
+        .map(vrcx_0_core::time::iso_millis)
+        .unwrap_or_else(|| fallback_created_at.to_string());
+    let title = notice.title.as_deref().unwrap_or_default().trim();
+    let body = notice.body.as_deref().unwrap_or_default().trim();
+    // 列里只有一栏正文，标题与正文都在这上面；两者可能只来一个。
+    let message = match (title.is_empty(), body.is_empty()) {
+        (true, _) => body.to_string(),
+        (_, true) => title.to_string(),
+        _ => format!("{title} {body}"),
+    };
+    let sender = DesktopVrccRuntime::NOTICE_ROW_SENDER;
+    json!({
+        "id": format!("{}{}", DesktopVrccRuntime::NOTICE_ROW_ID_PREFIX, notice.id),
+        "createdAt": created_at,
+        "updatedAt": created_at.clone(),
+        // 空串表示不过期：这些行是给玩家回查的历史，不该自己消失。
+        "expiresAt": "",
+        "type": DesktopVrccRuntime::NOTICE_ROW_TYPE,
+        // 提醒没有 VRChat 的用户或世界可跳，落点只能写在 link 上。
+        "link": DesktopVrccRuntime::NOTICE_ROW_LINK,
+        "linkText": String::new(),
+        // `title` 与 `senderUsername` 同值不是冗余：抽屉行经 `getSenderName`
+        // 读 `senderUsername`，表格页经 `view.actor.name`（= `firstText(title)`）
+        // 读 `title`，两处各取一路，只有同值才会显示成同一个名字。
+        "title": sender,
+        "message": message,
+        // 未读：抽屉的红点、侧边栏角标都认这个字段。
+        "seen": false,
+        // 留空，`openSender` 据此落到 `link` 分支，而不是去开一个不存在的玩家资料。
+        "senderUserId": String::new(),
+        "senderUsername": sender,
+        "data": {},
+        "responses": [],
+        "details": {},
+    })
 }
 
 /// 处理一批刚拉到的新提醒：挑出要弹的、交给通知分发器。
@@ -1063,5 +1130,96 @@ mod tests {
     fn event_names_match_the_frontend_contract() {
         assert_eq!(VRCC_NOTICES_CHANGED_EVENT, "vrccNoticesChanged");
         assert_eq!(VRCC_CONNECTION_CHANGED_EVENT, "vrccConnectionChanged");
+    }
+
+    // -- 通知中心那一行 ---------------------------------------------------
+
+    fn notice_at(
+        id: i64,
+        title: Option<&str>,
+        body: Option<&str>,
+        at: Option<i64>,
+    ) -> VrccNotificationItem {
+        VrccNotificationItem {
+            id,
+            title: title.map(str::to_string),
+            body: body.map(str::to_string),
+            at,
+        }
+    }
+
+    /// 行 id 必须能解析回提醒编号：点通知时要靠它定位到具体一条。
+    #[test]
+    fn a_row_is_addressed_by_the_notice_number() {
+        let row = notice_row(
+            &notice_at(42, Some("t"), None, None),
+            "2026-01-01T00:00:00.000Z",
+        );
+        let id = row["id"].as_str().unwrap();
+        assert_eq!(id, "vrcc_42");
+        assert_eq!(
+            id.strip_prefix(DesktopVrccRuntime::NOTICE_ROW_ID_PREFIX)
+                .unwrap()
+                .parse::<i64>()
+                .unwrap(),
+            42
+        );
+    }
+
+    /// 落库时必须还是未读，否则红点永远不会出现。
+    #[test]
+    fn a_row_stays_unread_and_never_expires() {
+        let row = notice_row(
+            &notice_at(1, Some("t"), Some("b"), None),
+            "2026-01-01T00:00:00.000Z",
+        );
+        assert_eq!(row["seen"], json!(false));
+        // 空串 = 不过期。写成日期会让历史行在几天后从列表里消失。
+        assert_eq!(row["expiresAt"], json!(""));
+    }
+
+    /// 点击落点写在 `link` 上：提醒没有 VRChat 用户可跳，`senderUserId` 留空。
+    #[test]
+    fn a_row_carries_the_link_the_frontend_dispatches_on() {
+        let row = notice_row(&notice_at(7, None, None, None), "2026-01-01T00:00:00.000Z");
+        assert_eq!(row["link"], json!("vrcc:notifications"));
+        assert_eq!(row["type"], json!("vrcc.notice"));
+        assert_eq!(row["senderUserId"], json!(""));
+    }
+
+    /// `at` 是毫秒时间戳，列里要的是 RFC3339。
+    #[test]
+    fn a_row_renders_the_timestamp_as_rfc3339() {
+        let row = notice_row(
+            &notice_at(1, None, Some("b"), Some(1_700_000_000_000)),
+            "2026-01-01T00:00:00.000Z",
+        );
+        assert_eq!(row["createdAt"], json!("2023-11-14T22:13:20.000Z"));
+        assert_eq!(row["updatedAt"], row["createdAt"]);
+    }
+
+    /// 提醒没带 `at` 时退回调用方给的时间，而不是写一个空 `created_at`
+    /// ——空值会让这一行在排序里垫底。
+    #[test]
+    fn a_row_without_a_timestamp_falls_back() {
+        let row = notice_row(&notice_at(1, None, None, None), "2026-01-01T00:00:00.000Z");
+        assert_eq!(row["createdAt"], json!("2026-01-01T00:00:00.000Z"));
+    }
+
+    /// 标题与正文合成一栏，两者只来一个时也不能丢。
+    #[test]
+    fn a_row_keeps_both_the_title_and_the_body() {
+        let both = notice_row(&notice_at(1, Some("标题"), Some("正文"), None), "");
+        assert_eq!(both["message"], json!("标题 正文"));
+
+        let title_only = notice_row(&notice_at(1, Some("标题"), None, None), "");
+        assert_eq!(title_only["message"], json!("标题"));
+
+        let body_only = notice_row(&notice_at(1, None, Some("正文"), None), "");
+        assert_eq!(body_only["message"], json!("正文"));
+
+        // 都为空时至少不要留下 " " 这种只有空白的一栏。
+        let neither = notice_row(&notice_at(1, Some("  "), None, None), "");
+        assert_eq!(neither["message"], json!(""));
     }
 }
