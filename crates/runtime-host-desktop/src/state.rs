@@ -782,14 +782,8 @@ impl DesktopRuntimeHostState {
             Arc::clone(runtime.database()),
             Arc::clone(runtime.web_client()),
         );
-        // 正式态的 `X-Client`（平台发的 `app_…`）放在配置里，切换不用重新编译。
-        // 配置为空时按 `resolve_client_id` 回落到开发态标识。
-        let vrcc_client_override = runtime
-            .desktop_assembly()
-            .config()
-            .get_raw(vrcx_0_integrations::vrcc::VRCC_CLIENT_CONFIG_KEY)
-            .ok()
-            .flatten();
+        // `X-Client` 在构建期定死（见 `resolve_client_id`），这里没有配置入口：
+        // 标识属于「这个包是哪个客户端」，不该由用户侧的配置文件改写。
         // 令牌按账号隔离：闭包每次读写时现取当前登录用户，切号自然生效。
         let vrcc_owner_scope = runtime.desktop_assembly().auth_scope().clone();
         let vrcc_owner = Arc::new(move || {
@@ -798,12 +792,11 @@ impl DesktopRuntimeHostState {
                 .active
                 .then(|| vrcx_0_core::OwnerId::new(snapshot.current_user_id))
         });
-        let vrcc = Arc::new(crate::vrcc::DesktopVrccRuntime::with_client_override(
+        let vrcc = Arc::new(crate::vrcc::DesktopVrccRuntime::new(
             vrcx_0_outbound_adapters::LocalVrccTokenStore::new(
                 Arc::clone(runtime.database()),
                 vrcc_owner,
             ),
-            vrcc_client_override.as_deref(),
             // 用宿主应用统一的代理设置：本机实测 vrcc.cc 直连 DNS 超时，
             // 不接代理时所有接口都会表现为「暂时不可用」。
             runtime.web_client().proxy_url(),

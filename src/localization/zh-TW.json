@@ -861,6 +861,8 @@
             "code_copied": "授權碼 {code} 已複製",
             "open_browser_failed": "打不開瀏覽器，請手動開啟星遇同頻網頁",
             "usage_note_server": "數字來自星遇同頻伺服器，是這個連線今天的次數，北京時間零點重置。",
+            "usage_unknown": "尚未取得",
+            "usage_reset_in": "{time} 後重置",
             "unread_used": "未讀數",
             "expired": "上一次的連線已失效：可能在星遇同頻網頁上斷開了、在別處重新授權過，或 90 天沒用自動斷開了。請重新連線。"
         },

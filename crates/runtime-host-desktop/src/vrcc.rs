@@ -81,34 +81,22 @@ impl DesktopVrccRuntime {
     /// 图标缓存文件名，落在应用数据目录。
     const NOTICE_ICON_FILE: &str = "vrcc-notice-icon.png";
 
-    pub fn new(store: LocalVrccTokenStore) -> Self {
-        Self::with_client_override(store, None, None)
-    }
-
-    /// 用指定的 `X-Client` 标识与代理构造。
+    /// 构造运行时。
     ///
-    /// `client_override` 来自配置：正式态把平台发的 `app_…` 填进去即可，
-    /// 不用重新编译。`None` 时按 `resolve_client_id` 的优先级回落到常量。
+    /// `X-Client` 由 [`resolve_client_id`] 在**构建期**定死，这里不接受任何
+    /// 覆盖入口：标识属于「这个二进制是哪个客户端」，不该由配置或命令行改写。
     ///
     /// `proxy_url` 必须传宿主应用的统一代理（`runtime_host().proxy_url()`）：
     /// 本机实测 `vrcc.cc` 直连 DNS 超时，不接代理时所有接口都会「暂时不可用」。
-    pub fn with_client_override(
-        store: LocalVrccTokenStore,
-        client_override: Option<&str>,
-        proxy_url: Option<&str>,
-    ) -> Self {
-        let usage_store = Arc::new(vrcx_0_outbound_adapters::LocalVrccUsageStore::new(
-            Arc::clone(store.db()),
-        ));
+    pub fn new(store: LocalVrccTokenStore, proxy_url: Option<&str>) -> Self {
         let port = Arc::new(TokenStoreAdapter { inner: store });
-        let client_id = resolve_client_id(client_override);
+        let client_id = resolve_client_id();
         // 网络端口的实现放在 outbound-adapters：应用层不认识 `VrccSession`，
         // 这里只把它当作 `Arc<dyn VrccRemote>` 注入。
         let remote: Arc<dyn vrcx_0_application::vrcc::VrccRemote> =
             Arc::new(vrcx_0_outbound_adapters::VrccRemoteAdapter::new(
                 client_id,
                 proxy_url.map(str::to_string),
-                Some(usage_store),
             ));
         Self {
             service: Arc::new(VrccService::new(port, remote)),

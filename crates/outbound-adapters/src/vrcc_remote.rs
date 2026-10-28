@@ -7,46 +7,16 @@
 //!
 //! 这一层很薄：把应用层的调用翻译成 `VrccSession` / `VrccClient` 的调用，
 //! 并把两边形状不同的类型对上（`VrccSessionSnapshot` → [`VrccConnection`]、
-//! `VrccLocalUsage` → 应用层的用量快照、`DailyUsage` → [`VrccUsageRecord`]）。
+//! `integrations::VrccLocalUsage` → 应用层的用量快照）。
 //! 不在这里做业务判断——要不要重连、未读怎么算，都属于应用层。
 
-use std::sync::Arc;
-
-use vrcx_0_application::vrcc::{
-    VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote, VrccUsageRecord, VrccUsageStore,
-};
+use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMutuals, VrccMyMap, VrccNotes,
     VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
     VrccUnread,
 };
-use vrcx_0_integrations::vrcc::{
-    now_millis, DailyUsage, DailyUsageStore, VrccSession, DEVICE_CODE_DAILY_LIMIT, WINDOW_LIMIT,
-};
-
-/// 把应用层的用量端口接到 `integrations` 的 `DailyUsageStore` 上。
-///
-/// 两者搬运的是同一组数（日期、第一份读、设备码），只是类型分属两层。
-struct UsageBridge(Arc<dyn VrccUsageStore>);
-
-impl DailyUsageStore for UsageBridge {
-    fn load(&self) -> Option<DailyUsage> {
-        let record = self.0.load()?;
-        Some(DailyUsage::restore(
-            &record.date,
-            record.personal,
-            record.device_code,
-        ))
-    }
-
-    fn save(&self, usage: &DailyUsage) {
-        self.0.save(&VrccUsageRecord {
-            date: usage.date().to_string(),
-            personal: usage.personal_used(),
-            device_code: usage.device_code_used(),
-        });
-    }
-}
+use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
 
 /// 星遇同频网络端口的实现。
 ///
@@ -61,16 +31,10 @@ impl VrccRemoteAdapter {
     ///
     /// `proxy_url` 用宿主应用的统一代理设置：不传的话在需要代理才能出网的
     /// 环境里，所有请求都会 DNS 超时。
-    pub fn new(
-        client_id: impl Into<String>,
-        proxy_url: Option<String>,
-        usage_store: Option<Arc<dyn VrccUsageStore>>,
-    ) -> Self {
-        let mut session = VrccSession::with_proxy(client_id, proxy_url);
-        if let Some(store) = usage_store {
-            session = session.with_usage_store(Arc::new(UsageBridge(store)));
+    pub fn new(client_id: impl Into<String>, proxy_url: Option<String>) -> Self {
+        Self {
+            session: VrccSession::with_proxy(client_id, proxy_url),
         }
-        Self { session }
     }
 
     /// 按当前会话造一个客户端。每个请求一次，确保用的是当前令牌。
@@ -176,14 +140,11 @@ impl VrccRemote for VrccRemoteAdapter {
     fn local_usage(&self) -> VrccLocalUsage {
         let usage = self.client().local_usage();
         VrccLocalUsage {
-            personal_used_today: usage.personal_used_today,
-            personal_daily_limit: usage.personal_daily_limit,
-            personal_from_server: usage.personal_from_server,
+            reads: usage.reads,
             unread: usage.unread,
-            device_code_used_today: usage.device_code_used_today,
             window_used: usage.window_used,
             backoff_remaining_ms: usage.backoff_remaining.as_millis() as i64,
-            date: usage.date,
+            reset_secs: usage.reset_secs,
         }
     }
 
@@ -193,10 +154,6 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn window_limit(&self) -> i64 {
         WINDOW_LIMIT as i64
-    }
-
-    fn device_code_daily_limit(&self) -> i64 {
-        DEVICE_CODE_DAILY_LIMIT
     }
 
     fn now_millis(&self) -> i64 {

@@ -20,3 +20,12 @@ scripts/package-windows-release.ps1
 .agents/
 .mcp.json
 tsconfig.tsbuildinfo
+
+# 本地环境变量。
+#
+# 这个项目本身不加载 .env（Rust 侧没有 dotenv，Vite 也不注入 shell 环境），
+# 所以它主要是防手滑：`.env` 里通常会放构建期注入用的 VRCC_CLIENT_ID 之类
+# 的凭据，一旦被 `git add .` 带进来就是永久入库。
+.env
+.env.*
+!.env.example

@@ -21,16 +21,15 @@ use std::time::{Duration, Instant};
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde_json::json;
+use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail,
     VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus,
-    VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_DEFAULT_CLIENT, VRCC_SITE_ORIGIN,
+    VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
-use super::throttle::{
-    backoff_for, DailyUsage, RateLimiter, MAX_BACKOFF, NOTIFICATIONS_MIN_GAP, PERSONAL_DAILY_LIMIT,
-};
+use super::throttle::{backoff_for, RateLimiter, MAX_BACKOFF, NOTIFICATIONS_MIN_GAP};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(25);
@@ -52,6 +51,13 @@ pub use vrcx_0_contracts::vrcc::VrccError;
 
 /// 官方限制 POST 正文最大 2 KB。
 const MAX_BODY_BYTES: usize = vrcx_0_contracts::vrcc::VRCC_MAX_BODY_BYTES;
+
+/// `/device/code` 的本地限流键。
+///
+/// 单独拎成常量是因为 `429` 的文案要按它分流：这个额度的维度是**网络出口
+/// 地址**（每天 30 个，同一路由下的所有人共用），和个人授权维度的额度不是
+/// 一回事，说错了会让玩家以为是自己账号的问题。
+const DEVICE_CODE_KEY: &str = "device_code";
 
 /// 发送前拦下超限的正文。
 ///
@@ -146,16 +152,19 @@ struct SeenQuota {
     until: Instant,
 }
 
-/// 客户端共享状态：限流器与用量计数。
+/// 客户端共享状态：限流器与服务器下发的配额。
 #[derive(Debug, Default)]
 pub struct VrccClientState {
     limiter: RateLimiter,
-    usage: DailyUsage,
     /// 429 退避截止时间。
     backoff_until: Option<Instant>,
     /// 连续 429 次数，用于指数退避。
     backoff_attempt: u32,
     /// 服务器在 `RateLimit-*` 里说的各份额度。
+    ///
+    /// **纯内存**：重启即丢，这是有意的。官方没有「查询额度」的接口，这组头
+    /// 只在你发请求的那一刻回一次；把它落盘只会把一个必然过期的快照当成事实，
+    /// 而官方的时间基准是北京时间零点，本地推算的日期跟它对不上。
     quotas: HashMap<QuotaBucket, SeenQuota>,
 }
 
@@ -170,14 +179,6 @@ impl VrccClientState {
             .unwrap_or_default()
     }
 
-    pub fn personal_used_today(&self) -> i64 {
-        self.usage.personal_used()
-    }
-
-    pub fn device_code_used_today(&self) -> i64 {
-        self.usage.device_code_used()
-    }
-
     /// 还没到重置时间的那份服务器额度；没拿到过或已经过了零点时为 `None`。
     fn live_quota(&self, bucket: QuotaBucket, now: Instant) -> Option<SeenQuota> {
         self.quotas
@@ -190,31 +191,15 @@ impl VrccClientState {
 /// 客户端用量快照。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VrccLocalUsage {
-    /// 第一份读今天已用多少。拿到过服务器的 `RateLimit-*` 就是服务器的数。
-    pub personal_used_today: i64,
-    /// 第一份读每天的上限：服务器给的，没给时是 [`PERSONAL_DAILY_LIMIT`]。
-    pub personal_daily_limit: i64,
-    /// 上面两个数是不是服务器给的。
-    pub personal_from_server: bool,
+    /// 第一份读今天已用多少、上限多少。**只来自服务端的 `RateLimit-*`**；
+    /// 还没拿到过时为 `None`——界面应显示「未知」，不要填一个自己编的数。
+    pub reads: Option<(i64, i64)>,
     /// `me/unread` 的（已用，上限），只有服务器给过响应头时才有。
     pub unread: Option<(i64, i64)>,
-    pub device_code_used_today: i64,
     pub window_used: usize,
     pub backoff_remaining: Duration,
-    /// 用量计数的日期（本地时区 `YYYY-MM-DD`）。
-    pub date: String,
-}
-
-/// 日配额计数的持久化端口。
-///
-/// `integrations` 不依赖数据库，所以这里只定接口，实现在 `outbound-adapters`。
-/// 需要落盘的原因是：日配额是**按天**算的，旧服务器不回 `RateLimit-*` 时，
-/// 重启后清零会让本地预扣完全失效。服务器给了头以后，落盘的是服务器的准数。
-pub trait DailyUsageStore: Send + Sync {
-    /// 读取上次保存的计数。没有记录或读失败时返回 `None`。
-    fn load(&self) -> Option<DailyUsage>;
-    /// 保存计数。失败只该记日志，不该让请求失败。
-    fn save(&self, usage: &DailyUsage);
+    /// 服务端下一次重置还有多少秒；没拿到过响应头时为 `None`。
+    pub reset_secs: Option<i64>,
 }
 
 /// 一次请求的全部参数。
@@ -249,8 +234,6 @@ pub struct VrccClient {
     client_id: String,
     token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     state: Arc<std::sync::Mutex<VrccClientState>>,
-    /// 日配额的落盘端口；`None` 时只在内存里记。
-    usage_store: Option<Arc<dyn DailyUsageStore>>,
 }
 
 impl VrccClient {
@@ -293,33 +276,15 @@ impl VrccClient {
             client_id: client_id.into(),
             token,
             state: Arc::new(std::sync::Mutex::new(VrccClientState::default())),
-            usage_store: None,
         }
     }
 
-    /// 接上日配额的落盘端口，并把上次的计数恢复进内存。
-    ///
-    /// 不恢复的后果是真的：旧服务器不回 `RateLimit-*` 时，重启清零等于本地
-    /// 预扣形同虚设，直到撞上 `too_many` 才暴露——那时只能等第二天。
-    ///
-    /// 恢复时会把日期一起带进来，`roll_to` 会在下次取用量时判断是否跨天，
-    /// 所以跨天重启不会把昨天的数字带到今天。
-    pub fn with_usage_store(mut self, store: Arc<dyn DailyUsageStore>) -> Self {
-        if let Some(restored) = store.load() {
-            if let Ok(mut state) = self.state.lock() {
-                state.usage = restored;
-            }
-        }
-        self.usage_store = Some(store);
-        self
-    }
-
-    /// 用默认标识新建。
+    /// 用构建期确定的标识新建。
     pub fn with_default_client(
         token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
         proxy_url: Option<&str>,
     ) -> Self {
-        Self::new(VRCC_DEFAULT_CLIENT, token, proxy_url)
+        Self::new(resolve_client_id(), token, proxy_url)
     }
 
     pub fn client_id(&self) -> &str {
@@ -328,25 +293,28 @@ impl VrccClient {
 
     /// 读用量。
     ///
-    /// 会顺带把跨天的计数清零——调用方通常是界面，正好一天看一次。
+    /// 全部取自服务端的 `RateLimit-*`，不落盘、不推算：官方没有查询额度的
+    /// 接口，这组头只在你发请求的那一刻回一次。还没拿到过时返回 `None`，
+    /// 让界面显示「未知」，而不是编一个本机日期算出来的数。
     pub fn local_usage(&self) -> VrccLocalUsage {
-        let today = super::throttle::local_date_today();
         let now = Instant::now();
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.usage.roll_to(&today);
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let used = |quota: SeenQuota| ((quota.limit - quota.remaining).max(0), quota.limit);
         let reads = state.live_quota(QuotaBucket::Reads, now);
-        let unread = state
-            .live_quota(QuotaBucket::Unread, now)
-            .map(|quota| ((quota.limit - quota.remaining).max(0), quota.limit));
+        let unread = state.live_quota(QuotaBucket::Unread, now);
         VrccLocalUsage {
-            personal_used_today: state.personal_used_today(),
-            personal_daily_limit: reads.map_or(PERSONAL_DAILY_LIMIT, |quota| quota.limit),
-            personal_from_server: reads.is_some(),
-            unread,
-            device_code_used_today: state.device_code_used_today(),
+            reads: reads.map(used),
+            unread: unread.map(used),
             window_used: state.window_used(now),
             backoff_remaining: state.backoff_remaining(now),
-            date: today,
+            reset_secs: reads.map(|quota| {
+                quota
+                    .until
+                    .saturating_duration_since(now)
+                    .as_secs()
+                    .try_into()
+                    .unwrap_or(i64::MAX)
+            }),
         }
     }
 
@@ -431,8 +399,8 @@ impl VrccClient {
 
     /// 记下服务器在 `RateLimit-*` 里说的一份额度。
     ///
-    /// 第一份读还会把本地计数改成服务器的准数并落盘：这就是「用服务器的数
-    /// 代替自己落盘猜的数」。
+    /// 只存内存。这份数就是界面能看到的全部依据——不再拿它去覆盖什么本地计数，
+    /// 因为本地计数已经没有了。
     fn note_quota(&self, bucket: QuotaBucket, quota: ServerQuota) {
         let now = Instant::now();
         let reset = if quota.reset_secs > 0 {
@@ -449,14 +417,6 @@ impl VrccClient {
                 until: now + Duration::from_secs(reset),
             },
         );
-        if bucket != QuotaBucket::Reads {
-            return;
-        }
-        state.usage.roll_to(&super::throttle::local_date_today());
-        state.usage.set_personal(quota.used());
-        let snapshot = state.usage.clone();
-        drop(state);
-        self.persist_usage(&snapshot);
     }
 
     /// 某一份额度今天用完了：在重置之前，这一份的请求不再发出去。
@@ -473,106 +433,38 @@ impl VrccClient {
         );
     }
 
-    /// 发请求前扣一次额度；已知用完时直接返回 `QuotaExhausted`，不发请求。
+    /// 发请求前过一下额度闸门。
     ///
-    /// 服务器给过 `RateLimit-*` 的，以服务器的余量为准；第一份读在没拿到过
-    /// 服务器的数时，退回本地计数（上限 [`PERSONAL_DAILY_LIMIT`]）。
+    /// **只在拿到过服务端 `RateLimit-*` 时才拦。** 没拿到过就放行——早先会在
+    /// 本地按自然日预扣到 1000 就自己停下，但官方的时间基准是北京时间零点，
+    /// 本地推算的日期对非 UTC+8 的玩家必然错开，结果是「服务端明明还有余量，
+    /// 客户端自己先拒绝」。宁可让服务端回 429（我们原样展示），也不要自己编。
     fn spend(&self, bucket: QuotaBucket) -> Result<(), VrccError> {
-        let today = super::throttle::local_date_today();
         let now = Instant::now();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.usage.roll_to(&today);
-        let live = state.live_quota(bucket, now);
-        if let Some(quota) = live {
-            if quota.remaining <= 0 {
-                return Err(VrccError::QuotaExhausted(format!(
-                    "今天的次数用完了，约 {} 后恢复",
-                    human_wait(quota.until.saturating_duration_since(now).as_secs())
-                )));
-            }
-            // 先扣着，免得两次响应之间连发越界；下一个响应头会覆盖它。
-            if let Some(seen) = state.quotas.get_mut(&bucket) {
-                seen.remaining -= 1;
-            }
-        }
-        if bucket != QuotaBucket::Reads {
+        let Some(live) = state.live_quota(bucket, now) else {
             return Ok(());
-        }
-        if live.is_some() {
-            state.usage.add_personal(1);
-        } else if !state.usage.spend_personal(1) {
+        };
+        if live.remaining <= 0 {
             return Err(VrccError::QuotaExhausted(format!(
-                "本客户端今日个人接口已用满 {PERSONAL_DAILY_LIMIT} 次"
+                "今天的次数用完了，约 {} 后恢复",
+                human_wait(live.until.saturating_duration_since(now).as_secs())
             )));
         }
-        let snapshot = state.usage.clone();
-        drop(state);
-        self.persist_usage(&snapshot);
+        // 先扣着，免得两次响应之间连发越界；下一个响应头会覆盖它。
+        if let Some(seen) = state.quotas.get_mut(&bucket) {
+            seen.remaining -= 1;
+        }
         Ok(())
     }
 
     /// 把 `spend` 预扣的那一次退回去。**只用于请求没发出去的情况。**
     ///
-    /// 与 `spend` 严格对称：`spend` 在「有服务器额度快照」时减
-    /// `remaining`、在本地计数模式下加 `personal`，这里就把对应的那一半还原。
-    ///
-    /// 服务器给过 `RateLimit-*` 时那份数是权威的，所以**只把本地减掉的
-    /// `remaining` 加回来**，不去动别的东西；本地计数则直接减一。
+    /// 服务器根本没收到这个请求，本地就不该占着这次额度。
     fn refund(&self, bucket: QuotaBucket) {
-        let today = super::throttle::local_date_today();
-        let now = Instant::now();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.usage.roll_to(&today);
-        let has_server_quota = state.live_quota(bucket, now).is_some();
-        if has_server_quota {
-            if let Some(seen) = state.quotas.get_mut(&bucket) {
-                seen.remaining = seen.remaining.saturating_add(1);
-            }
-            // `spend` 在服务器模式下对「第一份读」也加了本地数，一并还原。
-            if bucket == QuotaBucket::Reads {
-                state.usage.refund_personal(1);
-            }
-        } else if bucket == QuotaBucket::Reads {
-            state.usage.refund_personal(1);
-        }
-        let snapshot = state.usage.clone();
-        drop(state);
-        self.persist_usage(&snapshot);
-    }
-
-    /// 退一次设备码的预扣。同上，只在请求没发出去时调。
-    fn refund_device_code(&self) {
-        let today = super::throttle::local_date_today();
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.usage.roll_to(&today);
-        state.usage.refund_device_code();
-        let snapshot = state.usage.clone();
-        drop(state);
-        self.persist_usage(&snapshot);
-    }
-
-    pub fn spend_device_code(&self) -> Result<(), VrccError> {
-        let today = super::throttle::local_date_today();
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.usage.roll_to(&today);
-        if !state.usage.spend_device_code() {
-            return Err(VrccError::QuotaExhausted(
-                "本客户端今日申请连接码次数已用尽".to_string(),
-            ));
-        }
-        let snapshot = state.usage.clone();
-        drop(state);
-        self.persist_usage(&snapshot);
-        Ok(())
-    }
-
-    /// 把当前计数写回存储。
-    ///
-    /// 先放锁再落盘：写数据库可能耗时，不该在持有状态锁时做。
-    /// 写失败只记日志——配额记不准比让请求失败轻得多。
-    fn persist_usage(&self, usage: &DailyUsage) {
-        if let Some(store) = &self.usage_store {
-            store.save(usage);
+        if let Some(seen) = state.quotas.get_mut(&bucket) {
+            seen.remaining = seen.remaining.saturating_add(1);
         }
     }
 
@@ -591,6 +483,7 @@ impl VrccClient {
         body: &VrccErrorBody,
         rate: RateHeaders,
         bucket: Option<QuotaBucket>,
+        call_key: Option<&str>,
     ) -> VrccError {
         if error == "too_soon" {
             let gap = rate
@@ -618,6 +511,17 @@ impl VrccClient {
                 .unwrap_or_else(secs_until_beijing_midnight);
             if let Some(bucket) = bucket {
                 self.mark_exhausted(bucket, Duration::from_secs(wait));
+            }
+            // 设备码的 30 次/天是按**网络出口地址**算的，不是按本客户端算的：
+            // 同一路由下的所有人共用一个额度。所以这里的措辞必须点明这一点，
+            // 否则玩家会以为是自己的账号出了问题、或者怪这个软件。
+            if call_key == Some(DEVICE_CODE_KEY) {
+                return VrccError::QuotaExhausted(format!(
+                    "申请连接码失败（{error}）：该额度按网络出口 IP 计算，每天 30 个，\
+                     可能已被同一网络下的其他设备或玩家用完。约 {} 后恢复；\
+                     换一个网络（如手机热点）可以立刻再用。",
+                    human_wait(wait)
+                ));
             }
             return VrccError::QuotaExhausted(format!(
                 "{error}，今天的次数用完了，约 {} 后恢复",
@@ -733,7 +637,7 @@ impl VrccClient {
                 .clone()
                 .unwrap_or_else(|| format!("http_{code}"));
             if code == 429 {
-                return Err(self.on_too_many(&error, &parsed, rate, call.bucket));
+                return Err(self.on_too_many(&error, &parsed, rate, call.bucket, Some(call.key)));
             }
             if code == 503 && error == "stop" {
                 return Err(VrccError::Paused {
@@ -883,38 +787,21 @@ impl VrccClient {
     /// （`xingshi-app`）里「遇 400 退回查询串」的兼容逻辑是对的，这里直接
     /// 从一开始就发查询串，省掉一次注定失败的往返。
     pub async fn device_code(&self, scope: Option<&str>) -> Result<VrccDeviceCode, VrccError> {
-        self.spend_device_code()?;
         let path = match scope.map(str::trim).filter(|scope| !scope.is_empty()) {
             Some(scope) => format!("device/code?scope={}", encode_query_value(scope)),
             None => "device/code".to_string(),
         };
-        let result = self
-            .request(Call {
-                method: "POST",
-                path: &path,
-                body: None,
-                authed: false,
-                key: "device_code",
-                min_gap: Duration::from_secs(5),
-                bucket: None,
-                bypass_gate: false,
-            })
-            .await;
-        // 设备码走自己的计数（`bucket: None`，不经 `request` 的退还逻辑），
-        // 所以这里单独兜一次：请求没发出去就把预扣的退回来。
-        //
-        // 每天只有 30 个码，白扣一个就是实打实的损失。
-        // 只认「没发出去」的那几类错误：限流没过、连接失败。服务器答了
-        // 4xx/5xx 说明它已经收到并计过数了，不能退。
-        if let Err(error) = &result {
-            if matches!(
-                error,
-                VrccError::RateLimited(_) | VrccError::TooSoon { .. } | VrccError::Transport(_)
-            ) {
-                self.refund_device_code();
-            }
-        }
-        result
+        self.request(Call {
+            method: "POST",
+            path: &path,
+            body: None,
+            authed: false,
+            key: DEVICE_CODE_KEY,
+            min_gap: Duration::from_secs(5),
+            bucket: None,
+            bypass_gate: false,
+        })
+        .await
     }
 
     /// 用设备码换令牌。玩家还没点同意时返回 `authorization_pending`，
@@ -1155,40 +1042,55 @@ fn encode_query_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vrcx_0_contracts::vrcc::{
-        is_dev_client, resolve_client_id, VRCC_DEV_CLIENT, VRCC_PROD_CLIENT,
-    };
+    use vrcx_0_contracts::vrcc::{is_dev_client, VRCC_BUILD_CLIENT, VRCC_DEV_CLIENT};
+
+    /// 构建期没注入时，解析结果必须就是开发态标识。
+    ///
+    /// 这条是「克隆下来直接能跑」的保证：不能解析出空串。
+    fn expected_client() -> String {
+        if VRCC_BUILD_CLIENT.trim().is_empty() {
+            VRCC_DEV_CLIENT.to_string()
+        } else {
+            VRCC_BUILD_CLIENT.trim().to_string()
+        }
+    }
 
     fn client() -> VrccClient {
         VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())), None)
     }
 
-    /// 标识解析的优先级：运行时覆盖 > 正式常量 > 开发常量。
+    /// 标识的来源只有两层：构建期注入 > 源码默认，**没有运行时覆盖**。
     ///
-    /// 这三者的关系值得钉住，因为正式标识是平台发的、**不是** `dev-` 那个字符串
-    /// 去掉前缀——`dev-…` 与 `app_…` 是两种东西。写死一处常量迟早有人手改出错。
+    /// 这条钉住的是「同一个二进制永远用同一个标识」。留运行时覆盖就等于允许
+    /// 用配置文件冒充已审核客户端，所以这里连参数都不该有。
     #[test]
-    fn client_id_resolution_prefers_override_then_prod_then_dev() {
-        // 覆盖值优先。
+    fn client_id_is_locked_at_build_time() {
+        // 解析结果就是构建期那一层，不接受任何外部输入。
+        assert_eq!(resolve_client_id(), expected_client());
+        // 没注入时必须落到开发态，不能是空串——空 `X-Client` 每个请求都 403。
+        if VRCC_BUILD_CLIENT.trim().is_empty() {
+            assert_eq!(resolve_client_id(), VRCC_DEV_CLIENT);
+        }
+    }
+
+    /// 无论注入成什么样，**发出去的那个值**必须是干净的非空串。
+    ///
+    /// 这是唯一真正重要的不变式：`option_env!` 拿到的是构建环境的原始串，
+    /// CI 拼接时带空白或换行很常见，而带空白的 `X-Client` 会让**每一个**
+    /// 接口都 `403 client_unknown`，报错里又看不出是空格的问题。
+    ///
+    /// 注意断言的是解析结果、不是常量本身：注入了纯空白时常量确实还是
+    /// `"   "`，但 `resolve_client_id` 会回落到开发态——这种「常量脏、结果
+    /// 干净」的状态是合法的，不该让构建失败。
+    #[test]
+    fn resolved_client_id_is_always_clean() {
+        let resolved = resolve_client_id();
+        assert!(!resolved.is_empty(), "X-Client must never be empty");
         assert_eq!(
-            resolve_client_id(Some("app_0123456789abcdef")),
-            "app_0123456789abcdef"
+            resolved,
+            resolved.trim(),
+            "resolved X-Client must not carry surrounding whitespace"
         );
-        // 空白覆盖值不该被采用（配置项被清成空串是很常见的事）。
-        assert_eq!(resolve_client_id(Some("   ")), {
-            if VRCC_PROD_CLIENT.is_empty() {
-                VRCC_DEV_CLIENT.to_string()
-            } else {
-                VRCC_PROD_CLIENT.to_string()
-            }
-        });
-        assert_eq!(resolve_client_id(None), {
-            if VRCC_PROD_CLIENT.is_empty() {
-                VRCC_DEV_CLIENT.to_string()
-            } else {
-                VRCC_PROD_CLIENT.to_string()
-            }
-        });
     }
 
     /// 开发态判定只看 `dev-` 前缀，这是官方的判定方式。
@@ -1392,48 +1294,84 @@ mod tests {
         assert_eq!(none.absolute_url(), "https://vrcc.cc/");
     }
 
+    /// 没拿到过服务端配额时，`spend` 一律放行。
+    ///
+    /// 早先这里会按本地自然日预扣到 1000 就自己停下。那是错的：官方按北京时间
+    /// 零点重置，本地推算的日期对非 UTC+8 的玩家必然错开，结果就是「服务端
+    /// 明明还有余量，客户端自己先拒绝」。现在宁可让服务端回 429。
     #[tokio::test]
-    async fn personal_quota_stops_before_request() {
+    async fn spend_passes_when_no_server_quota_is_known() {
         let client = client();
-        // 把额度用光
-        {
-            let today = super::super::throttle::local_date_today();
-            let mut state = client.state.lock().unwrap();
-            state.usage.roll_to(&today);
-            assert!(state.usage.spend_personal(PERSONAL_DAILY_LIMIT));
-        }
+        assert!(client.spend(QuotaBucket::Reads).is_ok());
+        assert!(client.local_usage().reads.is_none());
+    }
+
+    /// 服务端说过余量是 0 时，不再把请求发出去。
+    #[tokio::test]
+    async fn spend_stops_once_the_server_says_the_day_is_used_up() {
+        let client = client();
+        client.note_quota(
+            QuotaBucket::Reads,
+            ServerQuota {
+                limit: 1000,
+                remaining: 0,
+                reset_secs: 3600,
+            },
+        );
         let error = client.spend(QuotaBucket::Reads).unwrap_err();
-        assert!(matches!(error, VrccError::QuotaExhausted(_)));
+        assert!(matches!(error, VrccError::QuotaExhausted(_)), "{error:?}");
     }
 
+    /// `spend` 与 `refund` 必须对称：请求没发出去时不能白占一次额度。
     #[test]
-    fn refunding_a_spend_restores_the_local_count() {
-        // `spend` 与 `refund` 必须对称。不对称的话，断网时每一轮轮询都会
-        // 白扣一次，本地计数很快跑满，网络恢复后会被自己拦到第二天。
+    fn refunding_a_spend_restores_the_server_count() {
         let client = client();
-        let before = client.local_usage().personal_used_today;
+        client.note_quota(
+            QuotaBucket::Reads,
+            ServerQuota {
+                limit: 1000,
+                remaining: 10,
+                reset_secs: 3600,
+            },
+        );
+        let before = client.local_usage().reads.expect("server quota").0;
         client.spend(QuotaBucket::Reads).expect("spend");
-        assert_eq!(client.local_usage().personal_used_today, before + 1);
+        let after = client.local_usage().reads.expect("server quota").0;
+        assert_eq!(after, before + 1);
         client.refund(QuotaBucket::Reads);
-        assert_eq!(client.local_usage().personal_used_today, before);
+        assert_eq!(client.local_usage().reads.expect("server quota").0, before);
     }
 
+    /// 没预扣就退还，不该把余量撑到超过上限。
     #[test]
-    fn refunding_does_not_go_below_zero() {
+    fn refunding_never_exceeds_the_server_limit() {
         let client = client();
-        assert_eq!(client.local_usage().personal_used_today, 0);
-        // 没有预扣时退还，不该变成负数。
+        client.note_quota(
+            QuotaBucket::Reads,
+            ServerQuota {
+                limit: 1000,
+                remaining: 1000,
+                reset_secs: 3600,
+            },
+        );
         client.refund(QuotaBucket::Reads);
-        assert_eq!(client.local_usage().personal_used_today, 0);
+        let (used, limit) = client.local_usage().reads.expect("server quota");
+        assert_eq!(used, 0);
+        assert_eq!(limit, 1000);
     }
 
+    /// `/device/code` 不再有本地计数，也不再本地拦截。
+    ///
+    /// 那个额度是**按网络出口 IP** 算的（每天 30 个，同一路由下所有人共用），
+    /// 本客户端无从得知、也不该假装知道。玩家换网络本来能继续用，本地拦着
+    /// 就成了凭空拒绝。
     #[test]
-    fn refunding_device_code_counts() {
+    fn device_code_is_not_counted_locally() {
         let client = client();
-        client.spend_device_code().expect("spend");
-        assert_eq!(client.local_usage().device_code_used_today, 1);
-        client.refund_device_code();
-        assert_eq!(client.local_usage().device_code_used_today, 0);
+        let usage = client.local_usage();
+        // 快照里已经没有这一项了——不存在「本客户端今日申请了几个码」这个数。
+        assert_eq!(usage.reads, None);
+        assert_eq!(usage.unread, None);
     }
 
     #[test]
@@ -1526,12 +1464,12 @@ mod tests {
             quota: None,
         };
         // 1.9.0 起 `Retry-After` 是 25 秒间隔还剩的秒数，比 `every` 准。
-        match client.on_too_many("too_soon", &body, rate, None) {
+        match client.on_too_many("too_soon", &body, rate, None, None) {
             VrccError::TooSoon { retry_after_secs } => assert_eq!(retry_after_secs, 7),
             other => panic!("expected TooSoon, got {other:?}"),
         }
         // 旧服务器没有头：退回 `every`。
-        match client.on_too_many("too_soon", &body, RateHeaders::default(), None) {
+        match client.on_too_many("too_soon", &body, RateHeaders::default(), None, None) {
             VrccError::TooSoon { retry_after_secs } => assert_eq!(retry_after_secs, 60),
             other => panic!("expected TooSoon, got {other:?}"),
         }
@@ -1546,12 +1484,12 @@ mod tests {
             retry_after_secs: Some(60),
             quota: None,
         };
-        let error = client.on_too_many("too_many", &VrccErrorBody::default(), rate, None);
+        let error = client.on_too_many("too_many", &VrccErrorBody::default(), rate, None, None);
         assert!(matches!(error, VrccError::RateLimited(_)), "{error:?}");
         let backoff = client.local_usage().backoff_remaining;
         assert!(backoff > Duration::from_secs(55) && backoff <= Duration::from_secs(60));
         // 第二次照样按服务器说的等，不再自己翻倍。
-        client.on_too_many("too_many", &VrccErrorBody::default(), rate, None);
+        client.on_too_many("too_many", &VrccErrorBody::default(), rate, None, None);
         assert!(client.local_usage().backoff_remaining <= Duration::from_secs(60));
     }
 
@@ -1562,6 +1500,7 @@ mod tests {
             "too_many",
             &VrccErrorBody::default(),
             RateHeaders::default(),
+            None,
             None,
         );
         assert!(matches!(error, VrccError::RateLimited(_)));
@@ -1585,6 +1524,7 @@ mod tests {
             &VrccErrorBody::default(),
             rate,
             Some(QuotaBucket::MoreReads),
+            None,
         );
         assert!(matches!(error, VrccError::QuotaExhausted(_)), "{error:?}");
         assert!(error.to_string().contains("5 小时"), "{error}");
@@ -1608,22 +1548,19 @@ mod tests {
             retry_after_secs: Some(8 * 3600),
             quota: None,
         };
-        let error = client.on_too_many("too_many", &VrccErrorBody::default(), rate, None);
+        let error = client.on_too_many("too_many", &VrccErrorBody::default(), rate, None, None);
         assert!(matches!(error, VrccError::QuotaExhausted(_)), "{error:?}");
         assert!(client.local_usage().backoff_remaining.is_zero());
     }
 
+    /// 服务端给的数直接进快照，不再覆盖什么本地计数。
     #[test]
-    fn server_quota_replaces_the_local_count() {
+    fn server_quota_shows_up_in_the_snapshot() {
         let client = client();
-        // 本地先记了 3 次（比如重启前的落盘数）。
-        for _ in 0..3 {
-            client.spend(QuotaBucket::Reads).unwrap();
-        }
+        // 还没拿到过头：什么都不显示，也绝不编一个数出来。
         let before = client.local_usage();
-        assert_eq!(before.personal_used_today, 3);
-        assert!(!before.personal_from_server);
-        assert_eq!(before.personal_daily_limit, PERSONAL_DAILY_LIMIT);
+        assert_eq!(before.reads, None);
+        assert_eq!(before.reset_secs, None);
 
         // 服务器说这个授权今天已经用了 412 次。
         client.note_quota(
@@ -1635,9 +1572,9 @@ mod tests {
             },
         );
         let after = client.local_usage();
-        assert_eq!(after.personal_used_today, 412);
-        assert_eq!(after.personal_daily_limit, 1000);
-        assert!(after.personal_from_server);
+        assert_eq!(after.reads, Some((412, 1000)));
+        // 重置时间来自服务端（到北京时间零点的秒数），不是本地推算的。
+        assert!(after.reset_secs.is_some_and(|secs| secs <= 3600));
         // 未读数那一份还没拿到过头，不显示。
         assert_eq!(after.unread, None);
 
@@ -1652,16 +1589,12 @@ mod tests {
         assert_eq!(client.local_usage().unread, Some((100, 1500)));
     }
 
+    /// 服务器哪天把上限调高了，本地不该有任何理由拦住。
+    ///
+    /// 现在本地根本没有上限这个概念了，这条钉住「没有本地上限」。
     #[test]
-    fn server_quota_lets_a_raised_limit_through() {
-        // 本地兜底上限是 1000；服务器哪天把上限调高了，不能被本地数拦住。
+    fn a_raised_server_limit_is_never_capped_locally() {
         let client = client();
-        {
-            let today = super::super::throttle::local_date_today();
-            let mut state = client.state.lock().unwrap();
-            state.usage.roll_to(&today);
-            assert!(state.usage.spend_personal(PERSONAL_DAILY_LIMIT));
-        }
         client.note_quota(
             QuotaBucket::Reads,
             ServerQuota {
@@ -1670,6 +1603,7 @@ mod tests {
                 reset_secs: 3600,
             },
         );
+        assert!(client.spend(QuotaBucket::Reads).is_ok());
         assert!(client.spend(QuotaBucket::Reads).is_ok());
     }
 

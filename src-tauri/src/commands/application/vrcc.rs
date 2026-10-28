@@ -83,8 +83,8 @@ pub fn app__vrcc_connection(state: State<'_, AppState>) -> VrccConnectionSnapsho
     state.runtime_host().vrcc().connection()
 }
 
-/// 今日用量。口径是「今日已用 N/上限」，不是「剩余」。服务器回过
-/// `RateLimit-*` 就是服务器的数，否则是本客户端自己记的（`personalFromServer`）。
+/// 今日用量。口径是「今日已用 N/上限」，不是「剩余」，且全部来自服务端的
+/// `RateLimit-*` 响应头；还没拿到过时字段是 `null`（界面显示「未知」）。
 #[tauri::command(async)]
 #[specta::specta]
 pub fn app__vrcc_usage(state: State<'_, AppState>) -> VrccUsageSnapshot {

@@ -222,8 +222,8 @@ impl VrccRemote for FakeRemote {
     }
     fn local_usage(&self) -> VrccLocalUsage {
         VrccLocalUsage {
-            personal_daily_limit: 1000,
-            date: "2026-10-26".to_string(),
+            reads: Some((12, 1000)),
+            reset_secs: Some(3600),
             ..VrccLocalUsage::default()
         }
     }
@@ -232,9 +232,6 @@ impl VrccRemote for FakeRemote {
     }
     fn window_limit(&self) -> i64 {
         120
-    }
-    fn device_code_daily_limit(&self) -> i64 {
-        30
     }
     fn now_millis(&self) -> i64 {
         1_700_000_000_000
@@ -266,17 +263,17 @@ fn new_without_stored_token_is_disconnected() {
 }
 
 #[test]
-fn usage_reports_used_not_remaining() {
+fn usage_reports_what_the_server_said() {
     // 口径要求：只说「今日已用 N/上限」，不说「还剩」。
     let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
     let usage = service.usage();
-    // 1.8.4 起第一份读是每个授权每天 1000 次。
-    assert_eq!(usage.personal_daily_limit, 1000);
-    assert_eq!(usage.device_code_daily_limit, 30);
+    // 服务端 `RateLimit-*` 说的那一份。
+    assert_eq!(usage.personal_used_today, Some(12));
+    assert_eq!(usage.personal_daily_limit, Some(1000));
     assert_eq!(usage.window_limit, 120);
-    assert!(!usage.date.is_empty());
-    // 还没拿到过服务器的 `RateLimit-*`：本地数，未读数那一份不显示。
-    assert!(!usage.personal_from_server);
+    // 重置时间来自服务端（到北京时间零点的秒数），不是本地推算的日期。
+    assert_eq!(usage.reset_secs, Some(3600));
+    // 未读数那一份还没拿到过响应头，不显示。
     assert_eq!(usage.unread_used_today, None);
     assert_eq!(usage.unread_daily_limit, None);
 }
@@ -442,12 +439,11 @@ async fn unread_and_notes_require_connection() {
 }
 
 #[test]
-fn usage_starts_at_zero_and_reflects_real_counters() {
-    // 新客户端还没发过请求，计数应当是真实的 0（而不是被写死的 0）。
+fn usage_snapshot_reflects_the_remote_counters() {
+    // 快照必须是真实读上来的，不是写死的 0。
     let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
     let usage = service.usage();
-    assert_eq!(usage.personal_used_today, 0);
-    assert_eq!(usage.device_code_used_today, 0);
+    assert_eq!(usage.personal_used_today, Some(12));
     assert_eq!(usage.window_used, 0);
     assert_eq!(usage.backoff_remaining_ms, 0);
 }

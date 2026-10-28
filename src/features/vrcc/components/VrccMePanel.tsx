@@ -16,11 +16,28 @@ import type {
 const SITE = 'https://vrcc.cc';
 
 /**
+ * 把服务端给的「还有几秒重置」写成人话。
+ *
+ * 这个数直接来自 `RateLimit-Reset`，量的就是到北京时间的零点，**不要**拿本地
+ * 时区去换算成具体时刻——那会在非 UTC+8 的机器上显示出错误的时间。
+ */
+function formatReset(secs: number): string {
+    const total = Math.max(0, Math.floor(secs));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.ceil((total % 3600) / 60);
+    if (hours > 0) {
+        return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+    }
+    return `${Math.max(1, minutes)}m`;
+}
+
+/**
  * 「我的」页：连接状态、设备授权、今日用量。
  *
- * 用量口径是「今日已用 N/上限」，不是「剩余」。服务器回过 `RateLimit-*`
- * （1.11.0 起）就是服务器按这个授权算的准数，否则是本客户端自己记的数；
- * 说明文字照来源换，不把自己猜的数说成服务器的。
+ * 用量口径是「今日已用 N/上限」，不是「剩余」，且**全部来自服务端的
+ * `RateLimit-*` 响应头**。官方没有查询额度的接口，那组头只在发请求的那一刻
+ * 回一次，所以这里显示的是「最近一次请求时服务端说的数」。还没拿到过就显示
+ * 「未知」——不拿本地日期去推算，因为官方按北京时间零点重置，本地算不准。
  */
 export function VrccMePanel({
     connection,
@@ -188,44 +205,41 @@ export function VrccMePanel({
                 </div>
             )}
 
-            {/* 本地用量 */}
+            {/* 今日用量：全部来自服务端响应头 */}
             {usage && (
                 <section className="rounded-xl border p-3">
                     <div className="mb-2 flex items-baseline gap-2">
                         <h3 className="text-sm font-semibold">
                             {t('vrcc.me.usage')}
                         </h3>
-                        <span className="text-muted-foreground ml-auto text-[10px] tabular-nums">
-                            {usage.date}
-                        </span>
+                        {usage.resetSecs != null && usage.resetSecs > 0 && (
+                            <span className="text-muted-foreground ml-auto text-[10px] tabular-nums">
+                                {t('vrcc.me.usage_reset_in', {
+                                    time: formatReset(usage.resetSecs)
+                                })}
+                            </span>
+                        )}
                     </div>
                     <UsageBar
                         label={t('vrcc.me.personal_used')}
                         used={usage.personalUsedToday}
                         limit={usage.personalDailyLimit}
+                        unknownHint={t('vrcc.me.usage_unknown')}
                     />
-                    {usage.unreadUsedToday != null &&
-                        usage.unreadDailyLimit != null && (
-                            <UsageBar
-                                label={t('vrcc.me.unread_used')}
-                                used={usage.unreadUsedToday}
-                                limit={usage.unreadDailyLimit}
-                            />
-                        )}
                     <UsageBar
-                        label={t('vrcc.me.device_code_used')}
-                        used={usage.deviceCodeUsedToday}
-                        limit={usage.deviceCodeDailyLimit}
+                        label={t('vrcc.me.unread_used')}
+                        used={usage.unreadUsedToday ?? null}
+                        limit={usage.unreadDailyLimit ?? null}
+                        unknownHint={t('vrcc.me.usage_unknown')}
                     />
                     <UsageBar
                         label={t('vrcc.me.window')}
                         used={usage.windowUsed}
                         limit={usage.windowLimit}
+                        unknownHint={t('vrcc.me.usage_unknown')}
                     />
                     <p className="text-muted-foreground mt-2 text-[10px] leading-relaxed">
-                        {usage.personalFromServer
-                            ? t('vrcc.me.usage_note_server')
-                            : t('vrcc.me.usage_note')}
+                        {t('vrcc.me.usage_note')}
                     </p>
                 </section>
             )}
@@ -268,13 +282,30 @@ function Row({ label, value }: { label: string; value: string }) {
 function UsageBar({
     label,
     used,
-    limit
+    limit,
+    unknownHint
 }: {
     label: string;
-    used: number;
-    limit: number;
+    used: number | null;
+    limit: number | null;
+    unknownHint: string;
 }) {
     // 口径：已用 N/上限，不显示「剩余」。
+    //
+    // `null` 是「服务端还没说过」——这时不画进度条、不填假数字。我们刻意不
+    // 拿本地日期去推算，因为官方按北京时间零点重置，本地算出来的是错的。
+    if (used == null || limit == null) {
+        return (
+            <div className="mb-1.5">
+                <div className="mb-0.5 flex items-baseline gap-2 text-[11px]">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="text-muted-foreground/70 ml-auto text-[10px]">
+                        {unknownHint}
+                    </span>
+                </div>
+            </div>
+        );
+    }
     const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
     return (
         <div className="mb-1.5">

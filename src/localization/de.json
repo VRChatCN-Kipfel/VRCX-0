@@ -858,6 +858,8 @@
             "code_copied": "Authorization code {code} copied",
             "open_browser_failed": "Could not open the browser; open the VRCC site manually",
             "usage_note_server": "These numbers come from the VRCC server: today's count for this connection. They reset at midnight Beijing time.",
+            "usage_unknown": "noch unbekannt",
+            "usage_reset_in": "Zurücksetzung in {time}",
             "unread_used": "Unread counts",
             "expired": "The previous connection is no longer valid: it was disconnected on vrcc.cc, authorized again elsewhere, or unused for 90 days. Please connect again."
         },

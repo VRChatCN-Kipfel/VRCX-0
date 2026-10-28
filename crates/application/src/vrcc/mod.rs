@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError,
-    VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus,
-    VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    is_dev_client, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot,
+    VrccDeviceCode, VrccError, VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications,
+    VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse, VrccUnread,
+    VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -40,23 +41,6 @@ pub trait VrccTokenStore: Send + Sync {
 /// `VrccError` 要能区分「重新授权 / 缺权限 / 限流 / 网络」，那是业务判定。
 pub type VrccFuture<'a, T> = futures_util::future::BoxFuture<'a, std::result::Result<T, VrccError>>;
 
-/// 日配额计数的落盘端口。
-///
-/// 只搬运 `(日期, 第一份读, 设备码)` 三个数：那是 `throttle` 里
-/// `DailyUsage` 的全部内容，但不暴露它的类型，避免应用层依赖网络实现。
-pub trait VrccUsageStore: Send + Sync {
-    fn load(&self) -> Option<VrccUsageRecord>;
-    fn save(&self, record: &VrccUsageRecord);
-}
-
-/// 落盘用的日配额快照，字段与 `integrations::vrcc::DailyUsage` 一一对应。
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct VrccUsageRecord {
-    pub date: String,
-    pub personal: i64,
-    pub device_code: i64,
-}
-
 /// 会话状态快照（应用层视角）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VrccConnection {
@@ -77,16 +61,16 @@ pub struct VrccConnection {
 }
 
 /// 本客户端的用量快照（应用层视角）。
+///
+/// 全部来自服务端的 `RateLimit-*`。没拿到过就是 `None`——界面显示「未知」，
+/// 不要拿本地日期推算一个数出来（官方按北京时间零点重置，本地算不准）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VrccLocalUsage {
-    pub personal_used_today: i64,
-    pub personal_daily_limit: i64,
-    pub personal_from_server: bool,
+    pub reads: Option<(i64, i64)>,
     pub unread: Option<(i64, i64)>,
-    pub device_code_used_today: i64,
     pub window_used: usize,
     pub backoff_remaining_ms: i64,
-    pub date: String,
+    pub reset_secs: Option<i64>,
 }
 
 /// 星遇同频网络端口。
@@ -138,8 +122,6 @@ pub trait VrccRemote: Send + Sync {
     fn note_poll(&self, at_ms: i64, cursor: Option<i64>, every_secs: Option<i64>);
     /// 限流窗口容量（每分钟）。
     fn window_limit(&self) -> i64;
-    /// 每网络地址每日拿码上限。
-    fn device_code_daily_limit(&self) -> i64;
     /// 当前毫秒时间戳，由实现方提供以保持「时间来自一处」。
     fn now_millis(&self) -> i64;
 }
@@ -245,7 +227,7 @@ pub struct StoredCredential {
     /// 签发这个令牌时用的 `X-Client`；旧存档没有这一项。
     ///
     /// 令牌只能配签发它的那个 client 使用，换了标识会 `403 client_mismatch`。
-    /// 加载时和当前 `resolve_client_id` 的结果比对，不一致就丢弃——
+    /// 加载时和当前构建期标识比对，不一致就丢弃——
     /// 否则换标识后旧令牌会在启动时被恢复成「已连接」，之后每次请求都 403。
     pub client_id: Option<String>,
 }
@@ -489,7 +471,7 @@ impl VrccService {
 
     pub fn snapshot(&self) -> VrccConnectionSnapshot {
         let connection = self.remote.connection();
-        let client_is_dev = connection.client.trim().starts_with("dev-");
+        let client_is_dev = is_dev_client(&connection.client);
         VrccConnectionSnapshot {
             connected: connection.connected,
             expired: connection.expired,
@@ -517,23 +499,20 @@ impl VrccService {
 
     /// 用量快照。
     ///
-    /// 口径：说「今日已用」多少。服务器回过 `RateLimit-*`（1.11.0 起）就是
-    /// 服务器按这个授权算的准数，否则是本客户端自己记的；`personal_from_server`
-    /// 告诉界面是哪一种。
+    /// 口径：说「今日已用」多少，**全部来自服务端的 `RateLimit-*`**。还没拿到
+    /// 过那组头时字段是 `None`，界面显示「未知」——不要拿本地日期推算，
+    /// 官方按北京时间零点重置，本地算出来的是错的。
     pub fn usage(&self) -> VrccUsageSnapshot {
         let usage = self.remote.local_usage();
         VrccUsageSnapshot {
-            personal_used_today: usage.personal_used_today,
-            personal_daily_limit: usage.personal_daily_limit,
-            personal_from_server: usage.personal_from_server,
+            personal_used_today: usage.reads.map(|(used, _)| used),
+            personal_daily_limit: usage.reads.map(|(_, limit)| limit),
             unread_used_today: usage.unread.map(|(used, _)| used),
             unread_daily_limit: usage.unread.map(|(_, limit)| limit),
-            device_code_used_today: usage.device_code_used_today,
-            device_code_daily_limit: self.remote.device_code_daily_limit(),
             window_used: usage.window_used as i64,
             window_limit: self.remote.window_limit(),
             backoff_remaining_ms: usage.backoff_remaining_ms,
-            date: usage.date,
+            reset_secs: usage.reset_secs,
         }
     }
 

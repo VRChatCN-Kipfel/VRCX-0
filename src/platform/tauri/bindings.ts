@@ -325,8 +325,8 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_connection');
     },
     /**
-     * 今日用量。口径是「今日已用 N/上限」，不是「剩余」。服务器回过
-     * `RateLimit-*` 就是服务器的数，否则是本客户端自己记的（`personalFromServer`）。
+     * 今日用量。口径是「今日已用 N/上限」，不是「剩余」，且全部来自服务端的
+     * `RateLimit-*` 响应头；还没拿到过时字段是 `null`（界面显示「未知」）。
      */
     async appVrccUsage(): Promise<VrccUsageSnapshot> {
         return await TAURI_INVOKE('app__vrcc_usage');
@@ -7810,25 +7810,29 @@ export type VrccUnread = {
 /**
  * 本客户端今天的用量。
  *
+ * **全部来自服务端响应头，既不落盘也不自我推算。**
+ *
  * 1.11.0 起，带每天次数的接口会回答 `RateLimit-Limit` / `RateLimit-Remaining`
- * / `RateLimit-Reset`，那是服务器按这个授权算的准数。拿到过就用它
- * （`personal_from_server` 为 `true`）；旧服务器没有这组头时，才退回本客户端
- * 自己记的数。措辞要分清这两种来源。
+ * / `RateLimit-Reset`，那是服务器按这个授权算的准数。官方没有「查询额度」的
+ * 接口，这组头只在你发某个请求的那一刻回一次——所以界面上显示的是「最近一次
+ * 请求时服务端说的余量」，不是实时值，也不需要是实时值。
+ *
+ * 为什么不再自己记账：官方的时间基准是**北京时间零点**（`RateLimit-Reset`
+ * 是到那时候的秒数），而本地推算只能拿到本机时区的自然日。两套时钟对非
+ * UTC+8 的玩家必然错开，本地记的数会变成「昨天下班前用了 980」这种误导，
+ * 还可能在服务端早就重置之后继续把请求拦在本地。宁可显示「未知」，也不显示
+ * 一个自己编的数。
  */
 export type VrccUsageSnapshot = {
     /**
      * 今日「第一份读」已用次数（最近的提醒、星轨相交、互相连上、所在的地图、
-     * 我打过分的地图合计）。
+     * 我打过分的地图合计）。还没拿到过服务端响应头时为 `null`。
      */
-    personalUsedToday: number;
+    personalUsedToday: number | null;
     /**
      * 「第一份读」每个授权每天的上限（1.8.4 起是 1000）。
      */
-    personalDailyLimit: number;
-    /**
-     * `personal_used_today` 是不是服务器响应头给的。`false` 时是本地计数。
-     */
-    personalFromServer: boolean;
+    personalDailyLimit: number | null;
     /**
      * 今日 `me/unread` 已用次数；服务器还没给过响应头时为 `null`。
      */
@@ -7837,14 +7841,6 @@ export type VrccUsageSnapshot = {
      * `me/unread` 每天的上限（1500）；同上，没拿到时为 `null`。
      */
     unreadDailyLimit: number | null;
-    /**
-     * 今日 `/device/code` 已用次数（本地计数）。
-     */
-    deviceCodeUsedToday: number;
-    /**
-     * 官方对每网络地址每日拿码上限。
-     */
-    deviceCodeDailyLimit: number;
     /**
      * 限流窗口内已发请求数。
      */
@@ -7858,9 +7854,12 @@ export type VrccUsageSnapshot = {
      */
     backoffRemainingMs: number;
     /**
-     * 用量计数的日期（本地时区 `YYYY-MM-DD`）。
+     * 服务端下一次重置额度还有多少秒（`RateLimit-Reset`）；没拿到时为 `null`。
+     *
+     * 这是**服务端**的时间基准（北京时间零点），界面据此显示「几点恢复」，
+     * 不要拿本机时区去推。
      */
-    date: string;
+    resetSecs: number | null;
 };
 export type VrchatAuthFileAnalysisInput = {
     fileId?: string;

@@ -191,20 +191,34 @@ pub const VRCC_DEV_CLIENT: &str = "dev-VRCX-0-Galaxies";
 /// 注意这不是 `X-Client` 的值。官方对应用名称的规定是「2–20 个字，不能带
 /// 「星遇同频」「VRCC」「VRChat」「官方」「管理员」」，`VRCX-0-Galaxies` 符合。
 /// 登记通过后拿到的 `client_id`（`app_` + 16 位十六进制）才是正式态的
-/// `X-Client`，届时用 [`VRCC_PROD_CLIENT`] 或运行时配置覆盖。
+/// `X-Client`，届时用 [`VRCC_BUILD_CLIENT`] 在构建期注入。
 pub const VRCC_APP_NAME: &str = "VRCX-0-Galaxies";
 
-/// 正式态客户端标识占位。
+/// 构建期注入的正式客户端标识。
 ///
-/// 官方 `client_id` 由平台发放，不能自己指定，所以这里先留空：
-/// 空值时回落用 [`VRCC_DEV_CLIENT`]。拿到 `app_…` 后改这一处，
-/// 或通过 [`crate::vrcc::resolve_client_id`] 的运行时覆盖传入。
-pub const VRCC_PROD_CLIENT: &str = "";
+/// 官方 `client_id`（`app_` + 16 位十六进制）由平台发放，**不入库**：
+///
+/// ```text
+/// 构建时：  VRCC_CLIENT_ID=app_xxxxxxxxxxxxxxxx  npm run tauri:build
+/// 未注入：  ""
+/// ```
+///
+/// `option_env!` 而不是 `env!`：源码树里默认没有正式标识，这必须是合法状态，
+/// 不是构建错误。cargo 会因这个变量的变化而重编本 crate，不需要额外声明。
+///
+/// 走的是和 [`crate::telemetry`] 里 `VRCX_0_TELEMETRY_ENDPOINT` 同一套约定——
+/// 构建期注入、源码里不留真实值。
+///
+/// **不要**把它改成字面量，也不要写进 `.cargo/config.toml`（那个文件是入库的）。
+pub const VRCC_BUILD_CLIENT: &str = match option_env!("VRCC_CLIENT_ID") {
+    Some(id) => id,
+    None => "",
+};
 
-/// 默认客户端标识：正式态没配就用开发态。
+/// 源码默认的客户端标识：构建期没注入时用它。
 ///
-/// 调用方应当用 [`resolve_client_id`] 而不是直接读这个常量，
-/// 这样配置覆盖能生效。
+/// 克隆下来直接 `tauri:dev` 就该能连上公开接口，所以默认值必须是能跑的。
+/// 需要正式标识时用 [`VRCC_BUILD_CLIENT`] 在构建期注入，别改这里。
 pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 
 /// 申请设备授权时**显式请求**的权限集合。
@@ -220,19 +234,38 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 /// 需要单独审核，拿到正式 `app_` 标识后再加。
 pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps";
 
-/// 决定实际要发的 `X-Client`。
+/// 实际要发的 `X-Client`。
 ///
-/// 优先级：运行时覆盖 > 正式态常量 > 开发态常量。
+/// **构建即锁定**：只有两层，没有运行时开关。
 ///
-/// 之所以允许运行时覆盖而不是只改常量：正式标识是平台发的，换它不该要求
-/// 重新编译；而且开发态和正式态的标识**不是同一个字符串的加前缀关系**
-/// （`dev-…` 与 `app_…` 是两种东西），写死一处常量迟早有人手改出错。
-pub fn resolve_client_id(override_id: Option<&str>) -> String {
-    let trimmed = override_id.map(str::trim).filter(|id| !id.is_empty());
-    match trimmed {
-        Some(id) => id.to_string(),
-        None if !VRCC_PROD_CLIENT.is_empty() => VRCC_PROD_CLIENT.to_string(),
-        None => VRCC_DEV_CLIENT.to_string(),
+/// ```text
+/// 1. VRCC_CLIENT_ID 环境变量       ← 构建期注入，不入库
+/// 2. dev-VRCX-0-Galaxies          ← 源码默认
+/// ```
+///
+/// 为什么不留运行时覆盖：`X-Client` 是「这个二进制以谁的身份和平台通信」的
+/// 全部凭据。留一个配置项等于允许用户在配置文件里填上正式标识，去冒充一个
+/// 通过审核的客户端——那是绕过平台审核，不是便利。锁定在构建期后，产物用
+/// 的是哪个标识只看它怎么被打出来，配置文件改不动它。
+///
+/// 想换标识就重新打包，并且应重新走一次设备授权：令牌绑签发它的那个标识。
+///
+/// 开发态和正式态的标识**不是同一个字符串的加前缀关系**（`dev-…` 与
+/// `app_…` 是两种东西），写死一处常量迟早有人手改出错。
+pub fn resolve_client_id() -> String {
+    build_client_id().to_string()
+}
+
+/// 构建期注入的标识；没注入时回落到开发态。
+///
+/// 注入值也要 trim：CI 里从变量拼进来的串偶尔带空白，而 `X-Client` 带空白
+/// 会吃 `403 client_unknown`，且现象是「所有接口都 403」，极难看出是空格。
+fn build_client_id() -> &'static str {
+    let injected = VRCC_BUILD_CLIENT.trim();
+    if injected.is_empty() {
+        VRCC_DEV_CLIENT
+    } else {
+        injected
     }
 }
 
@@ -971,36 +1004,41 @@ pub struct VrccErrorBody {
 
 /// 本客户端今天的用量。
 ///
+/// **全部来自服务端响应头，既不落盘也不自我推算。**
+///
 /// 1.11.0 起，带每天次数的接口会回答 `RateLimit-Limit` / `RateLimit-Remaining`
-/// / `RateLimit-Reset`，那是服务器按这个授权算的准数。拿到过就用它
-/// （`personal_from_server` 为 `true`）；旧服务器没有这组头时，才退回本客户端
-/// 自己记的数。措辞要分清这两种来源。
+/// / `RateLimit-Reset`，那是服务器按这个授权算的准数。官方没有「查询额度」的
+/// 接口，这组头只在你发某个请求的那一刻回一次——所以界面上显示的是「最近一次
+/// 请求时服务端说的余量」，不是实时值，也不需要是实时值。
+///
+/// 为什么不再自己记账：官方的时间基准是**北京时间零点**（`RateLimit-Reset`
+/// 是到那时候的秒数），而本地推算只能拿到本机时区的自然日。两套时钟对非
+/// UTC+8 的玩家必然错开，本地记的数会变成「昨天下班前用了 980」这种误导，
+/// 还可能在服务端早就重置之后继续把请求拦在本地。宁可显示「未知」，也不显示
+/// 一个自己编的数。
 #[derive(Clone, Debug, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VrccUsageSnapshot {
     /// 今日「第一份读」已用次数（最近的提醒、星轨相交、互相连上、所在的地图、
-    /// 我打过分的地图合计）。
-    pub personal_used_today: i64,
+    /// 我打过分的地图合计）。还没拿到过服务端响应头时为 `null`。
+    pub personal_used_today: Option<i64>,
     /// 「第一份读」每个授权每天的上限（1.8.4 起是 1000）。
-    pub personal_daily_limit: i64,
-    /// `personal_used_today` 是不是服务器响应头给的。`false` 时是本地计数。
-    pub personal_from_server: bool,
+    pub personal_daily_limit: Option<i64>,
     /// 今日 `me/unread` 已用次数；服务器还没给过响应头时为 `null`。
     pub unread_used_today: Option<i64>,
     /// `me/unread` 每天的上限（1500）；同上，没拿到时为 `null`。
     pub unread_daily_limit: Option<i64>,
-    /// 今日 `/device/code` 已用次数（本地计数）。
-    pub device_code_used_today: i64,
-    /// 官方对每网络地址每日拿码上限。
-    pub device_code_daily_limit: i64,
     /// 限流窗口内已发请求数。
     pub window_used: i64,
     /// 限流窗口容量（每分钟）。
     pub window_limit: i64,
     /// 若正在退避，还有多少毫秒恢复。
     pub backoff_remaining_ms: i64,
-    /// 用量计数的日期（本地时区 `YYYY-MM-DD`）。
-    pub date: String,
+    /// 服务端下一次重置额度还有多少秒（`RateLimit-Reset`）；没拿到时为 `null`。
+    ///
+    /// 这是**服务端**的时间基准（北京时间零点），界面据此显示「几点恢复」，
+    /// 不要拿本机时区去推。
+    pub reset_secs: Option<i64>,
 }
 
 /// 连接状态投影。

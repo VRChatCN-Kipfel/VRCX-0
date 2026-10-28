@@ -91,15 +91,12 @@ const connected = {
 const usage = {
     personalUsedToday: 7,
     personalDailyLimit: 1000,
-    personalFromServer: true,
     unreadUsedToday: 40,
     unreadDailyLimit: 1500,
-    deviceCodeUsedToday: 1,
-    deviceCodeDailyLimit: 30,
     windowUsed: 2,
     windowLimit: 120,
     backoffRemainingMs: 0,
-    date: '2026-10-26'
+    resetSecs: 3600
 };
 
 beforeEach(() => {

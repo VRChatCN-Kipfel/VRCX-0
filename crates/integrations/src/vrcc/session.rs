@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use vrcx_0_contracts::vrcc::VrccConnectionSnapshot;
+use vrcx_0_contracts::vrcc::{is_dev_client, VrccConnectionSnapshot};
 
 use super::client::VrccClient;
 
@@ -42,8 +42,6 @@ pub struct VrccSession {
     /// 放在会话里而不是每次调用时传：同一会话下所有请求必须走同一条网络路径，
     /// 否则会出现"某几个接口通、某几个不通"这种极难排查的状态。
     proxy_url: Option<String>,
-    /// 日配额计数的落盘端口；`None` 时只在内存里记（重启清零）。
-    usage_store: Option<Arc<dyn super::client::DailyUsageStore>>,
 }
 
 impl VrccSession {
@@ -57,7 +55,6 @@ impl VrccSession {
             state: Arc::new(RwLock::new(default_state())),
             client_id: client_id.into(),
             proxy_url: proxy_url.filter(|url| !url.trim().is_empty()),
-            usage_store: None,
         }
     }
 
@@ -139,23 +136,18 @@ impl VrccSession {
     }
 
     /// 按当前会话造一个客户端。
+    ///
+    /// 配额快照跟着 `VrccClient` 的 `state` 走，而 `client()` 每次造的是**新**
+    /// 客户端——所以同一会话里连发两次请求，配额不会互相累加。这是可接受的：
+    /// 权威值本来就是每次响应头重新给一遍，中间那点偏差只在「同一会儿连打两次」
+    /// 的窗口里存在，且服务端仍是最终判据。
     pub fn client(&self) -> VrccClient {
         let session = self.clone();
-        let client = VrccClient::new(
+        VrccClient::new(
             self.client_id.clone(),
             Arc::new(move || session.token()),
             self.proxy_url.as_deref(),
-        );
-        match &self.usage_store {
-            Some(store) => client.with_usage_store(Arc::clone(store)),
-            None => client,
-        }
-    }
-
-    /// 接上日配额的落盘端口。
-    pub fn with_usage_store(mut self, store: Arc<dyn super::client::DailyUsageStore>) -> Self {
-        self.usage_store = Some(store);
-        self
+        )
     }
 }
 
@@ -182,7 +174,7 @@ pub struct VrccSessionSnapshot {
 
 impl From<VrccSessionSnapshot> for VrccConnectionSnapshot {
     fn from(snapshot: VrccSessionSnapshot) -> Self {
-        let client_is_dev = snapshot.client.trim().starts_with("dev-");
+        let client_is_dev = is_dev_client(&snapshot.client);
         VrccConnectionSnapshot {
             connected: snapshot.connected,
             expired: snapshot.expired,
