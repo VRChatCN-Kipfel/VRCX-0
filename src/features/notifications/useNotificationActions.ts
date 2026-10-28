@@ -28,8 +28,10 @@ import {
 } from '@/services/notificationActionService';
 import { markAllNotificationsSeenWithFeedback } from '@/services/notificationMarkAllSeenService';
 import { toast } from '@/services/toastService';
+import { openVrccNotificationCenter } from '@/services/vrccNotificationService';
 import { withUploadTimeout } from '@/shared/utils/imageUpload';
 import { parseLocation } from '@/shared/utils/location';
+import { isVrccNotificationLink } from '@/shared/utils/vrccNotification';
 import { useModalStore } from '@/state/modalStore';
 import { useVrcNotificationStore } from '@/state/vrcNotificationStore';
 
@@ -83,6 +85,10 @@ export function useNotificationActions({
     const openNotificationLink = useCallback((link: unknown) => {
         const value = String(link || '').trim();
         if (!value) return;
+        if (isVrccNotificationLink(value)) {
+            openVrccNotificationCenter();
+            return;
+        }
         if (value.startsWith('user:')) {
             const userId = value.slice('user:'.length);
             openUserDialog({ userId });

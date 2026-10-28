@@ -17,10 +17,12 @@ import {
     openExternalLink
 } from '@/services/entityMediaService';
 import { toast } from '@/services/toastService';
+import { openVrccNotificationCenter } from '@/services/vrccNotificationService';
 import { hasGroupIdPrefix } from '@/shared/constants/vrchatIds';
 import { parseLocation } from '@/shared/utils/location';
 import { getNotificationTs } from '@/shared/utils/notificationCategory';
 import { isRecord } from '@/shared/utils/record';
+import { isVrccNotificationLink } from '@/shared/utils/vrccNotification';
 
 type CachedInstanceLike = Record<string, unknown> & {
     closedAt?: string | null;
@@ -194,6 +196,10 @@ function openNotificationLink(link: unknown) {
     const value = String(link || '').trim();
     if (!value) {
         return false;
+    }
+    if (isVrccNotificationLink(value)) {
+        openVrccNotificationCenter();
+        return true;
     }
     if (value.startsWith('user:')) {
         const userId = value.slice('user:'.length);
