@@ -89,6 +89,7 @@ import {
     handleAppUpdateDownloadStatusSnapshot,
     handleAppUpdateInstalledEvent
 } from './updateInstallService';
+import { bindVrccNotificationCenterEvents } from './vrccNotificationService';
 import { applyVrcStatusSnapshot } from './vrcStatusService';
 
 function reconcilePendingBackendRealtimeProjectionEvents(): void {
@@ -620,6 +621,7 @@ export async function bindRuntimeEvents(): Promise<() => void> {
     try {
         unsubscribers.push(await bindDeepLinkEvents());
         unsubscribers.push(await bindDesktopNotificationActivationEvents());
+        unsubscribers.push(await bindVrccNotificationCenterEvents());
         await Promise.all([
             drainPendingDeepLinks(),
             takePendingDesktopNotificationActivation()
