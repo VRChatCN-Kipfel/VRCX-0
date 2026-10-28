@@ -45,6 +45,7 @@ export function VrccMePanel({
     deviceAuth,
     deviceAuthBusy,
     deviceAuthMessage,
+    deviceAuthCooldown,
     onBegin,
     onDisconnect,
     onOpenLink
@@ -54,6 +55,8 @@ export function VrccMePanel({
     deviceAuth: VrccDeviceAuthPrompt | null;
     deviceAuthBusy: boolean;
     deviceAuthMessage: string | null;
+    /** 距离下一次允许点「申请连接码」还有多少秒；`0` 表示可以点。 */
+    deviceAuthCooldown: number;
     onBegin: () => void;
     onDisconnect: () => void | Promise<void>;
     onOpenLink: (url: string) => void;
@@ -148,13 +151,21 @@ export function VrccMePanel({
                         <Button
                             size="sm"
                             className="w-full"
-                            disabled={deviceAuthBusy || deviceAuth != null}
+                            disabled={
+                                deviceAuthBusy ||
+                                deviceAuth != null ||
+                                deviceAuthCooldown > 0
+                            }
                             onClick={onBegin}
                         >
                             {deviceAuthBusy && (
                                 <Spinner className="mr-1 size-3" />
                             )}
-                            {t('vrcc.me.begin')}
+                            {deviceAuthCooldown > 0
+                                ? t('vrcc.me.begin_cooldown', {
+                                      sec: deviceAuthCooldown
+                                  })
+                                : t('vrcc.me.begin')}
                         </Button>
                     </div>
                 )}

@@ -144,6 +144,42 @@ describe('useVrccController', () => {
         expect(result.current.usage?.personalDailyLimit).toBe(1000);
     });
 
+    it('申请连接码后进入 5 秒冷却，冷却期内不再发请求', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        mocks.beginDeviceAuth.mockResolvedValue({
+            userCode: 'ABCD-2345',
+            deviceCode: 'dc',
+            verificationUri: 'https://vrcc.cc/device',
+            verificationUriComplete: 'https://vrcc.cc/device?code=ABCD-2345',
+            interval: 5,
+            expiresIn: 600
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+
+        expect(result.current.deviceAuthCooldown).toBe(0);
+
+        await act(async () => {
+            await result.current.beginDeviceAuth();
+        });
+        expect(mocks.beginDeviceAuth).toHaveBeenCalledTimes(1);
+        // 请求一发出就开始计时，不等它回来。
+        expect(result.current.deviceAuthCooldown).toBeGreaterThan(0);
+
+        // 冷却期内再点：连请求都不该发出去。
+        await act(async () => {
+            await result.current.beginDeviceAuth();
+        });
+        expect(mocks.beginDeviceAuth).toHaveBeenCalledTimes(1);
+
+        // 走完 5 秒后按钮恢复可用。
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+        });
+        await waitFor(() => expect(result.current.deviceAuthCooldown).toBe(0));
+        vi.useRealTimers();
+    });
+
     it('打开「提醒」页签时用 mark=true 同步账号已读', async () => {
         const { result } = renderHook(() => useVrccController());
         await waitFor(() => expect(result.current.loading).toBe(false));

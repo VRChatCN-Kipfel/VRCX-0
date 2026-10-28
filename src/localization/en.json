@@ -847,6 +847,7 @@
             "disconnect": "Disconnect",
             "connect_hint": "Approve the code below on vrcc.cc and this will connect automatically. The token stays on this machine and is only ever sent to vrcc.cc.",
             "begin": "Connect",
+            "begin_cooldown": "Please wait {sec}s",
             "auth_pending": "Waiting for approval",
             "auth_hint": "Open the link below in a browser, or enter the code manually:",
             "open_browser": "Open in browser",

@@ -847,6 +847,7 @@
             "disconnect": "斷開連線",
             "connect_hint": "用下面的授權碼在星遇同頻網頁上同意，這裡會自動連上。權杖只存在本機，只發給 vrcc.cc。",
             "begin": "開始連線",
+            "begin_cooldown": "{sec} 秒後可再次申請",
             "auth_pending": "等待同意",
             "auth_hint": "在瀏覽器裡開啟下面的連結，或手動輸入授權碼：",
             "open_browser": "在瀏覽器開啟",

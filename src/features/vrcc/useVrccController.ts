@@ -45,6 +45,16 @@ const VRCC_CONNECTION_CHANGED_EVENT = 'vrccConnectionChanged';
  */
 const BOARD_REUSE_MS = 60_000;
 
+/**
+ * 两次「申请连接码」之间至少隔多久（秒）。
+ *
+ * 与后端 `device_code` 的 `min_gap` 一致。后端那一层是**发请求前等 5 秒**，
+ * 而这里挡的是**界面上的连点**：那份额度按网络出口 IP 每天只有 30 个，
+ * 同一 NAT 后所有人共用，点一次就真的消耗服务端一次计数。让按钮在冷却期间
+ * 不可点，玩家就不会用连点去赌「也许这次能过」。
+ */
+const DEVICE_AUTH_COOLDOWN_SECS = 5;
+
 export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'me';
 
 /** 「提醒」页签里看哪一个：最近的提醒，还是通知中心。 */
@@ -91,6 +101,13 @@ type State = {
     deviceAuth: VrccDeviceAuthPrompt | null;
     deviceAuthBusy: boolean;
     deviceAuthMessage: string | null;
+    /**
+     * 距离下一次允许点「申请连接码」还有多少秒；`0` 表示现在就能点。
+     *
+     * 这个额度是**按网络出口 IP** 算的（每天 30 个，同一 NAT 后所有人共用），
+     * 点一次就真的消耗服务端一次计数，所以不能靠连续点击去碰运气。
+     */
+    deviceAuthCooldown: number;
 };
 
 const initialState: State = {
@@ -114,7 +131,8 @@ const initialState: State = {
     error: null,
     deviceAuth: null,
     deviceAuthBusy: false,
-    deviceAuthMessage: null
+    deviceAuthMessage: null,
+    deviceAuthCooldown: 0
 };
 
 /**
@@ -127,6 +145,8 @@ export function useVrccController() {
     const [state, setState] = useState<State>(initialState);
     const authTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const mounted = useRef(true);
+    /** 设备码冷却的倒计时句柄。 */
+    const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     /** 各种排序最近拿到的地图榜，切回来时直接用。 */
     const boardCache = useRef<
         Partial<Record<VrccBoardSort, { board: VrccBoard; at: number }>>
@@ -436,6 +456,7 @@ export function useVrccController() {
         return () => {
             mounted.current = false;
             if (authTimer.current) clearTimeout(authTimer.current);
+            if (cooldownTimer.current) clearInterval(cooldownTimer.current);
         };
         // `load` 故意不放进依赖：它自己会 `patch`，进依赖就是无限循环。
         // 上面的 `didLoad` ref 已经保证只跑一次，所以这个空依赖是正确的。
@@ -616,8 +637,49 @@ export function useVrccController() {
         [patch, refreshNotes, reportError, state.connection?.connected]
     );
 
-    /** 开始设备授权。 */
+    /**
+     * 启动（或重启）设备码冷却倒计时。
+     *
+     * 用 `setInterval` 而不是一次性 `setTimeout`：界面要显示「还有几秒」，
+     * 每秒都要动一次。到 0 就自己停掉，不留下空转的定时器。
+     */
+    const startDeviceAuthCooldown = useCallback(() => {
+        if (cooldownTimer.current != null) {
+            clearInterval(cooldownTimer.current);
+            cooldownTimer.current = null;
+        }
+        let left = DEVICE_AUTH_COOLDOWN_SECS;
+        patch({ deviceAuthCooldown: left });
+        cooldownTimer.current = setInterval(() => {
+            left -= 1;
+            if (!mounted.current) {
+                if (cooldownTimer.current != null) {
+                    clearInterval(cooldownTimer.current);
+                    cooldownTimer.current = null;
+                }
+                return;
+            }
+            patch({ deviceAuthCooldown: Math.max(0, left) });
+            if (left <= 0 && cooldownTimer.current != null) {
+                clearInterval(cooldownTimer.current);
+                cooldownTimer.current = null;
+            }
+        }, 1000);
+    }, [patch]);
+
+    /**
+     * 开始设备授权。
+     *
+     * 冷却期内直接返回，**连请求都不发**：那份额度是按网络出口 IP 算的，
+     * 每次调用都真实消耗服务端一个计数，不能用连点去试探。
+     */
     const beginDeviceAuth = useCallback(async () => {
+        if (state.deviceAuthCooldown > 0) {
+            return;
+        }
+        // 请求一发出就开始冷却，不等它回来：`too_many` 时没有响应，若等结果
+        // 再计时，失败的那一次反而让玩家立刻又能点。
+        startDeviceAuthCooldown();
         patch({ deviceAuthBusy: true, deviceAuthMessage: null, error: null });
         try {
             const prompt = await vrccApi.beginDeviceAuth(null);
@@ -651,7 +713,7 @@ export function useVrccController() {
             patch({ deviceAuthBusy: false });
             reportError(error, 'beginDeviceAuth');
         }
-    }, [patch, reportError]);
+    }, [patch, reportError, startDeviceAuthCooldown, state.deviceAuthCooldown]);
 
     /**
      * 轮询设备授权。按后端给的 interval 反复问，直到成功、终态或超时。

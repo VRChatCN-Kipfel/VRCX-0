@@ -99,6 +99,7 @@ export function VrccPage() {
         deviceAuth,
         deviceAuthBusy,
         deviceAuthMessage,
+        deviceAuthCooldown,
         reload,
         refreshBoards,
         setBoardSort,
@@ -333,6 +334,7 @@ export function VrccPage() {
                                 deviceAuth={deviceAuth}
                                 deviceAuthBusy={deviceAuthBusy}
                                 deviceAuthMessage={deviceAuthMessage}
+                                deviceAuthCooldown={deviceAuthCooldown}
                                 onBegin={beginDeviceAuth}
                                 onDisconnect={disconnect}
                                 onOpenLink={openLink}

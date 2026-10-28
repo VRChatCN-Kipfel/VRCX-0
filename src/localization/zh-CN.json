@@ -847,6 +847,7 @@
             "disconnect": "断开连接",
             "connect_hint": "用下面的授权码在星遇同频网页上同意，这里会自动连上。令牌只存在本机，只发给 vrcc.cc。",
             "begin": "开始连接",
+            "begin_cooldown": "{sec} 秒后可再次申请",
             "auth_pending": "等待同意",
             "auth_hint": "在浏览器里打开下面的链接，或手动输入授权码：",
             "open_browser": "在浏览器打开",
