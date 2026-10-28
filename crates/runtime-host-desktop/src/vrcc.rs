@@ -12,6 +12,7 @@ use vrcx_0_contracts::vrcc::{
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
+use vrcx_0_persistence::DatabaseService;
 
 /// 把本地加密仓库适配成应用层端口。
 ///
@@ -61,6 +62,10 @@ pub const VRCC_CONNECTION_CHANGED_EVENT: &str = "vrccConnectionChanged";
 /// 桌面侧的星遇同频运行时。
 pub struct DesktopVrccRuntime {
     service: Arc<VrccService>,
+    /// 通知中心那一行要落到当前账号的库表里，句柄与令牌存储共用同一个。
+    db: Arc<DatabaseService>,
+    /// 读当前登录账号。装配发生在登录之前，所以取闭包而不是固定 id。
+    owner: Arc<dyn Fn() -> Option<vrcx_0_core::OwnerId> + Send + Sync>,
 }
 
 impl DesktopVrccRuntime {
@@ -88,7 +93,15 @@ impl DesktopVrccRuntime {
     ///
     /// `proxy_url` 必须传宿主应用的统一代理（`runtime_host().proxy_url()`）：
     /// 本机实测 `vrcc.cc` 直连 DNS 超时，不接代理时所有接口都会「暂时不可用」。
-    pub fn new(store: LocalVrccTokenStore, proxy_url: Option<&str>) -> Self {
+    ///
+    /// `owner` 与令牌存储用的是同一个来源：通知中心那一行要写进当前账号的表，
+    /// 标记已读也要按同一个账号找行。
+    pub fn new(
+        store: LocalVrccTokenStore,
+        proxy_url: Option<&str>,
+        owner: Arc<dyn Fn() -> Option<vrcx_0_core::OwnerId> + Send + Sync>,
+    ) -> Self {
+        let db = Arc::clone(store.db());
         let port = Arc::new(TokenStoreAdapter { inner: store });
         let client_id = resolve_client_id();
         // 网络端口的实现放在 outbound-adapters：应用层不认识 `VrccSession`，
@@ -100,6 +113,8 @@ impl DesktopVrccRuntime {
             ));
         Self {
             service: Arc::new(VrccService::new(port, remote)),
+            db,
+            owner,
         }
     }
 
