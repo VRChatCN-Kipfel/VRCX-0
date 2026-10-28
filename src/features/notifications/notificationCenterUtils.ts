@@ -22,7 +22,10 @@ import { hasGroupIdPrefix } from '@/shared/constants/vrchatIds';
 import { parseLocation } from '@/shared/utils/location';
 import { getNotificationTs } from '@/shared/utils/notificationCategory';
 import { isRecord } from '@/shared/utils/record';
-import { isVrccNotificationLink } from '@/shared/utils/vrccNotification';
+import {
+    isVrccNotification,
+    isVrccNotificationLink
+} from '@/shared/utils/vrccNotification';
 
 type CachedInstanceLike = Record<string, unknown> & {
     closedAt?: string | null;
@@ -130,6 +133,9 @@ export function canDeclineNotification(
         type !== 'message' &&
         type !== 'boop' &&
         type !== 'groupChange' &&
+        // 站外提醒的「拒绝」没有对口的外部接口：VRChat 不认识这个 id，
+        // 点下去只会换来一个必然失败的网络请求。
+        !isVrccNotification(notification) &&
         !type.includes('group.') &&
         !type.includes('moderation.') &&
         !type.includes('instance.') &&

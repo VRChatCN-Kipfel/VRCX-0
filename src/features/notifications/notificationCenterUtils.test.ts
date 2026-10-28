@@ -8,7 +8,7 @@ import { NAV_NAVIGATE_REQUESTED_EVENT } from '@/shared/events/navLayoutEvents';
 import { VRCC_NOTIFICATION_TYPE } from '@/shared/utils/vrccNotification';
 import { useVrcNotificationStore } from '@/state/vrcNotificationStore';
 
-import { openSender } from './notificationCenterUtils';
+import { canDeclineNotification, openSender } from './notificationCenterUtils';
 
 const t = ((key: string) => key) as TFunction;
 
@@ -58,5 +58,25 @@ describe('openSender', () => {
         } finally {
             navigate.stop();
         }
+    });
+});
+
+describe('canDeclineNotification', () => {
+    /**
+     * 「拒绝」走的是 VRChat 的隐藏接口。站外提醒的 id 在那边不存在，
+     * 给这一行挂上按钮等于提供一个点了必然失败的入口。
+     */
+    it('is not offered for an out-of-app notice', () => {
+        expect(canDeclineNotification(vrccRow())).toBe(false);
+    });
+
+    it('is still offered for an ordinary notice', () => {
+        expect(
+            canDeclineNotification({
+                id: 'notif_1',
+                type: 'invite',
+                link: 'user:usr_1'
+            })
+        ).toBe(true);
     });
 });
