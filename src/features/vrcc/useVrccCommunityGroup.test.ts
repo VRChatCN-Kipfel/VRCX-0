@@ -21,7 +21,9 @@ vi.mock('@/repositories/groupProfileRepository', () => ({
     }
 }));
 
+import { queryKeys } from '@/lib/entityQueryCache';
 import { VRCC_COMMUNITY_GROUP_ID } from '@/shared/constants/vrccCommunity';
+import { DEFAULT_VRCHAT_API_ENDPOINT } from '@/shared/vrchatEndpoint';
 
 import { useVrccCommunityGroup } from './useVrccCommunityGroup';
 
@@ -47,7 +49,7 @@ describe('useVrccCommunityGroup', () => {
         expect(getGroupProfile).not.toHaveBeenCalled();
     });
 
-    it('缓存用的是 includeRoles=true，和群组对话框同一个键', async () => {
+    it('缓存用的是 includeRoles=true 且带 endpoint，和群组对话框同一个键', async () => {
         getCachedQueryData.mockReturnValue(undefined);
         getGroupProfile.mockResolvedValue({ membershipStatus: 'inactive' });
 
@@ -56,12 +58,19 @@ describe('useVrccCommunityGroup', () => {
         await waitFor(() => {
             expect(getGroupProfile).toHaveBeenCalled();
         });
-        // 键里带 includeRoles，传 false 就和对话框不是同一个键、缓存白存。
-        expect(getCachedQueryData).toHaveBeenCalledWith([
-            'group',
-            VRCC_COMMUNITY_GROUP_ID,
-            true
-        ]);
+        // 期望值直接由生产用的那个函数算出来，不写死数组。
+        //
+        // 写死过一次，结果漏掉了 endpoint 那一段：`getGroupProfile` 自己传的是
+        // `DEFAULT_VRCHAT_API_ENDPOINT`，键因此比 ['group', id, true] 多一层，
+        // 两边长度都不同——缓存永远命中不了，「零请求」是假的。把字面量抄进
+        // 断言等于让测试跟着实现一起错。
+        expect(getCachedQueryData).toHaveBeenCalledWith(
+            queryKeys.group(
+                VRCC_COMMUNITY_GROUP_ID,
+                true,
+                DEFAULT_VRCHAT_API_ENDPOINT
+            )
+        );
         expect(getGroupProfile).toHaveBeenCalledWith(
             expect.objectContaining({
                 groupId: VRCC_COMMUNITY_GROUP_ID,

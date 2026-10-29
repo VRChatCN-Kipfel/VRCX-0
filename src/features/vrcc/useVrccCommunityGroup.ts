@@ -5,6 +5,7 @@ import { getCachedQueryData, queryKeys } from '@/lib/entityQueryCache';
 import groupProfileRepository from '@/repositories/groupProfileRepository';
 import { VRCC_COMMUNITY_GROUP_ID } from '@/shared/constants/vrccCommunity';
 import { normalizeString } from '@/shared/utils/string';
+import { DEFAULT_VRCHAT_API_ENDPOINT } from '@/shared/vrchatEndpoint';
 
 export type CommunityGroupState = {
     /** 是否已经加入。`null` 表示还不知道（拉取中或失败），界面按「未加入」处理。 */
@@ -46,7 +47,15 @@ export function useVrccCommunityGroup(): CommunityGroupState {
 
     useEffect(() => {
         let active = true;
-        const key = queryKeys.group(VRCC_COMMUNITY_GROUP_ID, true);
+        // **必须带 endpoint。** `queryKeys.group` 会把它拼进键的最后一段，而
+        // `getGroupProfile` 自己传的是 `DEFAULT_VRCHAT_API_ENDPOINT`；少这一段
+        // 键的长度都不一样，等于永远命中不了缓存——那样「零请求」是假的，
+        // 每次都会真去拉一遍。
+        const key = queryKeys.group(
+            VRCC_COMMUNITY_GROUP_ID,
+            true,
+            DEFAULT_VRCHAT_API_ENDPOINT
+        );
 
         // 1) 纯同步读，不发请求。命中就直接用。
         const cached = getCachedQueryData<GroupProfileRecord>(key);
