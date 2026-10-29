@@ -605,12 +605,13 @@ fn notice_row(
         .unwrap_or_else(|| fallback_created_at.to_string());
     let title = notice.title.as_deref().unwrap_or_default().trim();
     let body = notice.body.as_deref().unwrap_or_default().trim();
-    // 列里只有一栏正文，标题与正文都在这上面；两者可能只来一个。
-    let message = match (title.is_empty(), body.is_empty()) {
-        (true, _) => body.to_string(),
-        (_, true) => title.to_string(),
-        _ => format!("{title} {body}"),
-    };
+    // 正文一栏只放正文，不拼接标题。
+    //
+    // 抽屉行经 `getNotificationMessage` 会把 `title` 与 `message` 两列**再拼
+    // 一次**；先前把标题拼进正文，又让 `title` 与发送者同名，于是同一条提醒
+    // 在抽屉里会显示成「星遇同频 星遇同频 …」。两者只留一处：标题走 `title`，
+    // 正文走 `message`。正文缺失时退回标题，免得留下空白行。
+    let message = if body.is_empty() { title } else { body };
     let sender = DesktopVrccRuntime::NOTICE_ROW_SENDER;
     json!({
         "id": format!("{}{}", DesktopVrccRuntime::NOTICE_ROW_ID_PREFIX, notice.id),
@@ -622,9 +623,9 @@ fn notice_row(
         // 提醒没有 VRChat 的用户或世界可跳，落点只能写在 link 上。
         "link": DesktopVrccRuntime::NOTICE_ROW_LINK,
         "linkText": String::new(),
-        // `title` 与 `senderUsername` 同值不是冗余：抽屉行经 `getSenderName`
-        // 读 `senderUsername`，表格页经 `view.actor.name`（= `firstText(title)`）
-        // 读 `title`，两处各取一路，只有同值才会显示成同一个名字。
+        // 发送者同时写进 `title` 与 `senderUsername`：抽屉行经 `getSenderName`
+        // 读后者，表格页经 `view.actor.name`（= `firstText(title)`）读前者，
+        // 两处各取一路。
         "title": sender,
         "message": message,
         // 未读：抽屉的红点、侧边栏角标都认这个字段。
@@ -1298,11 +1299,17 @@ mod tests {
         assert_eq!(row["createdAt"], json!("2026-01-01T00:00:00.000Z"));
     }
 
-    /// 标题与正文合成一栏，两者只来一个时也不能丢。
+    /// 正文一栏只放正文，标题单独走 `title` 列。
+    ///
+    /// 抽屉行会把 `title` 与 `message` 再拼一次；早先把标题拼进正文、又让
+    /// `title` 与发送者同名，于是同一条提醒在抽屉里显示成「星遇同频 星遇同频
+    /// …」。这条测试钉住「两者不重复」。
     #[test]
-    fn a_row_keeps_both_the_title_and_the_body() {
+    fn a_row_keeps_the_title_and_the_body_apart() {
         let both = notice_row(&notice_at(1, Some("标题"), Some("正文"), None), "");
-        assert_eq!(both["message"], json!("标题 正文"));
+        // 正文只有正文，不含标题。
+        assert_eq!(both["message"], json!("正文"));
+        assert_eq!(both["title"], json!(DesktopVrccRuntime::NOTICE_ROW_SENDER));
 
         let title_only = notice_row(&notice_at(1, Some("标题"), None, None), "");
         assert_eq!(title_only["message"], json!("标题"));
@@ -1313,5 +1320,21 @@ mod tests {
         // 都为空时至少不要留下 " " 这种只有空白的一栏。
         let neither = notice_row(&notice_at(1, Some("  "), None, None), "");
         assert_eq!(neither["message"], json!(""));
+    }
+
+    /// 标题与正文不会在抽屉里重复：`getNotificationMessage` 拼的是
+    /// `title + message`，所以两者不能有相同内容。
+    #[test]
+    fn a_row_does_not_repeat_the_sender_in_the_body() {
+        let row = notice_row(
+            &notice_at(1, Some("星遇同频"), Some("有人连向了你"), None),
+            "",
+        );
+        let title = row["title"].as_str().unwrap_or_default();
+        let message = row["message"].as_str().unwrap_or_default();
+        assert_eq!(title, DesktopVrccRuntime::NOTICE_ROW_SENDER);
+        assert_eq!(message, "有人连向了你");
+        // 抽屉拼起来是「星遇同频 有人连向了你」，服务名只出现一次。
+        assert!(!message.contains(title));
     }
 }
