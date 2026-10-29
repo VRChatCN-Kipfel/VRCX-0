@@ -478,6 +478,13 @@ pub struct VrccBoardMap {
     /// 封面图地址。
     #[serde(default)]
     pub img: Option<String>,
+    /// 同一张封面的完整网址。
+    ///
+    /// **官方 `boards/maps` 至今不返回这个字段**（只有 `me/board`、地图页、
+    /// `me/maps/{world}` 才有），所以这里读到的通常是 `None`。仍然留着它，
+    /// 是因为哪天官方统一了就直接能接上，不用再改一轮契约。
+    #[serde(default)]
+    pub img_url: Option<String>,
     /// 热评：最热的一条短评（1.10.1 起写进文档），没有时是 `null`。
     #[serde(default)]
     pub hot: Option<VrccMapHot>,

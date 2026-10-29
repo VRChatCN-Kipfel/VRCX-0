@@ -131,12 +131,16 @@ export function VrccMapsPanel({
                                             {place ?? '—'}
                                         </span>
                                         {/* 封面。`boards/maps` 至今只给 `img`
-                                        （相对路径），没有 `imgUrl`，所以这里
-                                        靠 `vrccCoverUrl` 自己拼站点 origin。
-                                        没有封面或加载失败时组件返回 null，
-                                        行退回纯文字，不占位也不撑高。 */}
+                                        （相对路径），没有 `imgUrl`；两个字段
+                                        都交给 `vrccCoverUrl`，将来官方补上
+                                        `imgUrl` 时这里不用改。没有封面或加载
+                                        失败时组件返回 null，行退回纯文字，
+                                        不占位也不撑高。 */}
                                         <VrccCover
-                                            src={vrccCoverUrl(null, map.img)}
+                                            src={vrccCoverUrl(
+                                                map.imgUrl,
+                                                map.img
+                                            )}
                                             className="size-8 shrink-0 rounded object-cover"
                                         />
                                         <div className="min-w-0 flex-1">
