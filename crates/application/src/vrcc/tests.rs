@@ -3,7 +3,71 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use vrcx_0_contracts::vrcc::{VrccBoardMap, VrccUnread};
+use vrcx_0_contracts::vrcc::{HttpDetail, LocalThrottle, VrccBoardMap, VrccUnread};
+
+// ---------------------------------------------------------------------------
+// 造错误的几个便捷函数
+//
+// 重构后错误是「层级 + 细节」两段，直接写全每次都很啰嗦。这几个函数只用于
+// 测试，名字直接说明造的是哪一层的错。
+// ---------------------------------------------------------------------------
+
+/// 传输层失败（没拿到响应）。
+fn transport(message: &str) -> VrccError {
+    VrccError::new(
+        ErrorLayer::Transport,
+        ErrorDetail::Transport {
+            kind: TransportKind::Connect,
+            message: message.to_string(),
+        },
+    )
+}
+
+/// 服务器拒绝（拿到了响应，状态码不是 2xx）。
+fn http(status: u16, error: &str) -> VrccError {
+    VrccError::new(
+        ErrorLayer::Server,
+        ErrorDetail::Http(HttpDetail {
+            status,
+            error: error.to_string(),
+            need: None,
+            why: None,
+            retry_after: None,
+            op: None,
+        }),
+    )
+}
+
+/// 缺权限的 403。
+fn missing_scope(need: &str) -> VrccError {
+    VrccError::new(
+        ErrorLayer::Server,
+        ErrorDetail::Http(HttpDetail {
+            status: 403,
+            error: "scope".to_string(),
+            need: Some(need.to_string()),
+            why: None,
+            retry_after: None,
+            op: None,
+        }),
+    )
+}
+
+/// 本机限流（请求没发出去）。
+fn throttled_locally(secs: u64, reason: LocalThrottle) -> VrccError {
+    VrccError::new(
+        ErrorLayer::Client,
+        ErrorDetail::ThrottledLocally {
+            retry_after_secs: secs,
+            reason,
+        },
+    )
+}
+
+/// 没有令牌。
+fn token_missing() -> VrccError {
+    VrccError::new(ErrorLayer::Session, ErrorDetail::TokenMissing)
+}
 
 /// 内存令牌仓库。
 #[derive(Default)]
@@ -97,26 +161,26 @@ impl FakeRemote {
 
 impl VrccRemote for FakeRemote {
     fn boards<'a>(&'a self, _limit: u32, _sort: VrccBoardSort) -> VrccFuture<'a, VrccBoard> {
-        Box::pin(async move { Err(VrccError::Transport("fake".into())) })
+        Box::pin(async move { Err(transport("fake")) })
     }
     fn status<'a>(&'a self) -> VrccFuture<'a, VrccStatus> {
-        Box::pin(async move { Err(VrccError::Transport("fake".into())) })
+        Box::pin(async move { Err(transport("fake")) })
     }
     fn fetch_site_asset<'a>(&'a self, _path: &'a str) -> VrccFuture<'a, Vec<u8>> {
-        Box::pin(async move { Err(VrccError::Transport("fake".into())) })
+        Box::pin(async move { Err(transport("fake")) })
     }
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements> {
-        Box::pin(async move { Err(VrccError::Transport("fake".into())) })
+        Box::pin(async move { Err(transport("fake")) })
     }
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {
         self.device_code_scopes
             .lock()
             .unwrap()
             .push(scope.map(str::to_string));
-        Box::pin(async move { Err(VrccError::Transport("fake".into())) })
+        Box::pin(async move { Err(transport("fake")) })
     }
     fn device_token<'a>(&'a self, _code: &'a str) -> VrccFuture<'a, VrccTokenResponse> {
-        Box::pin(async move { Err(VrccError::Transport("fake".into())) })
+        Box::pin(async move { Err(transport("fake")) })
     }
     fn revoke<'a>(&'a self) -> VrccFuture<'a, ()> {
         Box::pin(async move {
@@ -135,7 +199,7 @@ impl VrccRemote for FakeRemote {
                 .lock()
                 .unwrap()
                 .clone()
-                .ok_or(VrccError::TokenMissing)
+                .ok_or_else(token_missing)
         })
     }
     fn notifications<'a>(&'a self, _since: Option<i64>) -> VrccFuture<'a, VrccNotifications> {
@@ -143,7 +207,7 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
-            Err(VrccError::TokenMissing)
+            Err(token_missing())
         })
     }
     fn my_map<'a>(&'a self, _world: &'a str) -> VrccFuture<'a, VrccMyMap> {
@@ -151,7 +215,7 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
-            Err(VrccError::TokenMissing)
+            Err(token_missing())
         })
     }
     fn unread<'a>(&'a self) -> VrccFuture<'a, VrccUnread> {
@@ -163,7 +227,7 @@ impl VrccRemote for FakeRemote {
                 .lock()
                 .unwrap()
                 .clone()
-                .ok_or(VrccError::TokenMissing)
+                .ok_or_else(token_missing)
         })
     }
     fn notes<'a>(&'a self) -> VrccFuture<'a, VrccNotes> {
@@ -171,7 +235,7 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
-            Err(VrccError::TokenMissing)
+            Err(token_missing())
         })
     }
     fn today<'a>(&'a self) -> VrccFuture<'a, VrccToday> {
@@ -179,7 +243,7 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
-            Err(VrccError::TokenMissing)
+            Err(token_missing())
         })
     }
     fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals> {
@@ -187,7 +251,7 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
-            Err(VrccError::TokenMissing)
+            Err(token_missing())
         })
     }
 
@@ -301,12 +365,7 @@ fn a_gone_token_is_dropped_and_remembered_as_expired() {
         ..Default::default()
     });
 
-    let error = service.settle(VrccError::Api {
-        status: 404,
-        error: "gone".into(),
-        need: None,
-        why: None,
-    });
+    let error = service.settle(http(404, "gone"));
     assert!(error.is_gone());
 
     let snapshot = service.snapshot();
@@ -334,12 +393,7 @@ fn other_404s_leave_the_token_alone() {
         let remote = FakeRemote::new();
         remote.mark_connected();
         let service = VrccService::new(store.clone(), remote);
-        service.settle(VrccError::Api {
-            status: 404,
-            error: code.into(),
-            need: None,
-            why: None,
-        });
+        service.settle(http(404, code));
         assert!(service.snapshot().connected, "{code}");
         assert!(!service.snapshot().expired, "{code}");
         assert!(store.load().unwrap().is_some(), "{code}");
@@ -424,24 +478,21 @@ fn wrist_shows_the_map_rank_once_connected() {
 
 #[test]
 fn stop_is_classified_as_a_passing_problem() {
-    let paused = VrccError::Paused {
-        say: Some("维护".into()),
-        until: None,
-    };
+    // 停站维护：令牌没事，等 `until` 就好，和网络问题一样处理。
+    let paused = http(503, "stop");
     assert_eq!(classify_vrcc_error(&paused).0, VrccErrorKind::Transport);
+    assert_eq!(paused.layer, ErrorLayer::Server);
 }
 
 #[tokio::test]
 async fn unread_and_notes_require_connection() {
     let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
-    assert!(matches!(
-        service.refresh_unread().await.unwrap_err(),
-        VrccError::TokenMissing
-    ));
-    assert!(matches!(
-        service.notes().await.unwrap_err(),
-        VrccError::TokenMissing
-    ));
+    assert!(service
+        .refresh_unread()
+        .await
+        .unwrap_err()
+        .is_session_lost());
+    assert!(service.notes().await.unwrap_err().is_session_lost());
 }
 
 #[test]
@@ -527,63 +578,81 @@ fn wrist_summary_unread_comes_from_recent_read_cursor() {
 
 #[test]
 fn classify_splits_reauth_from_throttle() {
-    let throttled = VrccError::RateLimited("too_many".into());
-    assert_eq!(classify_vrcc_error(&throttled).0, VrccErrorKind::Throttled);
+    // 本机限流：请求没发出去，玩家该等。
+    let client_side = throttled_locally(30, LocalThrottle::Gap);
+    assert_eq!(
+        classify_vrcc_error(&client_side).0,
+        VrccErrorKind::Throttled
+    );
 
-    let quota = VrccError::QuotaExhausted("用尽".into());
+    // 服务器说 429：同样是「问太多了」，也归 Throttled。
+    let too_many = http(429, "too_many");
+    assert_eq!(classify_vrcc_error(&too_many).0, VrccErrorKind::Throttled);
+
+    let quota = http(429, "quota");
     assert_eq!(classify_vrcc_error(&quota).0, VrccErrorKind::Throttled);
 
-    let gone = VrccError::Api {
-        status: 404,
-        error: "gone".into(),
-        need: None,
-        why: None,
-    };
+    let gone = http(404, "gone");
     assert_eq!(classify_vrcc_error(&gone).0, VrccErrorKind::NeedsReauth);
 
-    let missing = VrccError::Api {
-        status: 403,
-        error: "scope".into(),
-        need: Some("today".into()),
-        why: None,
-    };
+    let missing = missing_scope("today");
     let (kind, need) = classify_vrcc_error(&missing);
     assert_eq!(kind, VrccErrorKind::MissingScope);
     assert_eq!(need.as_deref(), Some("today"));
 
-    let transport = VrccError::Transport("timeout".into());
+    let transport = transport("timeout");
     assert_eq!(classify_vrcc_error(&transport).0, VrccErrorKind::Transport);
 }
 
 /// `409 busy` 和 `429 busy` 用的是同一个 `error` 串，含义却相反：
 /// 前者是「那边的星卡还在生成，等一下」，后者是「全站连接功能今天关了」。
+///
 /// 两者都不该被当成需要重新授权，也不该说成「今天的次数用完了」。
+/// 这正是把 HTTP 语义收敛成一个 `Http` 变体之后必须守住的一条：
+/// **官方的 `busy` 只能按状态码区分**。
 #[test]
 fn busy_never_reads_as_throttled_or_reauth() {
-    let not_ready = classify_vrcc_error(&VrccError::NotReady);
-    assert_eq!(not_ready.0, VrccErrorKind::NotReady);
-    assert_eq!(not_ready.1, None);
+    let not_ready = http(409, "busy");
+    assert_eq!(classify_vrcc_error(&not_ready).0, VrccErrorKind::NotReady);
+    assert!(not_ready.is_not_ready());
 
-    let connect_paused = classify_vrcc_error(&VrccError::ConnectPaused);
-    assert_eq!(connect_paused.0, VrccErrorKind::NotReady);
-    assert_eq!(connect_paused.1, None);
+    let connect_paused = http(429, "busy");
+    // 429 busy 也是「那边没准备好」，不是「你额度用完了」。
+    assert_eq!(
+        classify_vrcc_error(&connect_paused).0,
+        VrccErrorKind::NotReady
+    );
+    // 但 429 busy 不是 is_not_ready（那只认 409），两者靠状态码分开。
+    assert!(!connect_paused.is_not_ready());
 
-    for error in [VrccError::NotReady, VrccError::ConnectPaused] {
+    for error in [not_ready, connect_paused] {
         assert_ne!(classify_vrcc_error(&error).0, VrccErrorKind::NeedsReauth);
         assert_ne!(classify_vrcc_error(&error).0, VrccErrorKind::Throttled);
         assert!(!error.needs_reauth());
     }
 }
 
+/// 我们自己构造请求出的错，不该走到玩家面前。
+#[test]
+fn our_own_bugs_are_marked_as_input_layer() {
+    let bad_path = VrccError::new(
+        ErrorLayer::Input,
+        ErrorDetail::AbsolutePath("http://elsewhere".into()),
+    );
+    assert!(bad_path.is_our_bug());
+    assert_eq!(classify_vrcc_error(&bad_path).0, VrccErrorKind::Other);
+
+    let too_big = VrccError::new(ErrorLayer::Input, ErrorDetail::BodyTooLarge);
+    assert!(too_big.is_our_bug());
+
+    // 反过来：网络问题不是我们的锅。
+    assert!(!transport("timeout").is_our_bug());
+}
+
 #[test]
 fn map_not_went_is_not_a_reauth_case() {
     // 打分前置条件不满足，令牌没问题。
-    let error = VrccError::Api {
-        status: 403,
-        error: "map_not_went".into(),
-        need: Some("verify".into()),
-        why: None,
-    };
+    let error = missing_scope("verify");
     let (kind, _) = classify_vrcc_error(&error);
     assert_ne!(kind, VrccErrorKind::NeedsReauth);
 }
@@ -594,7 +663,7 @@ async fn connected_guard_blocks_personal_calls_when_disconnected() {
     let service = VrccService::new(store, FakeRemote::new());
     // 未连接时不应发请求，直接报没令牌。
     let error = service.recent_notifications(false).await.unwrap_err();
-    assert!(matches!(error, VrccError::TokenMissing));
+    assert!(error.is_session_lost());
 }
 
 /// 不传 `scope` 时要按标识显式地要：交给服务器默认的话，自助登记的
@@ -637,14 +706,14 @@ async fn device_auth_keeps_an_explicit_scope() {
 async fn poll_notifications_requires_connection() {
     let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
     let error = service.poll_notifications().await.unwrap_err();
-    assert!(matches!(error, VrccError::TokenMissing));
+    assert!(error.is_session_lost());
 }
 
 #[tokio::test]
 async fn today_requires_connection() {
     let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
     let error = service.today().await.unwrap_err();
-    assert!(matches!(error, VrccError::TokenMissing));
+    assert!(error.is_session_lost());
 }
 
 #[tokio::test]
@@ -732,11 +801,11 @@ async fn a_transport_failure_is_reported_but_keeps_the_token() {
     });
     let remote = FakeRemote::new();
     remote.mark_connected();
-    remote.set_error(VrccError::Transport("dns timeout".into()));
+    remote.set_error(transport("dns timeout"));
     let service = VrccService::new(store.clone(), Arc::clone(&remote) as Arc<dyn VrccRemote>);
 
     let error = service.refresh_unread().await.unwrap_err();
-    assert!(matches!(error, VrccError::Transport(_)));
+    assert_eq!(error.layer, ErrorLayer::Transport);
     assert!(service.snapshot().connected);
     assert!(store.load().unwrap().is_some());
 }
@@ -762,11 +831,10 @@ fn recent_item(id: i64) -> vrcx_0_contracts::vrcc::VrccRecentNotificationItem {
 #[tokio::test]
 async fn a_retriable_revoke_failure_keeps_the_token() {
     for error in [
-        VrccError::Transport("network unreachable".into()),
-        VrccError::RateLimited("退避中".into()),
-        VrccError::TooSoon {
-            retry_after_secs: 12,
-        },
+        transport("network unreachable"),
+        throttled_locally(30, LocalThrottle::Backoff),
+        // 最小间隔没到也是「没发出去」，同样该保留令牌。
+        throttled_locally(12, LocalThrottle::Gap),
     ] {
         let store = MemoryStore::with(StoredCredential {
             token: "tok".into(),
@@ -778,11 +846,9 @@ async fn a_retriable_revoke_failure_keeps_the_token() {
         let service = VrccService::new(store.clone(), Arc::clone(&remote) as Arc<dyn VrccRemote>);
 
         let returned = service.disconnect().await.unwrap_err();
-        assert_eq!(
-            std::mem::discriminant(&returned),
-            std::mem::discriminant(&error),
-            "错误要原样交出去"
-        );
+        // `VrccError` 现在是 struct，不能再用 `discriminant` 比「同一个变体」；
+        // 改成比层级，这才是「原样交出去」在结构上唯一说得通的等值判据。
+        assert_eq!(returned.layer, error.layer, "错误要原样交出去");
         // 令牌还在，服务器上那份授权还有机会被吊销。
         assert!(
             store.load().unwrap().is_some(),
@@ -818,12 +884,7 @@ async fn a_gone_token_counts_as_already_disconnected() {
     });
     let remote = FakeRemote::new();
     remote.mark_connected();
-    remote.set_error(VrccError::Api {
-        status: 404,
-        error: "gone".into(),
-        need: None,
-        why: None,
-    });
+    remote.set_error(http(404, "gone"));
     let service = VrccService::new(store.clone(), Arc::clone(&remote) as Arc<dyn VrccRemote>);
 
     service
@@ -837,25 +898,19 @@ async fn a_gone_token_counts_as_already_disconnected() {
 /// 服务器答复里的错误不算「可重试」：请求已经到了，重试也不会变。
 #[test]
 fn only_pre_send_failures_are_retriable() {
-    assert!(retriable_revoke_failure(&VrccError::Transport("x".into())));
-    assert!(retriable_revoke_failure(&VrccError::RateLimited(
-        "x".into()
+    // 没发出去的：传输失败、本机限流。
+    assert!(retriable_revoke_failure(&transport("x")));
+    assert!(retriable_revoke_failure(&throttled_locally(
+        1,
+        LocalThrottle::Backoff
     )));
-    assert!(retriable_revoke_failure(&VrccError::TooSoon {
-        retry_after_secs: 1
-    }));
+    assert!(retriable_revoke_failure(&throttled_locally(
+        1,
+        LocalThrottle::Gap
+    )));
 
-    assert!(!retriable_revoke_failure(&VrccError::Api {
-        status: 500,
-        error: "server_error".into(),
-        need: None,
-        why: None,
-    }));
-    assert!(!retriable_revoke_failure(&VrccError::QuotaExhausted(
-        "用尽".into()
-    )));
-    assert!(!retriable_revoke_failure(&VrccError::Paused {
-        say: None,
-        until: None,
-    }));
+    // 服务器已经答复的：重试没用。
+    assert!(!retriable_revoke_failure(&http(500, "server_error")));
+    assert!(!retriable_revoke_failure(&http(429, "quota")));
+    assert!(!retriable_revoke_failure(&http(503, "stop")));
 }

@@ -71,6 +71,36 @@ impl VrccError {
         }
     }
 
+    /// 会话丢失：没有令牌，或令牌已失效。
+    ///
+    /// 和 [`Self::is_gone`] 的区别：那个特指官方 `404 gone`；这个是更宽的
+    /// 「会话这一层出了问题」，包含从没连过的情况。
+    pub fn is_session_lost(&self) -> bool {
+        matches!(self.detail, ErrorDetail::TokenMissing) || self.is_gone()
+    }
+
+    /// 是不是被本机限流拦下的（请求没有发出去）。
+    ///
+    /// 本机最小间隔（`Gap`）和上一轮 429 的全局退避（`Backoff`）都算。
+    /// 这种时候服务可能是好的，只是现在不该问——后台轮询应当静默跳过这一轮。
+    pub fn is_throttled(&self) -> bool {
+        matches!(self.detail, ErrorDetail::ThrottledLocally { .. })
+    }
+
+    /// 是不是「同一接口的最小间隔还没到」。
+    ///
+    /// 和 [`Self::is_our_bug`] 不同，这个是正常情况：调用方可以改用缓存，
+    /// 而不是把它当成错误弹给玩家。`boards` 的 60 秒间隔就靠它接住。
+    pub fn is_local_gap(&self) -> bool {
+        matches!(
+            self.detail,
+            ErrorDetail::ThrottledLocally {
+                reason: LocalThrottle::Gap,
+                ..
+            }
+        )
+    }
+
     /// 这个错误是不是「我们自己的 bug」，**不该显示给玩家**。
     ///
     /// 拼错路径、正文超限都是我们自己构造请求时出的错。以前它们和
@@ -88,7 +118,12 @@ impl VrccError {
 pub enum ErrorLayer {
     /// **我们自己的 bug**：路径拼错、正文超限。玩家不该看到这类错误。
     Input,
-    /// **传输层**：请求没送到，也没拿到任何响应。
+    /// **本机限流**：请求根本没发出去，被本地限流器或退避拦下了。
+    ///
+    /// 和 [`Self::Server`] 分开是因为两者含义相反：本机限流时服务可能是好的，
+    /// 只是我们问得太勤；把它标成「服务不可用」是在冤枉服务器。
+    Client,
+    /// **传输层**：请求送出去了，但没拿到任何响应。
     Transport,
     /// **服务器拒绝**：拿到了响应，但状态码不是 2xx。
     Server,
@@ -151,6 +186,16 @@ pub enum ErrorDetail {
     AbsolutePath(String),
     #[error("请求正文超过 {VRCC_MAX_BODY_BYTES} 字节上限")]
     BodyTooLarge,
+    /// **本机限流**：请求没有发出去。
+    ///
+    /// 两种来源：发出前的全局退避还没结束，或者本地最小间隔还没到。
+    /// 后者通常意味着「刚问过，没必要再问」，调用方可以改用缓存。
+    #[error("星遇同频请求被本机限流拦下，{retry_after_secs} 秒后再问")]
+    ThrottledLocally {
+        retry_after_secs: u64,
+        /// `backoff`：上一轮 429 的全局退避中；`gap`：同一接口的最小间隔未到。
+        reason: LocalThrottle,
+    },
     #[error("星遇同频接口暂时不可用：{message}")]
     Transport {
         kind: TransportKind,
@@ -161,6 +206,15 @@ pub enum ErrorDetail {
     Decode(String),
     #[error("{}", http_display(.0))]
     Http(HttpDetail),
+}
+
+/// 本机拦截的原因。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalThrottle {
+    /// 上一轮 429 之后的全局退避还没结束。
+    Backoff,
+    /// 同一个接口两次请求的最小间隔还没到（例如地图榜 60 秒）。
+    Gap,
 }
 
 /// `Http` 的显示文案。

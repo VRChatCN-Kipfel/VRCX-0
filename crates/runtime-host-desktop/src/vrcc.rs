@@ -430,7 +430,10 @@ async fn poll_once(
     let fresh = match service.poll_notifications().await {
         Ok(result) => result.items,
         // 离上一次不到 25 秒（比如刚重新连上）：这一轮没有新的，下一轮补上。
-        Err(VrccError::TooSoon { .. }) => Vec::new(),
+        //
+        // 认 `Throttled` 这一类而不是某个具体变体：本机最小间隔（`Gap`）和
+        // 上一轮 429 的退避（`Backoff`）都算「现在不该问」，两种都静默跳过。
+        Err(error) if error.is_throttled() => Vec::new(),
         Err(error) => return Err(error),
     };
 
