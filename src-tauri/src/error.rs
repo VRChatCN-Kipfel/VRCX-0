@@ -62,9 +62,23 @@ pub struct AppErrorVrccDetail {
     /// 行为分类：`needsReauth` / `missingScope` / `throttled` / `notReady` /
     /// `transport` / `other`。
     pub kind: String,
+    /// 失败发生在哪一层：`input` / `client` / `transport` / `server` /
+    /// `session`。
+    ///
+    /// 前端据此区分「网络问题」和「业务拒绝」——这正是玩家分不清的那件事。
+    /// `input` 表示我们自己构造请求出了错，**不该显示给玩家**。
+    pub layer: String,
     /// 缺哪个权限（`missingScope` 时通常有值）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub need: Option<String>,
+    /// 传输层卡在哪一步：`dns` / `connect` / `timeout` / `body` / `other`。
+    /// 不是传输层错误时不带这个字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_kind: Option<String>,
+    /// 发起调用的接口标识。同一个错误码在不同接口下含义可能不同，
+    /// 例如 `429 too_many` 在 `device_code` 上是按网络出口 IP 算的额度。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,6 +160,31 @@ fn vrcc_kind_name(kind: vrcx_0_application::vrcc::VrccErrorKind) -> &'static str
     }
 }
 
+/// 和前端 `VrccErrorKind` 的联合类型逐字一致（`needsReauth` 等），
+/// 所以前端可以直接拿来当判别用，不需要再映射一次。
+fn vrcc_layer_name(layer: vrcx_0_contracts::vrcc::ErrorLayer) -> &'static str {
+    use vrcx_0_contracts::vrcc::ErrorLayer as Layer;
+    match layer {
+        Layer::Input => "input",
+        Layer::Client => "client",
+        Layer::Transport => "transport",
+        Layer::Server => "server",
+        Layer::Session => "session",
+    }
+}
+
+/// 传输层环节，同样和前端联合类型逐字一致。
+fn vrcc_transport_kind_name(kind: vrcx_0_contracts::vrcc::TransportKind) -> &'static str {
+    use vrcx_0_contracts::vrcc::TransportKind as Kind;
+    match kind {
+        Kind::Dns => "dns",
+        Kind::Connect => "connect",
+        Kind::Timeout => "timeout",
+        Kind::Body => "body",
+        Kind::Other => "other",
+    }
+}
+
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         AppErrorPayload {
@@ -154,7 +193,13 @@ impl Serialize for AppError {
             vrcc: match self {
                 Self::Vrcc { failure } => Some(AppErrorVrccDetail {
                     kind: vrcc_kind_name(failure.kind).to_string(),
+                    layer: vrcc_layer_name(failure.layer).to_string(),
                     need: failure.need.clone(),
+                    transport_kind: failure
+                        .transport_kind
+                        .map(vrcc_transport_kind_name)
+                        .map(str::to_string),
+                    op: failure.op.map(str::to_string),
                 }),
                 _ => None,
             },

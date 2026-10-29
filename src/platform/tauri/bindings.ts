@@ -3463,9 +3463,27 @@ export type AppErrorVrccDetail = {
      */
     kind: string;
     /**
+     * 失败发生在哪一层：`input` / `client` / `transport` / `server` /
+     * `session`。
+     *
+     * 前端据此区分「网络问题」和「业务拒绝」——这正是玩家分不清的那件事。
+     * `input` 表示我们自己构造请求出了错，**不该显示给玩家**。
+     */
+    layer: string;
+    /**
      * 缺哪个权限（`missingScope` 时通常有值）。
      */
     need?: string | null;
+    /**
+     * 传输层卡在哪一步：`dns` / `connect` / `timeout` / `body` / `other`。
+     * 不是传输层错误时不带这个字段。
+     */
+    transportKind?: string | null;
+    /**
+     * 发起调用的接口标识。同一个错误码在不同接口下含义可能不同，
+     * 例如 `429 too_many` 在 `device_code` 上是按网络出口 IP 算的额度。
+     */
+    op?: string | null;
 };
 export type AppLauncherEntry = {
     id: string;

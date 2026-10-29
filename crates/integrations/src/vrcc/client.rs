@@ -23,9 +23,10 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail,
-    VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus,
-    VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
+    VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMutuals, VrccMyMap,
+    VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday,
+    VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -67,9 +68,41 @@ const DEVICE_CODE_KEY: &str = "device_code";
 ///
 /// 官方限制 POST 正文 2 KB。正文超限属于我们自己构造错了请求，
 /// 不该发出去让它变成 400。
+/// 把 `reqwest` 的失败归成传输层错误，并判定卡在哪个环节。
+///
+/// 判据用 `reqwest::Error` 自带的方法（`is_dns` / `is_connect` / `is_timeout`
+/// / `is_body`），它们沿 source 链做类型 downcast，**不是**对错误文案做字符串
+/// 匹配，所以不受本地化或版本措辞变化影响。
+///
+/// 判定顺序有讲究：
+/// 1. **超时优先**。连接超时的 source 链里也可能带 connect 的错误，
+///    但玩家该做的动作是「稍后重试」而不是「检查网络」，说错了会误导。
+/// 2. DNS 先于 Connect。本机解析失败时两者都可能为真，而 DNS 更具体。
+/// 3. 其余归 `Other`，不去猜。
+fn transport_error(error: reqwest::Error) -> VrccError {
+    let kind = if error.is_timeout() {
+        TransportKind::Timeout
+    } else if error.is_dns() {
+        TransportKind::Dns
+    } else if error.is_connect() {
+        TransportKind::Connect
+    } else if error.is_body() {
+        TransportKind::Body
+    } else {
+        TransportKind::Other
+    };
+    VrccError::new(
+        ErrorLayer::Transport,
+        ErrorDetail::Transport {
+            kind,
+            message: error.to_string(),
+        },
+    )
+}
+
 fn check_body_size(len: usize) -> Result<(), VrccError> {
     if len > MAX_BODY_BYTES {
-        return Err(VrccError::BodyTooLarge);
+        return Err(VrccError::new(ErrorLayer::Input, ErrorDetail::BodyTooLarge));
     }
     Ok(())
 }
@@ -209,8 +242,11 @@ struct Call<'a> {
     body: Option<serde_json::Value>,
     /// 是否带 `Bearer`。
     authed: bool,
-    /// 本地限流用的接口标识。
-    key: &'a str,
+    /// 本地限流用的接口标识。全部是字面量，所以是 `'static`——
+    /// 它会被原样带进 [`HttpDetail::op`]，消费方靠它区分「同一个码在不同接口
+    /// 下的不同含义」（例如 `429 too_many` 在 `device_code` 上是按网络出口 IP
+    /// 算的额度，在别处是玩家自己的每日上限）。
+    key: &'static str,
     /// 同一个接口两次之间至少隔多久。
     min_gap: Duration,
     /// 算在哪一份每天的额度里；`None` 是没有每天上限的接口。
@@ -322,7 +358,10 @@ impl VrccClient {
     fn validate_path(path: &str) -> Result<(), VrccError> {
         let lowered = path.to_ascii_lowercase();
         if lowered.starts_with("http") || path.starts_with("//") {
-            return Err(VrccError::AbsolutePath(path.to_string()));
+            return Err(VrccError::new(
+                ErrorLayer::Input,
+                ErrorDetail::AbsolutePath(path.to_string()),
+            ));
         }
         Ok(())
     }
@@ -341,18 +380,25 @@ impl VrccClient {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let backoff = state.backoff_remaining(now);
             if !backoff.is_zero() {
-                return Err(VrccError::RateLimited(format!(
-                    "退避中，还需 {} 秒",
-                    backoff.as_secs().max(1)
-                )));
+                return Err(VrccError::new(
+                    ErrorLayer::Client,
+                    ErrorDetail::ThrottledLocally {
+                        retry_after_secs: backoff.as_secs().max(1),
+                        reason: LocalThrottle::Backoff,
+                    },
+                ));
             }
             match state.limiter.reserve(key, min_gap, now, MAX_ACQUIRE_WAIT) {
                 Ok(at) => at,
                 Err(wait) => {
                     // 没占槽：调用方可以拿缓存顶上，而不是干等。
-                    return Err(VrccError::TooSoon {
-                        retry_after_secs: wait.as_secs().max(1),
-                    });
+                    return Err(VrccError::new(
+                        ErrorLayer::Client,
+                        ErrorDetail::ThrottledLocally {
+                            retry_after_secs: wait.as_secs().max(1),
+                            reason: LocalThrottle::Gap,
+                        },
+                    ));
                 }
             }
         };
@@ -366,10 +412,13 @@ impl VrccClient {
             state.backoff_remaining(Instant::now())
         };
         if !backoff.is_zero() {
-            return Err(VrccError::RateLimited(format!(
-                "退避中，还需 {} 秒",
-                backoff.as_secs().max(1)
-            )));
+            return Err(VrccError::new(
+                ErrorLayer::Client,
+                ErrorDetail::ThrottledLocally {
+                    retry_after_secs: backoff.as_secs().max(1),
+                    reason: LocalThrottle::Backoff,
+                },
+            ));
         }
         Ok(())
     }
@@ -446,10 +495,15 @@ impl VrccClient {
             return Ok(());
         };
         if live.remaining <= 0 {
-            return Err(VrccError::QuotaExhausted(format!(
-                "今天的次数用完了，约 {} 后恢复",
-                human_wait(live.until.saturating_duration_since(now).as_secs())
-            )));
+            // 这一份额度按服务端上一次给的头已经用满。仍属本机拦截：
+            // 请求没有发出去，服务端也没计数。
+            return Err(VrccError::new(
+                ErrorLayer::Client,
+                ErrorDetail::ThrottledLocally {
+                    retry_after_secs: live.until.saturating_duration_since(now).as_secs().max(1),
+                    reason: LocalThrottle::Backoff,
+                },
+            ));
         }
         // 先扣着，免得两次响应之间连发越界；下一个响应头会覆盖它。
         if let Some(seen) = state.quotas.get_mut(&bucket) {
@@ -468,97 +522,53 @@ impl VrccClient {
         }
     }
 
-    /// 先于通用 429 分流处理的几个 `(状态码, error)` 组合。
+    /// 处理一次 `429` 的**本地记账**：停用哪一份额度、退避多久。
     ///
-    /// 官方错误码表里有两个 `error` 串**一个串两种含义**，只能靠状态码区分
-    /// （README「网页上的动作和打分的错误码」一节原话：「同一个码有两种状态的
-    /// （`busy`、`xd_world`），按状态码区分」）。`busy` 是最容易踩的那一个：
+    /// 它不返回错误，也不构造错误。早先这个函数叫 `on_too_many`，返回
+    /// 6 种不同的错误变体，等于把「该等多久」和「怎么措辞」都焊进了
+    /// client 层——文案没法本地化，`device_code` 的特殊说明也只能硬编码成
+    /// 一段中文。现在它只更新 [`VrccClientState`]，错误由调用方按 HTTP 事实
+    /// 统一构造，等待时长由 `Retry-After` 随错误一起带出去。
     ///
-    /// | 状态 | error | 含义 |
-    /// |---|---|---|
-    /// | `409` | `busy` | 这一轮的星卡还在生成，等一下就好 |
-    /// | `429` | `busy` | 全站今天输错的连接码太多，连接功能暂停到次日 |
-    ///
-    /// 两者都和本机额度无关，所以都**不能**交给 [`Self::on_too_many`]——
-    /// 那会把它们算成 `QuotaExhausted` 并说成「今天的次数用完了」。
-    ///
-    /// 单独抽成纯函数是为了能测到：`request()` 要先过限流再真的发网络请求，
-    /// 在单测里跑不到这条分支。
-    fn classify_status_error(code: u16, error: &str) -> Option<VrccError> {
-        match (code, error) {
-            (409, "busy") => Some(VrccError::NotReady),
-            (429, "busy") => Some(VrccError::ConnectPaused),
-            _ => None,
-        }
-    }
-
-    /// 把一个 `429` 变成错误，顺带决定要不要退避、退避多久。
-    ///
-    /// 官方的 `429` 分几种，处理完全不同：
-    /// - `too_soon`：两次轮询间隔不到 25 秒。等 `Retry-After` 秒（旧服务器
-    ///   没给就用 `every`）再问就行，**不该**触发长时间退避。
+    /// 官方的 `429` 分几种，记账方式不同：
+    /// - `too_soon`：两次轮询间隔不到 25 秒。**不退避**，这不是配额问题。
     /// - 每天的次数用完（`RateLimit-Remaining` 是 0，或 `Retry-After` 长到
     ///   只能是「到北京时间零点」）：只停这一份额度，不让别的接口跟着停。
     /// - 其余（每分钟的限制）：照 `Retry-After` 全局退避；旧服务器没给头时
     ///   按指数退避猜。
     ///
-    /// `429 busy` 不会走到这里，见 [`Self::classify_status_error`]。
-    fn on_too_many(
-        &self,
-        error: &str,
-        body: &VrccErrorBody,
-        rate: RateHeaders,
-        bucket: Option<QuotaBucket>,
-        call_key: Option<&str>,
-    ) -> VrccError {
+    /// `429 busy`（全站连接功能暂停到次日）也走这里，但它和本机额度无关：
+    /// 它不停用任何额度，只会因为 `Retry-After` 很长而让 [`Self::acquire`]
+    /// 自然退避。判断哪种 `busy` 是消费方的事，见 [`VrccError::is_not_ready`]
+    /// 与 [`HttpDetail::op`]。
+    fn record_too_many(&self, error: &str, rate: RateHeaders, bucket: Option<QuotaBucket>) {
         if error == "too_soon" {
-            let gap = rate
-                .retry_after_secs
-                .filter(|secs| *secs > 0)
-                .or_else(|| {
-                    body.every
-                        .filter(|every| *every > 0)
-                        .map(|every| every as u64)
-                })
-                .unwrap_or(NOTIFICATIONS_MIN_GAP.as_secs());
-            return VrccError::TooSoon {
-                retry_after_secs: gap,
-            };
+            // 问勤了而已，不消耗额度也不该长时间退避。
+            return;
         }
         let daily = rate.quota.is_some_and(|quota| quota.remaining <= 0)
             || rate
                 .retry_after_secs
                 .is_some_and(|secs| Duration::from_secs(secs) > MAX_BACKOFF);
         if daily {
-            let wait = rate
-                .retry_after_secs
-                .or(rate.quota.map(|quota| quota.reset_secs))
-                .filter(|secs| *secs > 0)
-                .unwrap_or_else(secs_until_beijing_midnight);
             if let Some(bucket) = bucket {
+                let wait = rate
+                    .retry_after_secs
+                    .or(rate.quota.map(|quota| quota.reset_secs))
+                    .filter(|secs| *secs > 0)
+                    .unwrap_or_else(secs_until_beijing_midnight);
                 self.mark_exhausted(bucket, Duration::from_secs(wait));
             }
-            // 设备码的 30 次/天是按**网络出口地址**算的，不是按本客户端算的：
-            // 同一路由下的所有人共用一个额度。所以这里的措辞必须点明这一点，
-            // 否则玩家会以为是自己的账号出了问题、或者怪这个软件。
-            if call_key == Some(DEVICE_CODE_KEY) {
-                return VrccError::QuotaExhausted(format!(
-                    "申请连接码失败（{error}）：该额度按网络出口 IP 计算，每天 30 个，\
-                     可能已被同一网络下的其他设备或玩家用完。约 {} 后恢复；\
-                     换一个网络（如手机热点）可以立刻再用。",
-                    human_wait(wait)
-                ));
-            }
-            return VrccError::QuotaExhausted(format!(
-                "{error}，今天的次数用完了，约 {} 后恢复",
-                human_wait(wait)
-            ));
+            return;
         }
-        let wait = match rate.retry_after_secs {
-            Some(secs) => self.note_retry_after(Duration::from_secs(secs.max(1))),
-            None => self.note_rate_limited(),
-        };
-        VrccError::RateLimited(format!("{error}，退避 {} 秒", wait.as_secs()))
+        match rate.retry_after_secs {
+            Some(secs) => {
+                self.note_retry_after(Duration::from_secs(secs.max(1)));
+            }
+            None => {
+                self.note_rate_limited();
+            }
+        }
     }
 
     /// 把请求真正发出去之前的所有步骤。
@@ -577,7 +587,11 @@ impl VrccClient {
             .http
             .request(
                 call.method.parse().map_err(|_| {
-                    VrccError::Transport(format!("不支持的请求方法 {}", call.method))
+                    // 方法名是我们自己写死的，拼错属于本机 bug，不是网络问题。
+                    VrccError::new(
+                        ErrorLayer::Input,
+                        ErrorDetail::AbsolutePath(format!("不支持的请求方法 {}", call.method)),
+                    )
                 })?,
                 format!("{}{}", self.base, call.path),
             )
@@ -585,7 +599,8 @@ impl VrccClient {
             .header("Accept", "application/json");
 
         if call.authed {
-            let token = (self.token)().ok_or(VrccError::TokenMissing)?;
+            let token = (self.token)()
+                .ok_or_else(|| VrccError::new(ErrorLayer::Session, ErrorDetail::TokenMissing))?;
             builder = builder.header("Authorization", format!("Bearer {token}"));
         }
 
@@ -597,10 +612,7 @@ impl VrccClient {
                 .body(text);
         }
 
-        builder
-            .send()
-            .await
-            .map_err(|error| VrccError::Transport(error.to_string()))
+        builder.send().await.map_err(transport_error)
     }
 
     /// 核心请求。
@@ -640,10 +652,7 @@ impl VrccClient {
                 "vrcc: response carries deprecated fields"
             );
         }
-        let text = response
-            .text()
-            .await
-            .map_err(|error| VrccError::Transport(error.to_string()))?;
+        let text = response.text().await.map_err(transport_error)?;
 
         if let (Some(bucket), Some(quota)) = (call.bucket, rate.quota) {
             self.note_quota(bucket, quota);
@@ -653,7 +662,14 @@ impl VrccClient {
             self.note_success();
             serde_json::from_str(&text).map_err(|error| {
                 // 不把正文塞进错误里：里面可能有玩家数据。
-                VrccError::Decode(error.to_string())
+                //
+                // 归传输层而不是服务器层：拿到了 2xx 却不是 JSON，通常意味着
+                // 中间设备改写了响应（门户页、劫持），或者代理返回了 HTML
+                // 错误页。那不是「服务器按协议拒绝了」，排查方向完全不同。
+                VrccError::new(
+                    ErrorLayer::Transport,
+                    ErrorDetail::Decode(error.to_string()),
+                )
             })
         } else {
             let code = status.as_u16();
@@ -662,24 +678,23 @@ impl VrccClient {
                 .error
                 .clone()
                 .unwrap_or_else(|| format!("http_{code}"));
-            if let Some(error) = Self::classify_status_error(code, &error) {
-                return Err(error);
-            }
+            // 429 的记账（停用哪一份额度、退避多久）在这一步做完。**错误本身
+            // 只记录 HTTP 事实**：哪些码要退避、退避多久由 `VrccClientState`
+            // 承担，不是错误对象的职责。
             if code == 429 {
-                return Err(self.on_too_many(&error, &parsed, rate, call.bucket, Some(call.key)));
+                self.record_too_many(&error, rate, call.bucket);
             }
-            if code == 503 && error == "stop" {
-                return Err(VrccError::Paused {
-                    say: parsed.say,
-                    until: parsed.until,
-                });
-            }
-            Err(VrccError::Api {
-                status: code,
-                error,
-                need: parsed.need,
-                why: parsed.why,
-            })
+            Err(VrccError::new(
+                ErrorLayer::Server,
+                ErrorDetail::Http(HttpDetail {
+                    status: code,
+                    error,
+                    need: parsed.need,
+                    why: parsed.why,
+                    retry_after: rate.retry_after_secs,
+                    op: Some(call.key),
+                }),
+            ))
         }
     }
 
@@ -737,26 +752,26 @@ impl VrccClient {
     pub async fn fetch_site_asset(&self, path: &str) -> Result<Vec<u8>, VrccError> {
         Self::validate_path(path)?;
         let url = format!("{VRCC_SITE_ORIGIN}{path}");
-        let response = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|error| VrccError::Transport(error.to_string()))?;
+        let response = self.http.get(&url).send().await.map_err(transport_error)?;
         let status = response.status();
         if !status.is_success() {
-            return Err(VrccError::Api {
-                status: status.as_u16(),
-                error: "asset".to_string(),
-                need: None,
-                why: None,
-            });
+            return Err(VrccError::new(
+                ErrorLayer::Server,
+                ErrorDetail::Http(HttpDetail {
+                    status: status.as_u16(),
+                    error: "asset".to_string(),
+                    need: None,
+                    why: None,
+                    retry_after: None,
+                    op: Some("asset"),
+                }),
+            ));
         }
         response
             .bytes()
             .await
             .map(|bytes| bytes.to_vec())
-            .map_err(|error| VrccError::Transport(error.to_string()))
+            .map_err(transport_error)
     }
 
     /// 单张地图详情。未上榜或未过审返回 `404 not_found`。
@@ -1038,19 +1053,6 @@ fn secs_until_beijing_midnight_from(unix_secs: u64) -> u64 {
     (DAY - beijing % DAY).max(1)
 }
 
-/// 给人看的等待时长：`3 小时 20 分钟`、`5 分钟`、`40 秒`。
-fn human_wait(secs: u64) -> String {
-    if secs < 60 {
-        return format!("{secs} 秒");
-    }
-    let total_minutes = secs.div_ceil(60);
-    match (total_minutes / 60, total_minutes % 60) {
-        (0, minutes) => format!("{minutes} 分钟"),
-        (hours, 0) => format!("{hours} 小时"),
-        (hours, minutes) => format!("{hours} 小时 {minutes} 分钟"),
-    }
-}
-
 /// 把 scope 编成查询串可用形式。
 ///
 /// scope 是空格分隔的权限名（profile notifications maps），查询串里空格要
@@ -1072,6 +1074,21 @@ fn encode_query_value(value: &str) -> String {
 mod tests {
     use super::*;
     use vrcx_0_contracts::vrcc::{is_dev_client, VRCC_BUILD_CLIENT, VRCC_DEV_CLIENT};
+
+    /// 服务器拒绝（拿到了响应，状态码不是 2xx）。
+    fn http_error(status: u16, error: &str) -> VrccError {
+        VrccError::new(
+            ErrorLayer::Server,
+            ErrorDetail::Http(HttpDetail {
+                status,
+                error: error.to_string(),
+                need: None,
+                why: None,
+                retry_after: None,
+                op: None,
+            }),
+        )
+    }
 
     /// 构建期没注入时，解析结果必须就是开发态标识。
     ///
@@ -1186,11 +1203,17 @@ mod tests {
     fn absolute_paths_are_rejected() {
         assert!(matches!(
             VrccClient::validate_path("https://evil.example/x"),
-            Err(VrccError::AbsolutePath(_))
+            Err(VrccError {
+                layer: ErrorLayer::Input,
+                detail: ErrorDetail::AbsolutePath(_)
+            })
         ));
         assert!(matches!(
             VrccClient::validate_path("//evil.example/x"),
-            Err(VrccError::AbsolutePath(_))
+            Err(VrccError {
+                layer: ErrorLayer::Input,
+                detail: ErrorDetail::AbsolutePath(_)
+            })
         ));
         assert!(VrccClient::validate_path("boards/maps?limit=5").is_ok());
         assert!(VrccClient::validate_path("me/notifications?since=1").is_ok());
@@ -1198,12 +1221,7 @@ mod tests {
 
     #[test]
     fn gone_error_is_detected() {
-        let error = VrccError::Api {
-            status: 404,
-            error: "gone".to_string(),
-            need: None,
-            why: None,
-        };
+        let error = http_error(404, "gone");
         assert!(error.is_gone());
         assert!(error.needs_reauth());
     }
@@ -1212,12 +1230,7 @@ mod tests {
     fn star_gone_and_not_found_do_not_need_reauth() {
         // 官方错误码表明确区分：对方不在了 / 地图不在榜上，令牌都没事。
         for code in ["star_gone", "not_found"] {
-            let error = VrccError::Api {
-                status: 404,
-                error: code.to_string(),
-                need: None,
-                why: None,
-            };
+            let error = http_error(404, code);
             assert!(!error.is_gone(), "{code} 不该被当成令牌失效");
             assert!(!error.needs_reauth(), "{code} 不该触发重新授权");
         }
@@ -1235,43 +1248,43 @@ mod tests {
             (403, "scope_unreviewed"),
             (401, "token"),
         ] {
-            let error = VrccError::Api {
-                status,
-                error: code.to_string(),
-                need: Some("card".to_string()),
-                why: None,
-            };
+            let error = VrccError::new(
+                ErrorLayer::Server,
+                ErrorDetail::Http(HttpDetail {
+                    status,
+                    error: code.to_string(),
+                    need: Some("card".to_string()),
+                    why: None,
+                    retry_after: None,
+                    op: None,
+                }),
+            );
             assert!(error.needs_reauth(), "{status} {code} 应要求重新授权");
         }
         // 这些不需要。
-        assert!(!VrccError::RateLimited("too_many".into()).needs_reauth());
-        let map_not_went = VrccError::Api {
-            status: 403,
-            error: "map_not_went".to_string(),
-            need: Some("verify".to_string()),
-            why: None,
-        };
+        assert!(!http_error(429, "too_many").needs_reauth());
+        let map_not_went = VrccError::new(
+            ErrorLayer::Server,
+            ErrorDetail::Http(HttpDetail {
+                status: 403,
+                error: "map_not_went".to_string(),
+                need: Some("verify".to_string()),
+                why: None,
+                retry_after: None,
+                op: None,
+            }),
+        );
         assert!(!map_not_went.needs_reauth(), "打分前置条件不要求重新授权");
     }
 
     #[test]
     fn device_flow_errors_are_classified() {
-        let pending = VrccError::Api {
-            status: 400,
-            error: "authorization_pending".to_string(),
-            need: None,
-            why: None,
-        };
+        let pending = http_error(400, "authorization_pending");
         assert!(pending.is_authorization_pending());
         assert!(!pending.is_device_auth_terminal());
 
         for code in ["access_denied", "expired_token"] {
-            let error = VrccError::Api {
-                status: 400,
-                error: code.to_string(),
-                need: None,
-                why: None,
-            };
+            let error = http_error(400, code);
             assert!(error.is_device_auth_terminal(), "{code}");
             assert!(!error.is_authorization_pending(), "{code}");
         }
@@ -1304,23 +1317,23 @@ mod tests {
     #[test]
     fn device_code_bad_request_is_recoverable() {
         for code in ["invalid_scope", "bad_request"] {
-            let error = VrccError::Api {
-                status: 400,
-                error: code.to_string(),
-                need: None,
-                why: None,
-            };
+            let error = http_error(400, code);
             assert!(!error.is_device_auth_terminal(), "{code}");
             assert!(!error.is_authorization_pending(), "{code}");
             assert!(!error.needs_reauth(), "{code}");
         }
         // 缺的权限要能带出去，界面才能告诉玩家是哪个名字写错了。
-        let invalid_scope = VrccError::Api {
-            status: 400,
-            error: "invalid_scope".to_string(),
-            need: Some("maps.rate".to_string()),
-            why: None,
-        };
+        let invalid_scope = VrccError::new(
+            ErrorLayer::Server,
+            ErrorDetail::Http(HttpDetail {
+                status: 400,
+                error: "invalid_scope".to_string(),
+                need: Some("maps.rate".to_string()),
+                why: None,
+                retry_after: None,
+                op: None,
+            }),
+        );
         assert_eq!(invalid_scope.needed_scope(), Some("maps.rate"));
     }
 
@@ -1328,13 +1341,24 @@ mod tests {
     fn too_soon_is_not_a_quota_problem() {
         // 官方把 429 分成两种：too_soon 是问勤了，too_many 是额度用完。
         // 前者不该被当成需要长时间退避的配额问题。
-        let too_soon = VrccError::TooSoon {
-            retry_after_secs: 25,
-        };
+        //
+        // 重构后两者都是 `Http { status: 429, .. }`，靠 `error` 串区分；
+        // 退避时长由 `retry_after` 带出去，不再拼进中文文案里。
+        let too_soon = VrccError::new(
+            ErrorLayer::Server,
+            ErrorDetail::Http(HttpDetail {
+                status: 429,
+                error: "too_soon".to_string(),
+                need: None,
+                why: None,
+                retry_after: Some(25),
+                op: Some("notifications"),
+            }),
+        );
         assert!(!too_soon.needs_reauth());
         assert!(too_soon.to_string().contains("25"));
 
-        let too_many = VrccError::RateLimited("too_many".into());
+        let too_many = http_error(429, "too_many");
         assert!(!too_many.needs_reauth());
     }
 
@@ -1385,7 +1409,9 @@ mod tests {
             },
         );
         let error = client.spend(QuotaBucket::Reads).unwrap_err();
-        assert!(matches!(error, VrccError::QuotaExhausted(_)), "{error:?}");
+        // 这一份额度按服务端上一次的头已经用满：本机拦下，请求没发出去。
+        assert_eq!(error.layer, ErrorLayer::Client);
+        assert!(error.is_throttled(), "{error:?}");
     }
 
     /// `spend` 与 `refund` 必须对称：请求没发出去时不能白占一次额度。
@@ -1449,9 +1475,9 @@ mod tests {
         assert!(
             matches!(
                 check_body_size(MAX_BODY_BYTES + 1),
-                Err(VrccError::BodyTooLarge)
+                Err(ref error) if error.is_our_bug()
             ),
-            "超 1 字节就该拦"
+            "超 1 字节就该拦，且要标成我们自己的 bug"
         );
         // 正好等于上限要通过：官方说的是「最大 2 KB」，边界不算超。
         assert!(check_body_size(MAX_BODY_BYTES).is_ok());
@@ -1471,12 +1497,7 @@ mod tests {
     }
 
     fn api_error(status: u16, code: &str) -> VrccError {
-        VrccError::Api {
-            status,
-            error: code.to_string(),
-            need: None,
-            why: None,
-        }
+        http_error(status, code)
     }
 
     #[test]
@@ -1518,31 +1539,34 @@ mod tests {
         assert_eq!(half.quota, None);
     }
 
-    /// 同一个 `busy` 串在 409 和 429 下含义相反，必须走不同的变体。
+    /// 同一个 `busy` 串在 409 和 429 下含义相反，只能按状态码分开。
     ///
-    /// 钉住这条是因为它极容易写错：只要在 `request()` 里先按 429 分流、
-    /// 或者用 `error == "busy"` 一处判断，就会把两种语义混成一种——
-    /// 前者让 `409 busy` 掉回 `Api { status: 409 }` 被前端显示成「操作失败」，
-    /// 后者把 `429 busy` 说成「今天的次数用完了」，可玩家一次都没用。
+    /// 重构后这个判断不再写死在 client 里（早先有个 `classify_status_error`
+    /// 专门做这件事，等于把业务语义焊在了网络层）。现在错误只忠实记录
+    /// `Http { status, error }`，判断落在 `is_not_ready()` 和
+    /// `classify_vrcc_error()` 上。这条测试钉住「消费者仍能分清」：
+    /// 409 是「星卡还在生成」，429 是「连接功能暂停到次日」。
     #[test]
-    fn busy_means_different_things_by_status() {
-        assert!(
-            matches!(
-                VrccClient::classify_status_error(409, "busy"),
-                Some(VrccError::NotReady)
-            ),
-            "409 busy 是「星卡还在生成」，应归 NotReady"
-        );
-        assert!(
-            matches!(
-                VrccClient::classify_status_error(429, "busy"),
-                Some(VrccError::ConnectPaused)
-            ),
-            "429 busy 是「连接功能暂停到次日」，应归 ConnectPaused"
-        );
-        // 别的组合不许被这条短路抢走，仍要走原来的路径。
+    fn busy_is_told_apart_by_status_code() {
+        // 409：这一轮的星卡还在生成，等一下就好。
+        let not_ready = http_error(409, "busy");
+        assert!(not_ready.is_not_ready());
+        assert_eq!(not_ready.layer, ErrorLayer::Server);
+
+        // 429：全站连接功能暂停到次日。同一个串，但**不是** is_not_ready。
+        let connect_paused = http_error(429, "busy");
+        assert!(!connect_paused.is_not_ready());
+        assert_eq!(connect_paused.layer, ErrorLayer::Server);
+
+        // 两者都不该被当成令牌问题。
+        for error in [not_ready, connect_paused] {
+            assert!(!error.needs_reauth());
+            assert!(!error.is_session_lost());
+        }
+
+        // 别的码不会被 busy 规则误伤。
         for (code, error) in [
-            (429, "too_many"),
+            (429u16, "too_many"),
             (429, "too_soon"),
             (429, "quota"),
             (409, "yq_wait"),
@@ -1550,35 +1574,25 @@ mod tests {
             (503, "stop"),
             (403, "scope"),
         ] {
-            assert!(
-                VrccClient::classify_status_error(code, error).is_none(),
-                "{code} {error} 不该被 busy 规则接走"
-            );
+            assert!(!http_error(code, error).is_not_ready(), "{code} {error}");
         }
     }
 
+    /// `too_soon` 只是问勤了，不该触发长时间退避。
+    ///
+    /// 重构后它不再产生独立变体：错误统一是 `Http { status: 429, error:
+    /// "too_soon", retry_after }`，等待时长由 `retry_after` 带给消费方。
     #[test]
-    fn too_soon_waits_for_retry_after_over_every() {
+    fn too_soon_does_not_trigger_backoff() {
         let client = client();
-        let body = VrccErrorBody {
-            every: Some(60),
-            ..Default::default()
-        };
         let rate = RateHeaders {
             retry_after_secs: Some(7),
             quota: None,
         };
-        // 1.9.0 起 `Retry-After` 是 25 秒间隔还剩的秒数，比 `every` 准。
-        match client.on_too_many("too_soon", &body, rate, None, None) {
-            VrccError::TooSoon { retry_after_secs } => assert_eq!(retry_after_secs, 7),
-            other => panic!("expected TooSoon, got {other:?}"),
-        }
-        // 旧服务器没有头：退回 `every`。
-        match client.on_too_many("too_soon", &body, RateHeaders::default(), None, None) {
-            VrccError::TooSoon { retry_after_secs } => assert_eq!(retry_after_secs, 60),
-            other => panic!("expected TooSoon, got {other:?}"),
-        }
-        // too_soon 不触发全局退避。
+        client.record_too_many("too_soon", rate, None);
+        assert!(client.local_usage().backoff_remaining.is_zero());
+        // 旧服务器没给头也不能退避。
+        client.record_too_many("too_soon", RateHeaders::default(), None);
         assert!(client.local_usage().backoff_remaining.is_zero());
     }
 
@@ -1589,26 +1603,18 @@ mod tests {
             retry_after_secs: Some(60),
             quota: None,
         };
-        let error = client.on_too_many("too_many", &VrccErrorBody::default(), rate, None, None);
-        assert!(matches!(error, VrccError::RateLimited(_)), "{error:?}");
+        client.record_too_many("too_many", rate, None);
         let backoff = client.local_usage().backoff_remaining;
         assert!(backoff > Duration::from_secs(55) && backoff <= Duration::from_secs(60));
         // 第二次照样按服务器说的等，不再自己翻倍。
-        client.on_too_many("too_many", &VrccErrorBody::default(), rate, None, None);
+        client.record_too_many("too_many", rate, None);
         assert!(client.local_usage().backoff_remaining <= Duration::from_secs(60));
     }
 
     #[test]
     fn old_server_429_without_retry_after_still_backs_off() {
         let client = client();
-        let error = client.on_too_many(
-            "too_many",
-            &VrccErrorBody::default(),
-            RateHeaders::default(),
-            None,
-            None,
-        );
-        assert!(matches!(error, VrccError::RateLimited(_)));
+        client.record_too_many("too_many", RateHeaders::default(), None);
         assert!(client.local_usage().backoff_remaining > Duration::from_secs(55));
     }
 
@@ -1624,22 +1630,11 @@ mod tests {
                 reset_secs: 5 * 3600,
             }),
         };
-        let error = client.on_too_many(
-            "too_many",
-            &VrccErrorBody::default(),
-            rate,
-            Some(QuotaBucket::MoreReads),
-            None,
-        );
-        assert!(matches!(error, VrccError::QuotaExhausted(_)), "{error:?}");
-        assert!(error.to_string().contains("5 小时"), "{error}");
+        client.record_too_many("too_many", rate, Some(QuotaBucket::MoreReads));
         // 不让所有接口一起退避五个小时。
         assert!(client.local_usage().backoff_remaining.is_zero());
         // 这一份在零点前不再发请求……
-        assert!(matches!(
-            client.spend(QuotaBucket::MoreReads),
-            Err(VrccError::QuotaExhausted(_))
-        ));
+        assert!(client.spend(QuotaBucket::MoreReads).is_err());
         // ……别的几份照常。
         assert!(client.spend(QuotaBucket::Reads).is_ok());
         assert!(client.spend(QuotaBucket::Unread).is_ok());
@@ -1653,8 +1648,8 @@ mod tests {
             retry_after_secs: Some(8 * 3600),
             quota: None,
         };
-        let error = client.on_too_many("too_many", &VrccErrorBody::default(), rate, None, None);
-        assert!(matches!(error, VrccError::QuotaExhausted(_)), "{error:?}");
+        client.record_too_many("too_many", rate, None);
+        // 长到只能是「到零点」的等待，不该变成全局退避。
         assert!(client.local_usage().backoff_remaining.is_zero());
     }
 
@@ -1723,10 +1718,8 @@ mod tests {
                 reset_secs: 600,
             },
         );
-        assert!(matches!(
-            client.spend(QuotaBucket::Unread),
-            Err(VrccError::QuotaExhausted(_))
-        ));
+        let error = client.spend(QuotaBucket::Unread).unwrap_err();
+        assert!(error.is_throttled(), "{error:?}");
     }
 
     #[test]
@@ -1750,22 +1743,21 @@ mod tests {
         assert!(!api_error(405, "method").is_not_found());
     }
 
+    /// `503 stop`（停站维护）不是令牌问题。
+    ///
+    /// 重构后它不再是独立变体，而是 `Http { status: 503, error: "stop" }`。
+    /// **停站说明和恢复时间不再拼进错误文案**——那两个字段本来就能从
+    /// `/announcements` 的 `stop` 拿到，错误对象只记 HTTP 事实即可。
     #[test]
     fn stop_reads_as_maintenance_not_as_reauth() {
-        let paused = VrccError::Paused {
-            say: Some("升级数据库，约半小时".to_string()),
-            until: Some(1_793_000_000_000),
-        };
-        assert!(!paused.needs_reauth());
-        assert_eq!(
-            paused.to_string(),
-            "星遇同频停站维护中：升级数据库，约半小时"
-        );
-        let silent = VrccError::Paused {
-            say: None,
-            until: None,
-        };
-        assert_eq!(silent.to_string(), "星遇同频停站维护中");
+        let stop = http_error(503, "stop");
+        assert!(!stop.needs_reauth(), "停站不该让玩家重新授权");
+        assert!(!stop.is_session_lost());
+        assert_eq!(stop.layer, ErrorLayer::Server);
+        // 文案只保留状态码与官方错误码，不含中文解释。
+        let text = stop.to_string();
+        assert!(text.contains("503"), "{text}");
+        assert!(text.contains("stop"), "{text}");
     }
 
     #[test]
@@ -1789,15 +1781,15 @@ mod tests {
         );
     }
 
+    /// 北京时间零点换算。
+    ///
+    /// `human_wait`（「5 小时 20 分钟」这种中文格式化）随重构删掉了：
+    /// 现在错误只带 `retry_after` 秒数，文案由前端按语言渲染。
     #[test]
-    fn beijing_midnight_and_waits_read_right() {
+    fn beijing_midnight_reads_right() {
         // 2026-10-27 00:00 北京 = 2026-10-26 16:00 UTC。
         let midnight_utc = 1_793_030_400;
         assert_eq!(secs_until_beijing_midnight_from(midnight_utc - 60), 60);
         assert_eq!(secs_until_beijing_midnight_from(midnight_utc), 86_400);
-        assert_eq!(human_wait(40), "40 秒");
-        assert_eq!(human_wait(300), "5 分钟");
-        assert_eq!(human_wait(3599), "1 小时");
-        assert_eq!(human_wait(5 * 3600 + 20 * 60), "5 小时 20 分钟");
     }
 }

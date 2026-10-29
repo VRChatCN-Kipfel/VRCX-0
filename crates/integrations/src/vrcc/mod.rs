@@ -25,6 +25,7 @@ pub use throttle::{
     PERSONAL_DAILY_LIMIT, WINDOW_LIMIT,
 };
 pub use vrcx_0_contracts::vrcc::{
-    is_dev_client, resolve_client_id, VRCC_API_BASE, VRCC_APP_NAME, VRCC_BUILD_CLIENT,
-    VRCC_DEFAULT_CLIENT, VRCC_DEV_CLIENT,
+    is_dev_client, resolve_client_id, ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle,
+    TransportKind, VRCC_API_BASE, VRCC_APP_NAME, VRCC_BUILD_CLIENT, VRCC_DEFAULT_CLIENT,
+    VRCC_DEV_CLIENT,
 };

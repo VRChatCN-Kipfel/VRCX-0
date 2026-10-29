@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
-    device_auth_scope, is_dev_client, VrccAnnouncements, VrccBoard, VrccBoardSort,
-    VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals, VrccMyMap, VrccNotes,
-    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
-    VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
+    VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals,
+    VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday,
+    VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -128,20 +128,19 @@ pub trait VrccRemote: Send + Sync {
 
 /// 吊销失败是否属于「请求没到服务器、值得再试一次」。
 ///
-/// - `RateLimited` / `TooSoon`：被限流挡住，请求根本没发出去；
-/// - `Transport`：网络或发送阶段失败。
+/// 判据是**层级**：本机限流（`Client`）和传输失败（`Transport`）都意味着
+/// 请求没有送到服务器，重试有意义。服务器答复里的错误（`Server`）**不算**——
+/// 那说明请求已经到了，服务器自己决定拒绝，重试也不会变。
 ///
-/// 这三种都不该连带清掉本地令牌，否则服务器上的授权永远吊销不了。
-/// 服务器答复里的错误（`Api` / `QuotaExhausted` / `Paused`）**不算**——
-/// 那些说明请求已经到了，服务器自己决定拒绝，重试也不会变。
+/// 早先这里逐个匹配 `RateLimited` / `TooSoon` / `Transport` 三个变体，
+/// 每加一种错误就要回来补一次；现在只问一次层级。
 fn retriable_revoke_failure(error: &VrccError) -> bool {
-    matches!(
-        error,
-        VrccError::RateLimited(_) | VrccError::TooSoon { .. } | VrccError::Transport(_)
-    )
+    matches!(error.layer, ErrorLayer::Client | ErrorLayer::Transport)
 }
 
 /// 前端能区分的行为分类。
+///
+/// 这一层是给界面的**动作提示**，不是错误的结构。结构见 [`VrccError::layer`]。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VrccErrorKind {
     /// 需要玩家重新授权。
@@ -161,20 +160,27 @@ pub enum VrccErrorKind {
     Other,
 }
 
-/// 跨层传递的错误：**分类结论 + 缺的权限 + 原文**。
+/// 跨层传递的错误：**分类结论 + 层级 + 缺的权限 + 原文**。
 ///
-/// 为什么不是 `String`：错误分类必须在产生错误的地方算（那里知道 `VrccError`
-/// 的确切变体），而消费它的地方（命令层、前端）不该靠解析中文文案反推。
-/// 早先 runtime 层把错误折成 `to_string()`，前端再对文案做子串匹配，结果
-/// `401 token` 落进 `Other`、`need` 在转字符串时直接丢失、`missing_scope`
-/// 提示永远不显示——都是这一个设计问题带出来的。
+/// 为什么不是 `String`：错误分类必须在产生错误的地方算（那里知道
+/// `VrccError` 的确切结构），而消费它的地方（命令层、前端）不该靠解析
+/// 中文文案反推。早先 runtime 层把错误折成 `to_string()`，前端再对文案做
+/// 子串匹配，结果 `401 token` 落进 `Other`、`need` 在转字符串时直接丢失、
+/// `missing_scope` 提示永远不显示——都是这一个设计问题带出来的。
 ///
-/// `message` 保留原文只为日志与兜底显示；判断分支一律看 `kind` / `need`。
+/// `message` 保留原文只为日志与兜底显示；判断分支一律看 `kind` / `layer` /
+/// `need`。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VrccFailure {
     pub kind: VrccErrorKind,
+    /// 失败发生在哪一层。前端据此区分「网络问题」和「业务拒绝」。
+    pub layer: ErrorLayer,
     /// 缺哪个权限（`kind == MissingScope` 时通常有值）。
     pub need: Option<String>,
+    /// 传输层失败卡在哪一步；不是传输层错误时为 `None`。
+    pub transport_kind: Option<TransportKind>,
+    /// 发起调用的接口标识，用于区分「同一个码在不同接口下的含义」。
+    pub op: Option<&'static str>,
     /// 人可读的错误原文，用于日志与兜底显示。
     pub message: String,
 }
@@ -183,9 +189,16 @@ impl VrccFailure {
     /// 从应用层错误造一个。分类在这里一次算清，后面不再重算。
     pub fn from_error(error: &VrccError) -> Self {
         let (kind, need) = classify_vrcc_error(error);
+        let transport_kind = match &error.detail {
+            ErrorDetail::Transport { kind, .. } => Some(*kind),
+            _ => None,
+        };
         Self {
             kind,
+            layer: error.layer,
             need,
+            transport_kind,
+            op: error.http().and_then(|http| http.op),
             message: error.to_string(),
         }
     }
@@ -198,30 +211,52 @@ impl std::fmt::Display for VrccFailure {
 }
 
 /// 判定一个错误属于哪一类，并把缺的权限一并带回。
+///
+/// 先看层级（[`ErrorLayer`]），再在 `Server` 层里看具体错误码。
+///
+/// **`Throttled` 只表示「你问太多了」**，不表示「额度用完了」：本机限流
+/// 和 `429 too_soon` / `429 too_many` / `429 quota` 都归这里，因为玩家该做的
+/// 动作都是「等」。
+///
+/// **`notReady` 表示「那边还没好」**，和 `Throttled` 相反。`409 busy`（星卡还在
+/// 生成）和 `429 busy`（全站连接功能暂停到次日）都归这里——后者本机一次都没
+/// 用过，说成「额度用完了」是错的。
 pub fn classify_vrcc_error(error: &VrccError) -> (VrccErrorKind, Option<String>) {
     let need = error.needed_scope().map(str::to_string);
-    let kind = match error {
-        // `TooSoon` 是「问勤了」，归到 Throttled 只是为了让前端显示
-        // 「稍后再试」；它不会触发长时间退避，也不消耗额度。
-        VrccError::RateLimited(_) | VrccError::QuotaExhausted(_) | VrccError::TooSoon { .. } => {
-            VrccErrorKind::Throttled
-        }
-        // `409 busy`：那边还没准备好，不是玩家的问题，也不是本机限流。
-        VrccError::NotReady => VrccErrorKind::NotReady,
-        // `429 busy`：全站连接功能暂停到次日。本机一次都没用，所以同样
-        // 不算 Throttled（那会显示「今天的次数用完了」，是错的）。
-        VrccError::ConnectPaused => VrccErrorKind::NotReady,
-        // 停站维护：令牌没事，等一会儿就好，和网络问题一样处理。
-        VrccError::Transport(_) | VrccError::Decode(_) | VrccError::Paused { .. } => {
-            VrccErrorKind::Transport
-        }
-        VrccError::TokenMissing => VrccErrorKind::NeedsReauth,
-        VrccError::Api { need, .. } if need.is_some() && error.needs_reauth() => {
-            VrccErrorKind::MissingScope
-        }
-        _ if error.needs_reauth() => VrccErrorKind::NeedsReauth,
-        VrccError::AbsolutePath(_) | VrccError::BodyTooLarge | VrccError::Api { .. } => {
-            VrccErrorKind::Other
+
+    // 本机拦下的请求都没发出去。玩家该做的就是等，或者改用缓存。
+    if error.layer == ErrorLayer::Client {
+        return (VrccErrorKind::Throttled, need);
+    }
+    // 网络层：传输失败、非 JSON 响应。停站维护（`503 stop`）也在这里——
+    // 令牌没事，等一会儿就好，排查方向和网络问题一致。
+    if error.layer == ErrorLayer::Transport {
+        return (VrccErrorKind::Transport, need);
+    }
+
+    let kind = match &error.detail {
+        ErrorDetail::TokenMissing => VrccErrorKind::NeedsReauth,
+        // 我们自己的 bug，界面上只配显示「操作失败」。它本不该发生，
+        // 落在这里说明代码有问题，会由日志暴露出来。
+        ErrorDetail::AbsolutePath(_) | ErrorDetail::BodyTooLarge => VrccErrorKind::Other,
+        ErrorDetail::Transport { .. } | ErrorDetail::Decode(_) => VrccErrorKind::Transport,
+        ErrorDetail::ThrottledLocally { .. } => VrccErrorKind::Throttled,
+        ErrorDetail::Http(http) => {
+            // 同一个 `busy` 串在 409 和 429 下含义相反，只有按状态码才能分开
+            // （官方文档：「同一个码有两种状态的（busy、xd_world），按状态码区分」）。
+            if http.error == "busy" {
+                VrccErrorKind::NotReady
+            } else if http.status == 429 {
+                VrccErrorKind::Throttled
+            } else if http.status == 503 && http.error == "stop" {
+                VrccErrorKind::Transport
+            } else if http.need.is_some() && error.needs_reauth() {
+                VrccErrorKind::MissingScope
+            } else if error.needs_reauth() {
+                VrccErrorKind::NeedsReauth
+            } else {
+                VrccErrorKind::Other
+            }
         }
     };
     (kind, need)
@@ -551,11 +586,11 @@ impl VrccService {
             //
             // 官方说开放数据最多 5 分钟才更新一次，一份旧榜单完全够用；
             // 而让用户点一下刷新就弹错误，比给旧数据更糟。客户端侧因此
-            // 把「等太久」直接报成 `TooSoon`（见 `MAX_ACQUIRE_WAIT`），
-            // 这里接住它。没有缓存时才真的报错。
-            Err(VrccError::TooSoon { retry_after_secs }) => match self.cached_board(limit, sort) {
+            // 把「等太久」报成 `ThrottledLocally { reason: Gap }`（见
+            // `MAX_ACQUIRE_WAIT`），这里接住它。没有缓存时才真的报错。
+            Err(error) if error.is_local_gap() => match self.cached_board(limit, sort) {
                 Some(board) => Ok(board),
-                None => Err(VrccError::TooSoon { retry_after_secs }),
+                None => Err(error),
             },
             Err(error) => Err(error),
         }
@@ -629,9 +664,14 @@ impl VrccService {
                     // 令牌已经不可用，而不是继续拿它请求、收一堆 403。
                     client_id: Some(self.remote.client_id()),
                 };
-                self.store
-                    .save(&credential)
-                    .map_err(|error| VrccError::Transport(format!("保存令牌失败：{error}")))?;
+                self.store.save(&credential).map_err(|error| {
+                    // 写本地令牌失败与网络无关：是本机存储出了问题。
+                    // 归 `Input` 而不是 `Transport`，否则界面会引导玩家去查网络。
+                    VrccError::new(
+                        ErrorLayer::Input,
+                        ErrorDetail::AbsolutePath(format!("保存令牌失败：{error}")),
+                    )
+                })?;
                 self.remote.connect(
                     credential.token,
                     credential.star,
@@ -674,9 +714,12 @@ impl VrccService {
                 return Err(error.clone());
             }
         }
-        self.store
-            .clear()
-            .map_err(|error| VrccError::Transport(format!("清除令牌失败：{error}")))?;
+        self.store.clear().map_err(|error| {
+            VrccError::new(
+                ErrorLayer::Input,
+                ErrorDetail::AbsolutePath(format!("清除令牌失败：{error}")),
+            )
+        })?;
         self.remote.disconnect();
         self.forget_unread();
         match revoke {
@@ -843,7 +886,10 @@ impl VrccService {
         if self.remote.connection().connected {
             Ok(())
         } else {
-            Err(VrccError::TokenMissing)
+            Err(VrccError::new(
+                ErrorLayer::Session,
+                ErrorDetail::TokenMissing,
+            ))
         }
     }
 }
