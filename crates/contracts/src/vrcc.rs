@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// 官方限制 POST 正文最大 2 KB。
 ///
-/// 放在契约层是因为 [`VrccError::BodyTooLarge`] 的错误文案要引用它。
+/// 放在契约层是因为 [`ErrorDetail::BodyTooLarge`] 的错误文案要引用它。
 pub const VRCC_MAX_BODY_BYTES: usize = 2048;
 
 /// 星遇同频的错误。
