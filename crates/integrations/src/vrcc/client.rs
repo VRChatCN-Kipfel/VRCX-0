@@ -468,6 +468,30 @@ impl VrccClient {
         }
     }
 
+    /// 先于通用 429 分流处理的几个 `(状态码, error)` 组合。
+    ///
+    /// 官方错误码表里有两个 `error` 串**一个串两种含义**，只能靠状态码区分
+    /// （README「网页上的动作和打分的错误码」一节原话：「同一个码有两种状态的
+    /// （`busy`、`xd_world`），按状态码区分」）。`busy` 是最容易踩的那一个：
+    ///
+    /// | 状态 | error | 含义 |
+    /// |---|---|---|
+    /// | `409` | `busy` | 这一轮的星卡还在生成，等一下就好 |
+    /// | `429` | `busy` | 全站今天输错的连接码太多，连接功能暂停到次日 |
+    ///
+    /// 两者都和本机额度无关，所以都**不能**交给 [`Self::on_too_many`]——
+    /// 那会把它们算成 `QuotaExhausted` 并说成「今天的次数用完了」。
+    ///
+    /// 单独抽成纯函数是为了能测到：`request()` 要先过限流再真的发网络请求，
+    /// 在单测里跑不到这条分支。
+    fn classify_status_error(code: u16, error: &str) -> Option<VrccError> {
+        match (code, error) {
+            (409, "busy") => Some(VrccError::NotReady),
+            (429, "busy") => Some(VrccError::ConnectPaused),
+            _ => None,
+        }
+    }
+
     /// 把一个 `429` 变成错误，顺带决定要不要退避、退避多久。
     ///
     /// 官方的 `429` 分几种，处理完全不同：
@@ -477,6 +501,8 @@ impl VrccClient {
     ///   只能是「到北京时间零点」）：只停这一份额度，不让别的接口跟着停。
     /// - 其余（每分钟的限制）：照 `Retry-After` 全局退避；旧服务器没给头时
     ///   按指数退避猜。
+    ///
+    /// `429 busy` 不会走到这里，见 [`Self::classify_status_error`]。
     fn on_too_many(
         &self,
         error: &str,
@@ -636,6 +662,9 @@ impl VrccClient {
                 .error
                 .clone()
                 .unwrap_or_else(|| format!("http_{code}"));
+            if let Some(error) = Self::classify_status_error(code, &error) {
+                return Err(error);
+            }
             if code == 429 {
                 return Err(self.on_too_many(&error, &parsed, rate, call.bucket, Some(call.key)));
             }
@@ -1487,6 +1516,45 @@ mod tests {
         // 只有上限、没有余量，等于没说。
         let half = RateHeaders::from_headers(&headers(&[("RateLimit-Limit", "1000")]));
         assert_eq!(half.quota, None);
+    }
+
+    /// 同一个 `busy` 串在 409 和 429 下含义相反，必须走不同的变体。
+    ///
+    /// 钉住这条是因为它极容易写错：只要在 `request()` 里先按 429 分流、
+    /// 或者用 `error == "busy"` 一处判断，就会把两种语义混成一种——
+    /// 前者让 `409 busy` 掉回 `Api { status: 409 }` 被前端显示成「操作失败」，
+    /// 后者把 `429 busy` 说成「今天的次数用完了」，可玩家一次都没用。
+    #[test]
+    fn busy_means_different_things_by_status() {
+        assert!(
+            matches!(
+                VrccClient::classify_status_error(409, "busy"),
+                Some(VrccError::NotReady)
+            ),
+            "409 busy 是「星卡还在生成」，应归 NotReady"
+        );
+        assert!(
+            matches!(
+                VrccClient::classify_status_error(429, "busy"),
+                Some(VrccError::ConnectPaused)
+            ),
+            "429 busy 是「连接功能暂停到次日」，应归 ConnectPaused"
+        );
+        // 别的组合不许被这条短路抢走，仍要走原来的路径。
+        for (code, error) in [
+            (429, "too_many"),
+            (429, "too_soon"),
+            (429, "quota"),
+            (409, "yq_wait"),
+            (409, "msg_wait"),
+            (503, "stop"),
+            (403, "scope"),
+        ] {
+            assert!(
+                VrccClient::classify_status_error(code, error).is_none(),
+                "{code} {error} 不该被 busy 规则接走"
+            );
+        }
     }
 
     #[test]

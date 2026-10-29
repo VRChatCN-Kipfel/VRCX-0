@@ -3458,7 +3458,8 @@ export type AppErrorPayload = {
  */
 export type AppErrorVrccDetail = {
     /**
-     * 行为分类：`needsReauth` / `missingScope` / `throttled` / `transport` / `other`。
+     * 行为分类：`needsReauth` / `missingScope` / `throttled` / `notReady` /
+     * `transport` / `other`。
      */
     kind: string;
     /**

@@ -59,7 +59,8 @@ struct AppErrorPayload {
 #[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AppErrorVrccDetail {
-    /// 行为分类：`needsReauth` / `missingScope` / `throttled` / `transport` / `other`。
+    /// 行为分类：`needsReauth` / `missingScope` / `throttled` / `notReady` /
+    /// `transport` / `other`。
     pub kind: String,
     /// 缺哪个权限（`missingScope` 时通常有值）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -139,6 +140,7 @@ fn vrcc_kind_name(kind: vrcx_0_application::vrcc::VrccErrorKind) -> &'static str
         Kind::NeedsReauth => "needsReauth",
         Kind::MissingScope => "missingScope",
         Kind::Throttled => "throttled",
+        Kind::NotReady => "notReady",
         Kind::Transport => "transport",
         Kind::Other => "other",
     }

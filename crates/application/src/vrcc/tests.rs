@@ -555,6 +555,26 @@ fn classify_splits_reauth_from_throttle() {
     assert_eq!(classify_vrcc_error(&transport).0, VrccErrorKind::Transport);
 }
 
+/// `409 busy` 和 `429 busy` 用的是同一个 `error` 串，含义却相反：
+/// 前者是「那边的星卡还在生成，等一下」，后者是「全站连接功能今天关了」。
+/// 两者都不该被当成需要重新授权，也不该说成「今天的次数用完了」。
+#[test]
+fn busy_never_reads_as_throttled_or_reauth() {
+    let not_ready = classify_vrcc_error(&VrccError::NotReady);
+    assert_eq!(not_ready.0, VrccErrorKind::NotReady);
+    assert_eq!(not_ready.1, None);
+
+    let connect_paused = classify_vrcc_error(&VrccError::ConnectPaused);
+    assert_eq!(connect_paused.0, VrccErrorKind::NotReady);
+    assert_eq!(connect_paused.1, None);
+
+    for error in [VrccError::NotReady, VrccError::ConnectPaused] {
+        assert_ne!(classify_vrcc_error(&error).0, VrccErrorKind::NeedsReauth);
+        assert_ne!(classify_vrcc_error(&error).0, VrccErrorKind::Throttled);
+        assert!(!error.needs_reauth());
+    }
+}
+
 #[test]
 fn map_not_went_is_not_a_reauth_case() {
     // 打分前置条件不满足，令牌没问题。

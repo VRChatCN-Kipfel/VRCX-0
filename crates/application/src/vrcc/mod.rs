@@ -150,6 +150,11 @@ pub enum VrccErrorKind {
     MissingScope,
     /// 限流或额度用尽，等等再来。
     Throttled,
+    /// 服务端还没准备好，稍后再试（`409 busy`：这一轮的星卡还在生成）。
+    ///
+    /// 和 [`Self::Throttled`] 分开：那个是「你问太多了」，这个是「那边还没好」，
+    /// 玩家能做的动作不同（前者该等，后者该过一会儿重试，都不用重连）。
+    NotReady,
     /// 网络或服务端问题。
     Transport,
     /// 其它。
@@ -201,6 +206,11 @@ pub fn classify_vrcc_error(error: &VrccError) -> (VrccErrorKind, Option<String>)
         VrccError::RateLimited(_) | VrccError::QuotaExhausted(_) | VrccError::TooSoon { .. } => {
             VrccErrorKind::Throttled
         }
+        // `409 busy`：那边还没准备好，不是玩家的问题，也不是本机限流。
+        VrccError::NotReady => VrccErrorKind::NotReady,
+        // `429 busy`：全站连接功能暂停到次日。本机一次都没用，所以同样
+        // 不算 Throttled（那会显示「今天的次数用完了」，是错的）。
+        VrccError::ConnectPaused => VrccErrorKind::NotReady,
         // 停站维护：令牌没事，等一会儿就好，和网络问题一样处理。
         VrccError::Transport(_) | VrccError::Decode(_) | VrccError::Paused { .. } => {
             VrccErrorKind::Transport

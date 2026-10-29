@@ -13,6 +13,7 @@ export type VrccErrorKind =
     | 'needsReauth'
     | 'missingScope'
     | 'throttled'
+    | 'notReady'
     | 'transport'
     | 'other';
 
@@ -64,12 +65,13 @@ function readVrccDetail(
     return detail as { kind?: string; need?: string | null };
 }
 
-/** 只接受已知的五个类别，别的一律当 `other`，免得后端加了新类别前端崩。 */
+/** 只接受已知的六个类别，别的一律当 `other`，免得后端加了新类别前端崩。 */
 function normalizeKind(kind: string | undefined): VrccErrorKind {
     switch (kind) {
         case 'needsReauth':
         case 'missingScope':
         case 'throttled':
+        case 'notReady':
         case 'transport':
             return kind;
         default:
