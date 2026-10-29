@@ -1,6 +1,7 @@
 import { ExternalLink, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { formatRelativeTime } from '@/lib/dateTime';
 import { Button } from '@/ui/shadcn/button';
 
 import type { VrccMutuals } from '../vrccApi';
@@ -76,6 +77,11 @@ export function VrccMutualsPanel({
                     // 我给 TA 的分（1.12.0 起）：0–5，半颗星一档，0 是没打；
                     // 连上当天和旧服务器都没有。
                     const mine = star.rate?.mine ?? 0;
+                    // 连上的时间（毫秒时间戳）。旧服务器和缺少字段时没有，
+                    // 这时整块不渲染——留一个「—」会让人以为记录丢了。
+                    const linkedAt = star.at
+                        ? formatRelativeTime(star.at, { style: 'short' })
+                        : '';
                     return (
                         <li
                             key={star.n}
@@ -98,6 +104,16 @@ export function VrccMutualsPanel({
                                     title={t('vrcc.mutuals.rate_mine')}
                                 >
                                     ★ {mine}
+                                </span>
+                            )}
+                            {/* 「什么时候连上的」和「我打的分」是两件事，
+                                所以各占一个位置，不合并进同一处文案。 */}
+                            {linkedAt && (
+                                <span
+                                    className="text-muted-foreground shrink-0 text-xs tabular-nums"
+                                    title={t('vrcc.mutuals.linked_at')}
+                                >
+                                    {linkedAt}
                                 </span>
                             )}
                             {canOpen && (
