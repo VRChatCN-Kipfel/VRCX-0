@@ -25,7 +25,7 @@ use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
     ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMutuals, VrccMyMap,
-    VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday,
+    VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
     VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
@@ -830,6 +830,30 @@ impl VrccClient {
             authed: false,
             key: "announcements",
             min_gap: Duration::from_secs(30),
+            bucket: None,
+            bypass_gate: false,
+        })
+        .await
+    }
+
+    // -- 贴纸素材 ----------------------------------------------------------
+
+    /// 所有贴纸和材质名（`GET /stickers`）。
+    ///
+    /// 这个接口**不需要 `X-Client`**（官方 `security: []`）。
+    /// `send_request` 会统一带一个客户端标识——官方只是"不要求"，并没有
+    /// "禁止"，多带一个不改变回答，所以这里不为此开特例；真正影响的是
+    /// `authed: false`：不带令牌。
+    ///
+    /// 官方说缓存一天，所以本地间隔也放长：这份数据一天内不会变。
+    pub async fn stickers(&self) -> Result<VrccStickers, VrccError> {
+        self.request(Call {
+            method: "GET",
+            path: "stickers",
+            body: None,
+            authed: false,
+            key: "stickers",
+            min_gap: Duration::from_secs(3600),
             bucket: None,
             bypass_gate: false,
         })

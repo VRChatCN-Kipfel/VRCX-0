@@ -92,6 +92,7 @@ export function VrccPage() {
         notes,
         notesSupported,
         announcements,
+        stickers,
         myMap,
         mutuals,
         mutualsError,
@@ -333,6 +334,7 @@ export function VrccPage() {
                             <VrccMePanel
                                 connection={connection}
                                 usage={usage}
+                                stickers={stickers}
                                 deviceAuth={deviceAuth}
                                 deviceAuthBusy={deviceAuthBusy}
                                 deviceAuthMessage={deviceAuthMessage}

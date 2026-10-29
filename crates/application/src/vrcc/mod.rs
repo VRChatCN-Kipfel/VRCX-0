@@ -12,8 +12,8 @@ use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals,
-    VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday,
-    VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccStickers,
+    VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -88,6 +88,7 @@ pub trait VrccRemote: Send + Sync {
     fn status<'a>(&'a self) -> VrccFuture<'a, VrccStatus>;
     fn fetch_site_asset<'a>(&'a self, path: &'a str) -> VrccFuture<'a, Vec<u8>>;
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements>;
+    fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers>;
 
     // -- 设备授权 ----------------------------------------------------------
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode>;
@@ -628,6 +629,20 @@ impl VrccService {
     pub async fn announcements(&self) -> std::result::Result<Option<VrccAnnouncements>, VrccError> {
         match self.remote.announcements().await {
             Ok(announcements) => Ok(Some(announcements)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    // -- 贴纸素材 ----------------------------------------------------------
+
+    /// 所有贴纸和材质名。
+    ///
+    /// 旧服务器没有这个接口（`404 not_found`），那时返回 `None`——贴纸是
+    /// 装饰，缺了它不该让整个「我的」页签报错。
+    pub async fn stickers(&self) -> std::result::Result<Option<VrccStickers>, VrccError> {
+        match self.remote.stickers().await {
+            Ok(stickers) => Ok(Some(stickers)),
             Err(error) if error.is_not_found() => Ok(None),
             Err(error) => Err(error),
         }

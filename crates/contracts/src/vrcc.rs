@@ -1136,6 +1136,39 @@ pub struct VrccAnnouncements {
     pub posts: Vec<VrccAnnouncement>,
 }
 
+/// 一张贴纸：`GET /stickers` 里 `stickers` 的一项。
+///
+/// 官方没保证这三个字段一定存在，所以都按「可能没有」处理——少一段装饰
+/// 素材不该让整页解析失败。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccSticker {
+    /// 贴纸名，展示用。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 这张贴纸支持的材质代号（`paper` / `glitter` / …）。
+    #[serde(default)]
+    pub finishes: Vec<String>,
+    /// 贴纸图的地址；`GET /stickers/{id}?fin=…` 会按材质和磨损画。
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// `GET /stickers`：所有贴纸和材质名（**不需要令牌，也不需要 `client`**）。
+///
+/// 两个字段都是「代号 → 值」的字典而不是数组：键是贴纸 ID 或材质代号，
+/// 顺序没有意义，用 `BTreeMap` 让迭代顺序稳定。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccStickers {
+    /// 贴纸 ID → 贴纸。
+    #[serde(default)]
+    pub stickers: std::collections::BTreeMap<String, VrccSticker>,
+    /// 材质代号 → 材质名（`paper` → 纸质）。
+    #[serde(default)]
+    pub finishes: std::collections::BTreeMap<String, String>,
+}
+
 // ---------------------------------------------------------------------------
 // 错误体
 // ---------------------------------------------------------------------------

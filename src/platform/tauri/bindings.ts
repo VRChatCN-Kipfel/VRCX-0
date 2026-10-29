@@ -365,6 +365,12 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_announcements');
     },
     /**
+     * 所有贴纸和材质名。不需要连接。服务器还没有这个接口时返回 `null`。
+     */
+    async appVrccStickers(): Promise<VrccStickers | null> {
+        return await TAURI_INVOKE('app__vrcc_stickers');
+    },
+    /**
      * 第一步：申请连接码。`scope` 传 `null` 时按当前 `X-Client` 选权限。
      */
     async appVrccDeviceAuthBegin(
@@ -7787,6 +7793,42 @@ export type VrccStatus = {
      * `ok` 表示正常。
      */
     state?: string | null;
+};
+/**
+ * 一张贴纸：`GET /stickers` 里 `stickers` 的一项。
+ *
+ * 官方没保证这三个字段一定存在，所以都按「可能没有」处理——少一段装饰
+ * 素材不该让整页解析失败。
+ */
+export type VrccSticker = {
+    /**
+     * 贴纸名，展示用。
+     */
+    name?: string | null;
+    /**
+     * 这张贴纸支持的材质代号（`paper` / `glitter` / …）。
+     */
+    finishes?: string[];
+    /**
+     * 贴纸图的地址；`GET /stickers/{id}?fin=…` 会按材质和磨损画。
+     */
+    url?: string | null;
+};
+/**
+ * `GET /stickers`：所有贴纸和材质名（**不需要令牌，也不需要 `client`**）。
+ *
+ * 两个字段都是「代号 → 值」的字典而不是数组：键是贴纸 ID 或材质代号，
+ * 顺序没有意义，用 `BTreeMap` 让迭代顺序稳定。
+ */
+export type VrccStickers = {
+    /**
+     * 贴纸 ID → 贴纸。
+     */
+    stickers?: Partial<{ [key in string]: VrccSticker }>;
+    /**
+     * 材质代号 → 材质名（`paper` → 纸质）。
+     */
+    finishes?: Partial<{ [key in string]: string }>;
 };
 /**
  * 停站说明。

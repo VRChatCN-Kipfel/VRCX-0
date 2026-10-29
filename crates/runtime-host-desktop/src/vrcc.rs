@@ -7,7 +7,7 @@ use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
-    VrccRecentNotifications, VrccStatus, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
     VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
@@ -147,6 +147,14 @@ impl DesktopVrccRuntime {
     pub async fn announcements(&self) -> Result<Option<VrccAnnouncements>, VrccFailure> {
         self.service
             .announcements()
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 所有贴纸和材质名。服务器还没有这个接口时为 `None`。
+    pub async fn stickers(&self) -> Result<Option<VrccStickers>, VrccFailure> {
+        self.service
+            .stickers()
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

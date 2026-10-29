@@ -13,8 +13,8 @@
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMutuals, VrccMyMap, VrccNotes,
-    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
-    VrccUnread,
+    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
+    VrccTokenResponse, VrccUnread,
 };
 use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
 
@@ -62,6 +62,10 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements> {
         Box::pin(async move { self.client().announcements().await })
+    }
+
+    fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers> {
+        Box::pin(async move { self.client().stickers().await })
     }
 
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {

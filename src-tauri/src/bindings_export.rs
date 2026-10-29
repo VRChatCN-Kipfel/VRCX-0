@@ -206,6 +206,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             commands::application::vrcc::app__vrcc_maps,
             commands::application::vrcc::app__vrcc_status,
             commands::application::vrcc::app__vrcc_announcements,
+            commands::application::vrcc::app__vrcc_stickers,
             commands::application::vrcc::app__vrcc_device_auth_begin,
             commands::application::vrcc::app__vrcc_device_auth_poll,
             commands::application::vrcc::app__vrcc_disconnect,

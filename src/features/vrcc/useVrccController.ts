@@ -16,6 +16,7 @@ import {
     vrccApi,
     VrccError,
     type VrccAnnouncements,
+    type VrccStickers,
     type VrccBoard,
     type VrccBoardSort,
     type VrccConnection,
@@ -126,6 +127,8 @@ type State = {
     notesSupported: boolean | null;
     /** 公告和停站；null 表示没拉到，或服务器还没有这个接口。 */
     announcements: VrccAnnouncements | null;
+    /** 贴纸和材质名；null 表示没拉到，或服务器还没有这个接口。 */
+    stickers: VrccStickers | null;
     /** 当前所在地图在榜上的状态；null 表示不显示（未连接、无地图、或被隐藏）。 */
     myMap: VrccMyMap | null;
     /** 「互相连上」的星友；null 表示还没拉过或没权限。 */
@@ -167,6 +170,7 @@ const initialState: State = {
     notes: null,
     notesSupported: null,
     announcements: null,
+    stickers: null,
     myMap: null,
     mutuals: null,
     mutualsError: null,
@@ -393,6 +397,19 @@ export function useVrccController() {
         }
     }, [patch]);
 
+    /**
+     * 贴纸和材质名。拿不到不算页面错误：那是装饰素材，缺了它不该让
+     * 「我的」页签报错。
+     */
+    const refreshStickers = useCallback(async () => {
+        try {
+            const stickers = await vrccApi.stickers();
+            patch({ stickers });
+        } catch (error) {
+            console.error('[vrcc] refreshStickers failed:', error);
+        }
+    }, [patch]);
+
     const refreshService = useCallback(async () => {
         try {
             const service = await vrccApi.status();
@@ -440,6 +457,7 @@ export function useVrccController() {
             reportError(error, 'refreshService');
         });
         void refreshAnnouncements();
+        void refreshStickers();
         void refreshBoards(boardSortRef.current).catch((error) => {
             reportError(error, 'refreshBoards');
         });
@@ -464,6 +482,7 @@ export function useVrccController() {
     }, [
         patch,
         refreshAnnouncements,
+        refreshStickers,
         refreshBoards,
         refreshConnection,
         refreshMutuals,

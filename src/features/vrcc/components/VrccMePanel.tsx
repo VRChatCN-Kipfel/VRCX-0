@@ -1,4 +1,4 @@
-import { ExternalLink, ShieldCheck, Unplug } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Sticker, Unplug } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { openExternalLink } from '@/services/shellIntegrationService';
@@ -10,6 +10,8 @@ import { Spinner } from '@/ui/shadcn/spinner';
 import type {
     VrccConnection,
     VrccDeviceAuthPrompt,
+    VrccSticker,
+    VrccStickers,
     VrccUsage
 } from '../vrccApi';
 
@@ -42,6 +44,7 @@ function formatReset(secs: number): string {
 export function VrccMePanel({
     connection,
     usage,
+    stickers,
     deviceAuth,
     deviceAuthBusy,
     deviceAuthMessage,
@@ -52,6 +55,8 @@ export function VrccMePanel({
 }: {
     connection: VrccConnection | null;
     usage: VrccUsage | null;
+    /** 贴纸和材质名；null 表示没拉到或服务器还没有这个接口。 */
+    stickers: VrccStickers | null;
     deviceAuth: VrccDeviceAuthPrompt | null;
     deviceAuthBusy: boolean;
     deviceAuthMessage: string | null;
@@ -63,6 +68,13 @@ export function VrccMePanel({
 }) {
     const { t } = useTranslation();
     const connected = connection?.connected ?? false;
+
+    // specta 把 Rust 的 `BTreeMap` 生成为 `Partial<Record<…>>`，值可能不存在。
+    // `NonUndefined` 只把「值可能没有」这一层剥掉，`VrccSticker` 自己的字段
+    // 仍然是可选的（官方本来也不保证它们齐全）。
+    const stickerEntries = Object.entries(
+        (stickers?.stickers ?? {}) as Record<string, VrccSticker | undefined>
+    ).filter((entry): entry is [string, VrccSticker] => Boolean(entry[1]));
 
     return (
         <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto">
@@ -251,6 +263,45 @@ export function VrccMePanel({
                     />
                     <p className="text-muted-foreground mt-2 text-[10px] leading-relaxed">
                         {t('vrcc.me.usage_note')}
+                    </p>
+                </section>
+            )}
+
+            {stickerEntries.length > 0 && (
+                <section className="rounded-xl border p-3">
+                    <div className="mb-2 flex items-center gap-2">
+                        <Sticker className="text-muted-foreground size-4" />
+                        <h3 className="text-sm font-semibold">
+                            {t('vrcc.me.stickers')}
+                        </h3>
+                        <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
+                            {stickerEntries.length}
+                        </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {stickerEntries.map(([id, sticker]) => {
+                            if (!sticker) {
+                                return null;
+                            }
+                            const finishes = (sticker.finishes ?? [])
+                                .map(
+                                    (finish) =>
+                                        stickers?.finishes?.[finish] ?? finish
+                                )
+                                .join(' · ');
+                            return (
+                                <span
+                                    key={id}
+                                    className="bg-muted/40 rounded px-1.5 py-0.5 text-[11px]"
+                                    title={finishes || undefined}
+                                >
+                                    {sticker.name ?? id}
+                                </span>
+                            );
+                        })}
+                    </div>
+                    <p className="text-muted-foreground mt-2 text-[10px] leading-relaxed">
+                        {t('vrcc.me.stickers_note')}
                     </p>
                 </section>
             )}

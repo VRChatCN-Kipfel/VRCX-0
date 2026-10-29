@@ -243,6 +243,9 @@ export const vrccApi = {
     /** 公告和停站。不需要连接。服务器还没有这个接口时为 null。 */
     announcements: () => call(() => commands.appVrccAnnouncements()),
 
+    /** 所有贴纸和材质名。不需要连接也不需要令牌。服务器还没有这个接口时为 null。 */
+    stickers: () => call(() => commands.appVrccStickers()),
+
     /**
      * 第一步设备授权：拿码。
      *
@@ -343,3 +346,7 @@ export type VrccAnnouncements = NonNullable<
     Awaited<ReturnType<typeof commands.appVrccAnnouncements>>
 >;
 export type VrccAnnouncement = NonNullable<VrccAnnouncements['posts']>[number];
+export type VrccStickers = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccStickers>>
+>;
+export type VrccSticker = NonNullable<VrccStickers['stickers']>[string];

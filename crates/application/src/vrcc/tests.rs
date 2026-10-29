@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use vrcx_0_contracts::vrcc::{HttpDetail, LocalThrottle, VrccBoardMap, VrccUnread};
-
 // ---------------------------------------------------------------------------
 // 造错误的几个便捷函数
 //
@@ -173,6 +172,9 @@ impl VrccRemote for FakeRemote {
         Box::pin(async move { Err(transport("fake")) })
     }
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements> {
+        Box::pin(async move { Err(transport("fake")) })
+    }
+    fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers> {
         Box::pin(async move { Err(transport("fake")) })
     }
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {

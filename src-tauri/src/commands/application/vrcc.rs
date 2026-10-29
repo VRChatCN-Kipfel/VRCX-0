@@ -12,7 +12,7 @@ use tauri::State;
 use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
-    VrccRecentNotifications, VrccStatus, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
 };
 
 use crate::{error::AppError, state::AppState};
@@ -140,6 +140,20 @@ pub async fn app__vrcc_announcements(
         .runtime_host()
         .vrcc()
         .announcements()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 所有贴纸和材质名。不需要连接。服务器还没有这个接口时返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_stickers(
+    state: State<'_, AppState>,
+) -> Result<Option<VrccStickers>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .stickers()
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }

@@ -870,7 +870,9 @@
             "usage_unknown": "zatím neznámé",
             "usage_reset_in": "obnova za {time}",
             "unread_used": "Unread counts",
-            "expired": "The previous connection is no longer valid: it was disconnected on vrcc.cc, authorized again elsewhere, or unused for 90 days. Please connect again."
+            "expired": "The previous connection is no longer valid: it was disconnected on vrcc.cc, authorized again elsewhere, or unused for 90 days. Please connect again.",
+            "stickers": "Stickers",
+            "stickers_note": "Sticker art from Xingyu Tongpin, used on star cards."
         },
         "error": {
             "unknown": "The action failed. Please try again.",
