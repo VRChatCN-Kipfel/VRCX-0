@@ -4,7 +4,8 @@ mod types;
 mod write;
 
 pub use query::{
-    notification_has_unseen_action_required, notification_list_query, notification_rows_query,
+    notification_has_unseen_action_required, notification_has_unseen_action_required_excluding,
+    notification_list_query, notification_rows_query, UNSEEN_ACTION_EXCLUDED_ID_PREFIXES,
 };
 pub use types::{
     NotificationListItemOutput, NotificationListQueryInput, NotificationRowsOutput,
