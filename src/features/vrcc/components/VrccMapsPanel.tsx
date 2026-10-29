@@ -12,6 +12,8 @@ import {
 } from '@/ui/shadcn/toggle-group';
 
 import type { VrccBoard, VrccBoardSort } from '../vrccApi';
+import { vrccCoverUrl } from '../vrccCover';
+import { VrccCover } from './VrccCover';
 
 const SORTS: readonly VrccBoardSort[] = ['top', 'week', 'new'];
 
@@ -128,6 +130,15 @@ export function VrccMapsPanel({
                                         >
                                             {place ?? '—'}
                                         </span>
+                                        {/* 封面。`boards/maps` 至今只给 `img`
+                                        （相对路径），没有 `imgUrl`，所以这里
+                                        靠 `vrccCoverUrl` 自己拼站点 origin。
+                                        没有封面或加载失败时组件返回 null，
+                                        行退回纯文字，不占位也不撑高。 */}
+                                        <VrccCover
+                                            src={vrccCoverUrl(null, map.img)}
+                                            className="size-8 shrink-0 rounded object-cover"
+                                        />
                                         <div className="min-w-0 flex-1">
                                             <div className="truncate text-sm font-medium">
                                                 {map.name ?? map.world}

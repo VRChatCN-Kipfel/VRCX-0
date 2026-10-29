@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from '@/ui/shadcn/badge';
 
 import type { VrccMyMap } from '../vrccApi';
+import { vrccCoverUrl } from '../vrccCover';
+import { VrccCover } from './VrccCover';
 
 /**
  * 当前所在地图在榜上的状态。
@@ -44,8 +46,14 @@ export function VrccCurrentMapCard({
                 )}
             </div>
 
-            <div className="mb-2 truncate text-sm font-medium">
-                {map.name ?? world}
+            <div className="mb-2 flex items-center gap-2">
+                <VrccCover
+                    src={vrccCoverUrl(map.imgUrl, map.img)}
+                    className="size-10 shrink-0 rounded object-cover"
+                />
+                <div className="min-w-0 truncate text-sm font-medium">
+                    {map.name ?? world}
+                </div>
             </div>
 
             {notRanked ? (
