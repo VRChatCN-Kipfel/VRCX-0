@@ -11,7 +11,7 @@
 use tauri::State;
 use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep};
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes, VrccRatedMaps,
     VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
 };
 
@@ -154,6 +154,18 @@ pub async fn app__vrcc_stickers(
         .runtime_host()
         .vrcc()
         .stickers()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 我打过分的地图。需要 `maps` 普通权限。最近的在前。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_maps(state: State<'_, AppState>) -> Result<VrccRatedMaps, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_maps()
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }

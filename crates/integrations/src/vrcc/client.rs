@@ -25,8 +25,8 @@ use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
     ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMutuals, VrccMyMap,
-    VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
-    VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    VrccNotes, VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers,
+    VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -1028,6 +1028,25 @@ impl VrccClient {
             authed: true,
             key: "my_map",
             min_gap: Duration::from_secs(10),
+            bucket: Some(QuotaBucket::Reads),
+            bypass_gate: false,
+        })
+        .await
+    }
+
+    /// 我打过分的地图（`GET /me/maps`）。最近的在前，最多 200 张。
+    ///
+    /// 需要 `maps` 普通权限，计入个人每天的读取次数。这个接口只有 `GET`；
+    /// 同一个路径的 `POST` 是「添加地图」，要 `maps.write` 敏感权限，本客户端
+    /// 不申请，所以那条路走不通是**设计如此**，不是漏了。
+    pub async fn my_maps(&self) -> Result<VrccRatedMaps, VrccError> {
+        self.request(Call {
+            method: "GET",
+            path: "me/maps",
+            body: None,
+            authed: true,
+            key: "my_maps",
+            min_gap: Duration::from_secs(30),
             bucket: Some(QuotaBucket::Reads),
             bypass_gate: false,
         })

@@ -7,8 +7,8 @@ use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
-    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
-    VrccWristSummary,
+    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread,
+    VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -237,6 +237,14 @@ impl DesktopVrccRuntime {
     ) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, VrccFailure> {
         self.service
             .my_map(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 我打过分的地图。需要 `maps` 普通权限。
+    pub async fn my_maps(&self) -> Result<VrccRatedMaps, VrccFailure> {
+        self.service
+            .my_maps()
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

@@ -13,7 +13,7 @@
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMutuals, VrccMyMap, VrccNotes,
-    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
+    VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
     VrccTokenResponse, VrccUnread,
 };
 use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
@@ -90,6 +90,10 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn my_map<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMyMap> {
         Box::pin(async move { self.client().my_map(world).await })
+    }
+
+    fn my_maps<'a>(&'a self) -> VrccFuture<'a, VrccRatedMaps> {
+        Box::pin(async move { self.client().my_maps().await })
     }
 
     fn unread<'a>(&'a self) -> VrccFuture<'a, VrccUnread> {

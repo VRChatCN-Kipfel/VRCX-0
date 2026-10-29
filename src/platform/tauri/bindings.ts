@@ -431,6 +431,12 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_my_map');
     },
     /**
+     * 我打过分的地图。需要 `maps` 普通权限。最近的在前。
+     */
+    async appVrccMyMaps(): Promise<VrccRatedMaps> {
+        return await TAURI_INVOKE('app__vrcc_my_maps');
+    },
+    /**
      * 增量轮询。游标由后端维护，前端不用关心。
      */
     async appVrccPollNotifications(): Promise<VrccNotifications> {
@@ -7677,6 +7683,50 @@ export type VrccNotifications = {
      */
     dot?: number | null;
 };
+/**
+ * 我打过分的某张地图：`GET /me/maps` 里的一条。
+ *
+ * **和 [`VrccBoardMap`] 不是同一个形状**：这里说的是「我给它打了多少分、
+ * 写了什么」，所以有 `score` / `words` / `at`，没有 `avg` / `rank`。
+ * 把两者塞进同一个结构体会让一半字段永远是空的，调用方也分不清「没有」
+ * 和「不适用」。
+ */
+export type VrccRatedMap = {
+    /**
+     * 世界 ID，形如 `wrld_…`。
+     */
+    world: string;
+    /**
+     * 地图名；官方不知道时是 `null`。
+     */
+    name?: string | null;
+    /**
+     * 我打的分数（1–10）。
+     */
+    score?: number | null;
+    /**
+     * 我写的短评；没写是 `null`。
+     */
+    words?: string | null;
+    /**
+     * 短评的审核状态：`wait` / `ok` / `hidden`。
+     */
+    wordsOk?: string | null;
+    /**
+     * 打分的时间（毫秒）。
+     */
+    at?: number | null;
+    /**
+     * vrcc.cc 上的地图页。
+     */
+    page?: string | null;
+};
+/**
+ * `GET /me/maps`：我打过分的地图，**最近打的在前**，最多 200 张。
+ *
+ * 需要 `maps` 普通权限。计入个人每天 1000 次。
+ */
+export type VrccRatedMaps = { maps?: VrccRatedMap[] };
 /**
  * `recent` 里的提醒条目：`Notice` 加上站内跳转路径。
  */

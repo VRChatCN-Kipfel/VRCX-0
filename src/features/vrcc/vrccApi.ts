@@ -247,6 +247,14 @@ export const vrccApi = {
     stickers: () => call(() => commands.appVrccStickers()),
 
     /**
+     * 我打过分的地图和短评。需要 `maps` 普通权限，最近的在前。
+     *
+     * 这是「我给它打了多少分」，不是那张图在榜上的均分——两者形状不同，
+     * 不要混用同一条渲染路径。
+     */
+    myMaps: () => call(() => commands.appVrccMyMaps()),
+
+    /**
      * 第一步设备授权：拿码。
      *
      * 要哪些权限由 Rust 侧按当前 `X-Client` 决定（`device_auth_scope`）：
@@ -350,3 +358,5 @@ export type VrccStickers = NonNullable<
     Awaited<ReturnType<typeof commands.appVrccStickers>>
 >;
 export type VrccSticker = NonNullable<VrccStickers['stickers']>[string];
+export type VrccRatedMaps = Awaited<ReturnType<typeof commands.appVrccMyMaps>>;
+export type VrccRatedMap = NonNullable<VrccRatedMaps['maps']>[number];

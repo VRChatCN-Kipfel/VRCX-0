@@ -223,6 +223,14 @@ impl VrccRemote for FakeRemote {
             Err(token_missing())
         })
     }
+    fn my_maps<'a>(&'a self) -> VrccFuture<'a, VrccRatedMaps> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Err(token_missing())
+        })
+    }
     fn unread<'a>(&'a self) -> VrccFuture<'a, VrccUnread> {
         Box::pin(async move {
             if let Some(error) = self.take_error() {

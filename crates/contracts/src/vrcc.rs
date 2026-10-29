@@ -1169,6 +1169,47 @@ pub struct VrccStickers {
     pub finishes: std::collections::BTreeMap<String, String>,
 }
 
+/// 我打过分的某张地图：`GET /me/maps` 里的一条。
+///
+/// **和 [`VrccBoardMap`] 不是同一个形状**：这里说的是「我给它打了多少分、
+/// 写了什么」，所以有 `score` / `words` / `at`，没有 `avg` / `rank`。
+/// 把两者塞进同一个结构体会让一半字段永远是空的，调用方也分不清「没有」
+/// 和「不适用」。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRatedMap {
+    /// 世界 ID，形如 `wrld_…`。
+    pub world: String,
+    /// 地图名；官方不知道时是 `null`。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 我打的分数（1–10）。
+    #[serde(default)]
+    pub score: Option<i64>,
+    /// 我写的短评；没写是 `null`。
+    #[serde(default)]
+    pub words: Option<String>,
+    /// 短评的审核状态：`wait` / `ok` / `hidden`。
+    #[serde(default)]
+    pub words_ok: Option<String>,
+    /// 打分的时间（毫秒）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// vrcc.cc 上的地图页。
+    #[serde(default)]
+    pub page: Option<String>,
+}
+
+/// `GET /me/maps`：我打过分的地图，**最近打的在前**，最多 200 张。
+///
+/// 需要 `maps` 普通权限。计入个人每天 1000 次。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRatedMaps {
+    #[serde(default)]
+    pub maps: Vec<VrccRatedMap>,
+}
+
 // ---------------------------------------------------------------------------
 // 错误体
 // ---------------------------------------------------------------------------
