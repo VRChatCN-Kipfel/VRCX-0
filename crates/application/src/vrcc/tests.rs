@@ -175,7 +175,12 @@ impl VrccRemote for FakeRemote {
         Box::pin(async move { Err(transport("fake")) })
     }
     fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers> {
-        Box::pin(async move { Err(transport("fake")) })
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Ok(VrccStickers::default())
+        })
     }
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {
         self.device_code_scopes
@@ -236,7 +241,9 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
-            Err(token_missing())
+            // 公开接口：没有令牌也能答。默认给一份空页面，让「404 转 None」
+            // 这类测试只要注入错误就能覆盖到。
+            Ok(VrccMapPage::default())
         })
     }
     fn my_board<'a>(&'a self, _sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
@@ -942,4 +949,107 @@ fn only_pre_send_failures_are_retriable() {
     assert!(!retriable_revoke_failure(&http(500, "server_error")));
     assert!(!retriable_revoke_failure(&http(429, "quota")));
     assert!(!retriable_revoke_failure(&http(503, "stop")));
+}
+
+// ---------------------------------------------------------------------------
+// 地图页 / 我打过的图 / 玩家视角榜 / 贴纸
+//
+// 这四条都随 A 批一起进来，行为都是「某种失败要变成可显示的状态」，
+// 最容易在以后的重构里被悄悄改掉，所以钉住。
+// ---------------------------------------------------------------------------
+
+fn connected_service() -> (VrccService, Arc<FakeRemote>, Arc<MemoryStore>) {
+    let store = MemoryStore::with(StoredCredential {
+        token: "tok".into(),
+        ..Default::default()
+    });
+    let remote = FakeRemote::new();
+    remote.mark_connected();
+    let service = VrccService::new(store.clone(), Arc::clone(&remote) as Arc<dyn VrccRemote>);
+    (service, remote, store)
+}
+
+/// 地图页是没有令牌也能读的公开接口。
+///
+/// 不在榜上时服务器回 `404 not_found`——那是**这张图还没上榜**，不是故障。
+/// 如果这里改成把 404 当错误抛出去，一张新图就会显示成「服务坏了」。
+#[tokio::test]
+async fn a_map_that_is_not_on_the_board_is_absent_not_broken() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(404, "not_found"));
+
+    assert!(
+        service.map_page("wrld_x").await.unwrap().is_none(),
+        "404 should read as 'no page for this world', not as a failure"
+    );
+
+    // 真的故障（5xx）仍然要报出去，别把两者都吞掉。
+    remote.set_error(http(500, "server"));
+    let error = service.map_page("wrld_x").await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Server);
+}
+
+/// 空的 world 直接短路，不发请求。
+#[tokio::test]
+async fn an_empty_world_never_reaches_the_network() {
+    let (service, remote, _store) = connected_service();
+    // 留一个「下一次一定失败」的错误：真发出去就会拿到它。
+    remote.set_error(transport("should not be sent"));
+
+    assert!(service.map_page("").await.unwrap().is_none());
+    assert!(service.map_page("   ").await.unwrap().is_none());
+}
+
+/// 贴纸是装饰素材：旧服务器没有这个接口（404）时给 `None`，
+/// 「我的」页签不该因此报错。
+#[tokio::test]
+async fn stickers_go_missing_quietly_on_an_old_server() {
+    let (service, remote, _store) = connected_service();
+
+    // 正常有数据。
+    assert!(service.stickers().await.unwrap().is_some());
+
+    remote.set_error(http(404, "not_found"));
+    assert!(service.stickers().await.unwrap().is_none());
+
+    // 其它错误照常上报。
+    remote.set_error(http(500, "server"));
+    assert!(service.stickers().await.unwrap_err().layer == ErrorLayer::Server);
+}
+
+/// 需要令牌的两条：没连接就当场拒绝，不把必然 `TokenMissing` 的请求发出去。
+///
+/// 发出去的后果很实在：那个错误会被判成「要重新授权」，于是还没连过的玩家
+/// 打开页面就看见一句莫名其妙的「请重新连接」。
+#[tokio::test]
+async fn personal_map_lists_refuse_before_sending_when_disconnected() {
+    // 注意这里**不**调用 `mark_connected`。
+    let store = MemoryStore::with(StoredCredential::default());
+    let remote = FakeRemote::new();
+    let service = VrccService::new(store, Arc::clone(&remote) as Arc<dyn VrccRemote>);
+
+    let error = service.my_maps().await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Session);
+
+    let error = service.my_board(VrccMyBoardSort::Went).await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Session);
+}
+
+/// 连上之后这两条照常可用。
+///
+/// fake 在这两条上回 `token_missing`，但连接状态已经就绪——所以拿到的错误
+/// 必须来自**远端**，而不是本地那道提前拒绝。两者同为 `Session` 层，这里
+/// 靠「换一个远端错误能否透传」来区分。
+#[tokio::test]
+async fn personal_map_lists_work_once_connected() {
+    let (service, remote, _store) = connected_service();
+
+    // 注入一个远端错误：能原样拿到，就说明请求确实走到了远端。
+    remote.set_error(http(403, "scope"));
+    let error = service.my_maps().await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Server);
+
+    remote.set_error(http(403, "scope"));
+    let error = service.my_board(VrccMyBoardSort::Top).await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Server);
 }
