@@ -117,7 +117,13 @@ async function normalizeError(error: unknown): Promise<VrccError> {
     );
 }
 
-/** 后端给出的结构化细节；老后端或非 vrcc 错误时没有这一项。 */
+/**
+ * 后端给出的结构化细节。
+ *
+ * `null` 只意味着「这个错误不是星遇同频错误」——比如 IPC 本身失败、命令名
+ * 对不上、或未来加了别的 `AppError` 变体。所有 `app__vrcc_*` 命令的错误都由
+ * `AppError::Vrcc` 产生，所以只要是星遇同频错误，`kind` 和 `layer` 一定在。
+ */
 function readVrccDetail(error: unknown): {
     kind?: string;
     layer?: string;
@@ -155,7 +161,15 @@ function normalizeKind(kind: string | undefined): VrccErrorKind {
     }
 }
 
-/** 只接受已知的五个层级；老后端没有这个字段时回落到 `server`。 */
+/**
+ * 只接受已知的五个层级。
+ *
+ * 认不出的值一律当 `server`：这个值只影响提示措辞，而「服务器拒绝了」是最
+ * 不会误导人的说法——说成网络问题会让玩家去排查一个没坏的网络。
+ *
+ * 这**不是**给「老后端」留的兼容：所有 `app__vrcc_*` 命令的错误都由
+ * `AppError::Vrcc` 产生，`layer` 是必填字段，不存在不带它的后端。
+ */
 function normalizeLayer(layer: string | undefined): VrccErrorLayer {
     switch (layer) {
         case 'input':
@@ -165,8 +179,6 @@ function normalizeLayer(layer: string | undefined): VrccErrorLayer {
         case 'session':
             return layer;
         default:
-            // 老后端不带 `layer`。那些版本里能出错的几乎都是服务器拒绝，
-            // 归 `server` 比归 `transport` 更保守——不会把它们误报成网络故障。
             return 'server';
     }
 }

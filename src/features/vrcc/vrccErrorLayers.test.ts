@@ -8,10 +8,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * 这里只钉住两件事，都是玩家能直接感知的：
  *
  * 1. **归一化**：后端的 `layer` / `transportKind` / `op` 要原样落到 `VrccError`
- *    上；老后端不带 `layer` 时回落到 `server`（不能回落到 `transport`，那会把
- *    服务器拒绝误报成网络故障）。
+ *    上；认不出的值落到安全的 `server`，不能落到 `transport`。
  * 2. **文案**：网络层失败要给一句人话，而不是把
  *    `error sending request for url (…)` 这种英文技术串丢给玩家。
+ *
+ * 注意这里**不测「老后端兼容」**：所有 `app__vrcc_*` 命令的错误都由
+ * `AppError::Vrcc` 产生，`layer` 是必填字段。不存在的兼容路径不该有测试去
+ * 假装它存在。
  */
 
 const mocks = vi.hoisted(() => ({
@@ -79,15 +82,18 @@ describe('vrcc 错误分层', () => {
         expect(error.isOurBug).toBe(false);
     });
 
-    it('老后端不带 layer 时回落到 server，而不是 transport', async () => {
-        // 回落到 transport 会把「服务器拒绝」误报成「你网络有问题」，
-        // 玩家就会去折腾一个根本没坏的网络。
-        const error = await normalize({ kind: 'other', need: null });
+    it('认不出的 layer 落到 server，而不是 transport', async () => {
+        // 说成 `transport` 会把「服务器拒绝」误报成「你网络有问题」，
+        // 玩家就会去排查一个根本没坏的网络。
+        const error = await normalize({
+            kind: 'other',
+            layer: 'some-future-layer',
+            need: null
+        });
         expect(error.layer).toBe('server');
-        expect(error.transportKind).toBeNull();
     });
 
-    it('认不出的 layer / transportKind 一律落到安全值', async () => {
+    it('认不出的 transportKind 落到 null', async () => {
         const error = await normalize({
             kind: 'other',
             layer: 'some-future-layer',
