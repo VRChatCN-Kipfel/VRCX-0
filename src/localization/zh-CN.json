@@ -884,7 +884,12 @@
             "open_profile": "在 VRChat 玩家详情里打开",
             "unavailable": "这一项需要额外权限，当前客户端还没开通",
             "rate_mine": "我给 TA 的分",
-            "linked_at": "连上的时间"
+            "linked_at": "连上的时间",
+            "presence": {
+                "online": "在线",
+                "friend": "已是好友",
+                "add": "加好友 ›"
+            }
         },
         "community": {
             "label": "社区",

@@ -881,7 +881,12 @@
             "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them",
-            "linked_at": "When you linked"
+            "linked_at": "When you linked",
+            "presence": {
+                "online": "Online",
+                "friend": "Already friends",
+                "add": "Add friend ›"
+            }
         },
         "community": {
             "label": "Community",

@@ -1,10 +1,12 @@
 import { ExternalLink, Users } from 'lucide-react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { formatRelativeTime } from '@/lib/dateTime';
 import { vrccStarGroupColor } from '@/shared/constants/vrccStarGroup';
 import { Button } from '@/ui/shadcn/button';
 
+import { useMutualPresence, type MutualPresence } from '../useMutualPresence';
 import type { VrccMutuals } from '../vrccApi';
 import { VrccCommunityGroup } from './VrccCommunityGroup';
 
@@ -38,6 +40,30 @@ export function VrccMutualsPanel({
     onOpenGroup: (groupId: string) => void;
 }) {
     const { t } = useTranslation();
+    // 必须在任何提前 return 之前调用：Hooks 的调用顺序每一轮渲染都得一致。
+    const presenceLookup = useMutualPresence();
+    const stars = mutuals?.stars;
+
+    // 在线优先，其余保持服务端顺序（最近连上的在前）。
+    //
+    // 用「下标当第二排序键」而不是直接判断真假，是因为 `Array.prototype.sort`
+    // 在等价元素上的顺序没有保证；显式带上原始下标，同状态之间才不会每次
+    // 重渲染都换位置。
+    const orderedStars = useMemo(() => {
+        const list = stars ?? [];
+        return list
+            .map((star, index) => ({ star, index }))
+            .sort((left, right) => {
+                const rank = (value: MutualPresence) =>
+                    value === 'online' ? 0 : 1;
+                return (
+                    rank(presenceLookup.of(left.star.vrcUser)) -
+                        rank(presenceLookup.of(right.star.vrcUser)) ||
+                    left.index - right.index
+                );
+            })
+            .map((entry) => entry.star);
+    }, [stars, presenceLookup]);
 
     if (!connected) {
         return (
@@ -48,9 +74,7 @@ export function VrccMutualsPanel({
         );
     }
 
-    const stars = mutuals?.stars ?? [];
-
-    if (stars.length === 0) {
+    if ((stars ?? []).length === 0) {
         return (
             <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-2 px-6 text-center text-sm">
                 <Users className="size-6" />
@@ -75,7 +99,7 @@ export function VrccMutualsPanel({
         <div className="flex min-h-0 flex-1 flex-col gap-2">
             <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border">
                 <ul className="divide-y">
-                    {stars.map((star) => {
+                    {orderedStars.map((star) => {
                         const userId = star.vrcUser ?? '';
                         // 没有 vrcUser 说明对方没公开「已验证」，就无法打开玩家页。
                         // 这时只显示名字，不给一个点了没反应的按钮。
@@ -91,6 +115,7 @@ export function VrccMutualsPanel({
                         // 星群色点。`A`（万象）没有专属色，官方也是用文字色，
                         // 所以查不到就用 `currentColor` 跟着文字走，不硬造一个。
                         const groupColor = vrccStarGroupColor(star.group);
+                        const presence = presenceLookup.of(userId);
                         return (
                             <li
                                 key={star.n}
@@ -137,6 +162,25 @@ export function VrccMutualsPanel({
                                         title={t('vrcc.mutuals.linked_at')}
                                     >
                                         {linkedAt}
+                                    </span>
+                                )}
+                                {/* 和好友表的关系。好友表没加载好时一律不显示，
+                                    否则会把「还不知道」误显示成「不是好友」。 */}
+                                {presenceLookup.ready && canOpen && (
+                                    <span
+                                        className={
+                                            presence === 'online'
+                                                ? 'shrink-0 text-xs font-medium text-emerald-500'
+                                                : 'text-muted-foreground shrink-0 text-xs'
+                                        }
+                                    >
+                                        {presence === 'online'
+                                            ? t('vrcc.mutuals.presence.online')
+                                            : presence === 'friend'
+                                              ? t(
+                                                    'vrcc.mutuals.presence.friend'
+                                                )
+                                              : t('vrcc.mutuals.presence.add')}
                                     </span>
                                 )}
                                 {canOpen && (

@@ -15,12 +15,34 @@ vi.mock('@/lib/dateTime', () => ({
     formatRelativeTime: () => 'now'
 }));
 
+/**
+ * 好友表由每个用例自己决定。默认「就绪但空」——三态标签会显示「加好友」，
+ * 和真实玩家没加过这些人的情况一致。
+ */
+const presenceState = {
+    ready: true,
+    online: new Set<string>()
+};
+
+vi.mock('../useMutualPresence', () => ({
+    useMutualPresence: () => ({
+        ready: presenceState.ready,
+        of: (userId: string | null | undefined) => {
+            const id = (userId ?? '').trim();
+            if (!id) return 'unknown';
+            return presenceState.online.has(id) ? 'online' : 'unknown';
+        }
+    })
+}));
+
 import { VrccMapsPanel } from './VrccMapsPanel';
 import { VrccMutualsPanel } from './VrccMutualsPanel';
 import { VrccNotificationsPanel } from './VrccNotificationsPanel';
 
 afterEach(() => {
     cleanup();
+    presenceState.ready = true;
+    presenceState.online.clear();
 });
 
 function renderNotifications(unread: {
@@ -163,5 +185,50 @@ describe('VrccMutualsPanel', () => {
         ) as HTMLElement;
         // 官方颜色表里没有 A，官方也用文字色，所以这里不该有内联底色。
         expect(dot.style.backgroundColor).toBe('');
+    });
+
+    it('在线的好友排到最前面，其余保持服务端顺序', () => {
+        presenceState.online.add('usr_second');
+        const { container } = render(
+            <VrccMutualsPanel
+                connected
+                mutuals={
+                    {
+                        stars: [
+                            { n: 1, name: 'first', vrcUser: 'usr_first' },
+                            { n: 2, name: 'second', vrcUser: 'usr_second' },
+                            { n: 3, name: 'third', vrcUser: 'usr_third' }
+                        ]
+                    } as never
+                }
+                onOpenUser={() => {}}
+                onOpenGroup={() => {}}
+            />
+        );
+        const names = Array.from(container.querySelectorAll('li')).map(
+            (row) => row.textContent ?? ''
+        );
+        // 在线的 #2 提到最前；#1 和 #3 都不是好友，保持原顺序。
+        expect(names[0]).toContain('second');
+        expect(names[1]).toContain('first');
+        expect(names[2]).toContain('third');
+    });
+
+    it('好友表没就绪时不显示三态标签', () => {
+        presenceState.ready = false;
+        const { container } = render(
+            <VrccMutualsPanel
+                connected
+                mutuals={
+                    {
+                        stars: [{ n: 1, name: 'a', vrcUser: 'usr_a' }]
+                    } as never
+                }
+                onOpenUser={() => {}}
+                onOpenGroup={() => {}}
+            />
+        );
+        // 没就绪时所有人都是 unknown，显示「加好友」会误导玩家。
+        expect(container.textContent).not.toContain('vrcc.mutuals.presence.');
     });
 });

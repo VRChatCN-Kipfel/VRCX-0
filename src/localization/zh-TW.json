@@ -884,7 +884,12 @@
             "open_profile": "在 VRChat 玩家詳情裡開啟",
             "unavailable": "這一項需要額外權限，當前客戶端還沒開通",
             "rate_mine": "我給 TA 的分",
-            "linked_at": "連上的時間"
+            "linked_at": "連上的時間",
+            "presence": {
+                "online": "線上",
+                "friend": "已是好友",
+                "add": "加好友 ›"
+            }
         },
         "community": {
             "label": "社群",
