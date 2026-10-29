@@ -576,6 +576,36 @@ impl VrccBoardSort {
     }
 }
 
+/// `GET /me/board` 的排序。比公开榜多一个 `went`（我去过的）。
+///
+/// 单独一个枚举而不是复用 [`VrccBoardSort`]：多出来的那一个值在公开榜上
+/// 不存在，塞进同一个枚举会让公开榜的调用点也「支持」一个它其实发不出去的
+/// 值。
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize, specta::Type,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum VrccMyBoardSort {
+    #[default]
+    Top,
+    Week,
+    New,
+    /// 我去过的。
+    Went,
+}
+
+impl VrccMyBoardSort {
+    /// 查询串里的写法。
+    pub fn as_query(self) -> &'static str {
+        match self {
+            VrccMyBoardSort::Top => "top",
+            VrccMyBoardSort::Week => "week",
+            VrccMyBoardSort::New => "new",
+            VrccMyBoardSort::Went => "went",
+        }
+    }
+}
+
 /// 地图榜 / 批量查地图 / 我打过的图，三者的外层结构一致。
 #[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -1208,6 +1238,159 @@ pub struct VrccRatedMap {
 pub struct VrccRatedMaps {
     #[serde(default)]
     pub maps: Vec<VrccRatedMap>,
+}
+
+/// 玩家视角地图榜里的一行（`GET /me/board` 的 `maps` 条目）。
+///
+/// 比公开榜单多了「我自己的视角」：去过几次、我有没有打过分、热评、名次、
+/// 介绍首行。**不复用 [`VrccBoardMap`]**：那边没有这些字段，硬塞会让
+/// 调用方分不清「没有」和「不适用」。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyBoardMap {
+    /// 世界 ID（1.11.0 起也有同值的 `world`）。
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub world: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    /// 房间人数上限。
+    #[serde(default)]
+    pub cap: Option<i64>,
+    /// 封面**相对路径**。
+    #[serde(default)]
+    pub img: Option<String>,
+    /// 同一张封面的完整网址（1.11.0 起）。
+    #[serde(default)]
+    pub img_url: Option<String>,
+    /// 榜单状态。
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub avg: Option<f64>,
+    #[serde(default)]
+    pub raters: Option<i64>,
+    /// 去过的人数。
+    #[serde(default)]
+    pub went: Option<i64>,
+    /// 总榜或本周榜上的名次；有人打分的才有。筛选不改名次。
+    #[serde(default)]
+    pub rank: Option<i64>,
+    /// 赞最多的那段介绍的第一行。
+    #[serde(default)]
+    pub intro: Option<String>,
+    /// 最热的一条短评。
+    #[serde(default)]
+    pub hot: Option<VrccMapHot>,
+    /// 最多 3 条短评。
+    #[serde(default)]
+    pub hots: Vec<VrccMapHot>,
+}
+
+/// `GET /me/board`：玩家看到的地图榜。
+///
+/// 需要 `maps` 普通权限。和网页「榜单」一样，带玩家自己的评分、去过、热评。
+/// `dot` 是「有新内容」的提示，`min` 是进榜需要几人评分。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyBoard {
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub min: Option<i64>,
+    /// 有新内容的提示。
+    #[serde(default)]
+    pub dot: Option<VrccBoardDot>,
+    #[serde(default)]
+    pub maps: Vec<VrccMyBoardMap>,
+}
+
+/// `GET /me/board` 的 `dot`：哪一块有新内容。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccBoardDot {
+    #[serde(default)]
+    pub maps: bool,
+    #[serde(default)]
+    pub went: bool,
+}
+
+/// 分数分布的一段：`9–10` 分占百分之几。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccScoreBand {
+    /// 这一段的分数下限。
+    #[serde(default)]
+    pub from: i64,
+    /// 这一段的分数上限。
+    #[serde(default)]
+    pub to: i64,
+    /// 占百分之几（整数）。
+    #[serde(default)]
+    pub pct: i64,
+}
+
+/// 多小咕的实测数据（`perf`）。**整个可以没有**，里面每一项也可以是 `null`。
+///
+/// 所以除了 `from` 之外全部是 `Option`——没测过的图不该显示成一堆 0。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapPerf {
+    /// 实测方式：`test`（测地图本身）/ `hang`（挂房的平均）。
+    #[serde(default)]
+    pub from: Option<String>,
+    /// 轻重档位：`light` / `mid` / `heavy`。
+    #[serde(default)]
+    pub weight: Option<String>,
+    /// 显存（MB）。
+    #[serde(default)]
+    pub vram: Option<f64>,
+    /// 内存（MB）。
+    #[serde(default)]
+    pub mem: Option<f64>,
+    /// 加载时间（毫秒）。
+    #[serde(default)]
+    pub load: Option<f64>,
+    /// 下载大小（字节）。
+    #[serde(default)]
+    pub size: Option<f64>,
+    /// 支持的平台：`PC` / `Quest` / `iOS`。
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    /// 挂房的分钟数（实测时为 `null`）。
+    #[serde(default)]
+    pub minutes: Option<i64>,
+}
+
+/// `GET /maps/{world}/page`：公开地图页（1.13.0 起，**不需要令牌**）。
+///
+/// 和 vrcc.cc 上每张地图的页面一样：榜上那一行、分数分布、去过的人数、
+/// 房间上限、多小咕实测。短评和介绍不在这里。
+///
+/// 不在榜上或没过审时是 `404 not_found`——那是**正常状态**，不是故障。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapPage {
+    /// 榜上的那一行。
+    pub map: VrccBoardMap,
+    /// 分数分布：9–10、7–8、5–6、3–4、1–2 各占百分之几。
+    #[serde(default)]
+    pub spread: Vec<VrccScoreBand>,
+    /// 去过的人数。
+    #[serde(default)]
+    pub went: i64,
+    /// 房间人数上限。
+    #[serde(default)]
+    pub cap: Option<i64>,
+    /// 多小咕实测；没测过是 `null`。
+    #[serde(default)]
+    pub perf: Option<VrccMapPerf>,
+    /// 服务器生成这份数据的时刻（毫秒）。
+    #[serde(default)]
+    pub at: i64,
 }
 
 // ---------------------------------------------------------------------------

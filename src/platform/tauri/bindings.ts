@@ -437,6 +437,18 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_my_maps');
     },
     /**
+     * 公开地图页。不需要令牌。不在榜上时（`404`）返回 `null`。
+     */
+    async appVrccMapPage(world: string): Promise<VrccMapPage | null> {
+        return await TAURI_INVOKE('app__vrcc_map_page', { world });
+    },
+    /**
+     * 玩家视角地图榜。需要 `maps` 普通权限。
+     */
+    async appVrccMyBoard(sort: VrccMyBoardSort | null): Promise<VrccMyBoard> {
+        return await TAURI_INVOKE('app__vrcc_my_board', { sort });
+    },
+    /**
      * 增量轮询。游标由后端维护，前端不用关心。
      */
     async appVrccPollNotifications(): Promise<VrccNotifications> {
@@ -7311,6 +7323,10 @@ export type VrccBoard = {
     at?: number | null;
 };
 /**
+ * `GET /me/board` 的 `dot`：哪一块有新内容。
+ */
+export type VrccBoardDot = { maps?: boolean; went?: boolean };
+/**
  * `GET /boards/maps`、`GET /maps`、`GET /me/maps` 共用的地图条目。
  */
 export type VrccBoardMap = {
@@ -7491,6 +7507,79 @@ export type VrccMapHot = {
     went?: boolean | null;
 };
 /**
+ * `GET /maps/{world}/page`：公开地图页（1.13.0 起，**不需要令牌**）。
+ *
+ * 和 vrcc.cc 上每张地图的页面一样：榜上那一行、分数分布、去过的人数、
+ * 房间上限、多小咕实测。短评和介绍不在这里。
+ *
+ * 不在榜上或没过审时是 `404 not_found`——那是**正常状态**，不是故障。
+ */
+export type VrccMapPage = {
+    /**
+     * 榜上的那一行。
+     */
+    map: VrccBoardMap;
+    /**
+     * 分数分布：9–10、7–8、5–6、3–4、1–2 各占百分之几。
+     */
+    spread?: VrccScoreBand[];
+    /**
+     * 去过的人数。
+     */
+    went?: number;
+    /**
+     * 房间人数上限。
+     */
+    cap?: number | null;
+    /**
+     * 多小咕实测；没测过是 `null`。
+     */
+    perf?: VrccMapPerf | null;
+    /**
+     * 服务器生成这份数据的时刻（毫秒）。
+     */
+    at?: number;
+};
+/**
+ * 多小咕的实测数据（`perf`）。**整个可以没有**，里面每一项也可以是 `null`。
+ *
+ * 所以除了 `from` 之外全部是 `Option`——没测过的图不该显示成一堆 0。
+ */
+export type VrccMapPerf = {
+    /**
+     * 实测方式：`test`（测地图本身）/ `hang`（挂房的平均）。
+     */
+    from?: string | null;
+    /**
+     * 轻重档位：`light` / `mid` / `heavy`。
+     */
+    weight?: string | null;
+    /**
+     * 显存（MB）。
+     */
+    vram?: number | null;
+    /**
+     * 内存（MB）。
+     */
+    mem?: number | null;
+    /**
+     * 加载时间（毫秒）。
+     */
+    load?: number | null;
+    /**
+     * 下载大小（字节）。
+     */
+    size?: number | null;
+    /**
+     * 支持的平台：`PC` / `Quest` / `iOS`。
+     */
+    platforms?: string[];
+    /**
+     * 挂房的分钟数（实测时为 `null`）。
+     */
+    minutes?: number | null;
+};
+/**
  * 我给一颗互相连上的星的评价，和网页上互相连上的卡一样。
  *
  * 只有我给 TA 的，没有 TA 给我的。
@@ -7556,6 +7645,90 @@ export type VrccMutuals = {
      */
     n?: number | null;
 };
+/**
+ * `GET /me/board`：玩家看到的地图榜。
+ *
+ * 需要 `maps` 普通权限。和网页「榜单」一样，带玩家自己的评分、去过、热评。
+ * `dot` 是「有新内容」的提示，`min` 是进榜需要几人评分。
+ */
+export type VrccMyBoard = {
+    sort?: string | null;
+    min?: number | null;
+    /**
+     * 有新内容的提示。
+     */
+    dot?: VrccBoardDot | null;
+    maps?: VrccMyBoardMap[];
+};
+/**
+ * 玩家视角地图榜里的一行（`GET /me/board` 的 `maps` 条目）。
+ *
+ * 比公开榜单多了「我自己的视角」：去过几次、我有没有打过分、热评、名次、
+ * 介绍首行。**不复用 [`VrccBoardMap`]**：那边没有这些字段，硬塞会让
+ * 调用方分不清「没有」和「不适用」。
+ */
+export type VrccMyBoardMap = {
+    /**
+     * 世界 ID（1.11.0 起也有同值的 `world`）。
+     */
+    id?: string | null;
+    world?: string | null;
+    name?: string | null;
+    author?: string | null;
+    /**
+     * 房间人数上限。
+     */
+    cap?: number | null;
+    /**
+     * 封面**相对路径**。
+     */
+    img?: string | null;
+    /**
+     * 同一张封面的完整网址（1.11.0 起）。
+     */
+    imgUrl?: string | null;
+    /**
+     * 榜单状态。
+     */
+    status?: string | null;
+    avg?: number | null;
+    raters?: number | null;
+    /**
+     * 去过的人数。
+     */
+    went?: number | null;
+    /**
+     * 总榜或本周榜上的名次；有人打分的才有。筛选不改名次。
+     */
+    rank?: number | null;
+    /**
+     * 赞最多的那段介绍的第一行。
+     */
+    intro?: string | null;
+    /**
+     * 最热的一条短评。
+     */
+    hot?: VrccMapHot | null;
+    /**
+     * 最多 3 条短评。
+     */
+    hots?: VrccMapHot[];
+};
+/**
+ * `GET /me/board` 的排序。比公开榜多一个 `went`（我去过的）。
+ *
+ * 单独一个枚举而不是复用 [`VrccBoardSort`]：多出来的那一个值在公开榜上
+ * 不存在，塞进同一个枚举会让公开榜的调用点也「支持」一个它其实发不出去的
+ * 值。
+ */
+export type VrccMyBoardSort =
+    | 'top'
+    | 'week'
+    | 'new'
+    /**
+     * 我去过的。
+     */
+    | 'went';
 /**
  * `GET /me/maps/{world}`：玩家**当前所在地图**在地图榜上的状态与本人评分。
  *
@@ -7776,6 +7949,23 @@ export type VrccRound = {
      */
     max?: number | null;
     remind?: boolean | null;
+};
+/**
+ * 分数分布的一段：`9–10` 分占百分之几。
+ */
+export type VrccScoreBand = {
+    /**
+     * 这一段的分数下限。
+     */
+    from?: number;
+    /**
+     * 这一段的分数上限。
+     */
+    to?: number;
+    /**
+     * 占百分之几（整数）。
+     */
+    pct?: number;
 };
 /**
  * 一张星卡：`/me/today`、`/me/inbox` 里的条目。

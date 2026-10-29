@@ -11,8 +11,9 @@
 use tauri::State;
 use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep};
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes, VrccRatedMaps,
-    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage, VrccMyBoard,
+    VrccMyBoardSort, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers,
+    VrccToday, VrccUnread, VrccUsageSnapshot,
 };
 
 use crate::{error::AppError, state::AppState};
@@ -154,6 +155,36 @@ pub async fn app__vrcc_stickers(
         .runtime_host()
         .vrcc()
         .stickers()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 公开地图页。不需要令牌。不在榜上时（`404`）返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_map_page(
+    state: State<'_, AppState>,
+    world: String,
+) -> Result<Option<VrccMapPage>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .map_page(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 玩家视角地图榜。需要 `maps` 普通权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_board(
+    state: State<'_, AppState>,
+    sort: Option<VrccMyBoardSort>,
+) -> Result<VrccMyBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_board(sort.unwrap_or_default())
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }

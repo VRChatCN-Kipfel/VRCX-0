@@ -6,9 +6,9 @@ use std::time::Duration;
 use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
-    scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
-    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread,
-    VrccUsageSnapshot, VrccWristSummary,
+    scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage,
+    VrccMyBoard, VrccMyBoardSort, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus,
+    VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -237,6 +237,22 @@ impl DesktopVrccRuntime {
     ) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, VrccFailure> {
         self.service
             .my_map(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 公开地图页。不在榜上时（`404`）返回 `None`。
+    pub async fn map_page(&self, world: &str) -> Result<Option<VrccMapPage>, VrccFailure> {
+        self.service
+            .map_page(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 玩家视角地图榜。需要 `maps` 普通权限。
+    pub async fn my_board(&self, sort: VrccMyBoardSort) -> Result<VrccMyBoard, VrccFailure> {
+        self.service
+            .my_board(sort)
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

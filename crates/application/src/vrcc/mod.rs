@@ -11,9 +11,10 @@ use std::time::{Duration, Instant};
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
-    VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals,
-    VrccMyMap, VrccNotes, VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus,
-    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMapPage,
+    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications,
+    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse,
+    VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -89,6 +90,7 @@ pub trait VrccRemote: Send + Sync {
     fn fetch_site_asset<'a>(&'a self, path: &'a str) -> VrccFuture<'a, Vec<u8>>;
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements>;
     fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers>;
+    fn map_page<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMapPage>;
 
     // -- 设备授权 ----------------------------------------------------------
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode>;
@@ -100,6 +102,7 @@ pub trait VrccRemote: Send + Sync {
     fn notifications<'a>(&'a self, since: Option<i64>) -> VrccFuture<'a, VrccNotifications>;
     fn my_map<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMyMap>;
     fn my_maps<'a>(&'a self) -> VrccFuture<'a, VrccRatedMaps>;
+    fn my_board<'a>(&'a self, sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard>;
     fn unread<'a>(&'a self) -> VrccFuture<'a, VrccUnread>;
     fn notes<'a>(&'a self) -> VrccFuture<'a, VrccNotes>;
     fn today<'a>(&'a self) -> VrccFuture<'a, VrccToday>;
@@ -887,6 +890,37 @@ impl VrccService {
         // 有新提醒到达时，未读数会变；下次打开页面拉 recent 时会修正。
         // 这里若把 items 长度加上去，会和 `read` 的语义打架。
         Ok(polled)
+    }
+
+    /// 公开地图页（1.13.0 起）。**不需要令牌。**
+    ///
+    /// 不在榜上或没过审时是 `404 not_found`——那是这张图还没上榜，返回
+    /// `None` 而不是错误。把它报成故障会让一张新图看起来像服务坏了。
+    pub async fn map_page(
+        &self,
+        world: &str,
+    ) -> std::result::Result<Option<VrccMapPage>, VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            return Ok(None);
+        }
+        match self.remote.map_page(&world).await {
+            Ok(page) => Ok(Some(page)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(self.settle(error)),
+        }
+    }
+
+    /// 玩家视角地图榜（需要 `maps` 普通权限）。
+    pub async fn my_board(
+        &self,
+        sort: VrccMyBoardSort,
+    ) -> std::result::Result<VrccMyBoard, VrccError> {
+        self.ensure_connected()?;
+        self.remote
+            .my_board(sort)
+            .await
+            .map_err(|error| self.settle(error))
     }
 
     /// 我打过分的地图（需要 `maps` 普通权限）。最近的在前。

@@ -231,6 +231,22 @@ impl VrccRemote for FakeRemote {
             Err(token_missing())
         })
     }
+    fn map_page<'a>(&'a self, _world: &'a str) -> VrccFuture<'a, VrccMapPage> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Err(token_missing())
+        })
+    }
+    fn my_board<'a>(&'a self, _sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Err(token_missing())
+        })
+    }
     fn unread<'a>(&'a self) -> VrccFuture<'a, VrccUnread> {
         Box::pin(async move {
             if let Some(error) = self.take_error() {

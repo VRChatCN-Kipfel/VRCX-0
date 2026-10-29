@@ -12,9 +12,9 @@
 
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMutuals, VrccMyMap, VrccNotes,
-    VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
-    VrccTokenResponse, VrccUnread,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMapPage, VrccMutuals,
+    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications, VrccRatedMaps,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread,
 };
 use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
 
@@ -66,6 +66,14 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers> {
         Box::pin(async move { self.client().stickers().await })
+    }
+
+    fn map_page<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMapPage> {
+        Box::pin(async move { self.client().map_page(world).await })
+    }
+
+    fn my_board<'a>(&'a self, sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
+        Box::pin(async move { self.client().my_board(sort).await })
     }
 
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode> {

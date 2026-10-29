@@ -24,9 +24,10 @@ use serde_json::json;
 use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
     ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
-    VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMutuals, VrccMyMap,
-    VrccNotes, VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers,
-    VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMapPage,
+    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications,
+    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse,
+    VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -819,6 +820,27 @@ impl VrccClient {
         .await
     }
 
+    /// 公开地图页（`GET /maps/{world}/page`，1.13.0 起）。
+    ///
+    /// 不需要令牌。不在榜上或没过审时 `404 not_found`——这是正常状态
+    /// （这张图还没上榜），调用方应当把它当成「没有这一页」，而不是报故障。
+    ///
+    /// 独立一个限流键：它和单张查询问的是不同接口，但同样 5 分钟才更新一次，
+    /// 间隔可以放宽。
+    pub async fn map_page(&self, world: &str) -> Result<VrccMapPage, VrccError> {
+        self.request(Call {
+            method: "GET",
+            path: &format!("maps/{world}/page"),
+            body: None,
+            authed: false,
+            key: "map_page",
+            min_gap: Duration::from_secs(60),
+            bucket: None,
+            bypass_gate: false,
+        })
+        .await
+    }
+
     /// 公告和停站（1.12.0 起）。不用令牌，停站时也能问，服务器缓存 1 分钟。
     ///
     /// 旧服务器没有这个接口，回答 `404 not_found`。
@@ -1034,8 +1056,25 @@ impl VrccClient {
         .await
     }
 
-    /// 我打过分的地图（`GET /me/maps`）。最近的在前，最多 200 张。
+    /// 玩家视角地图榜（`GET /me/board`）。需要 `maps` 普通权限。
     ///
+    /// 比公开榜多出「我的视角」：去过几次、热评、名次、介绍首行。
+    /// `sort` 走 `top` / `week` / `new` / `went`——比公开榜多一个 `went`。
+    pub async fn my_board(&self, sort: VrccMyBoardSort) -> Result<VrccMyBoard, VrccError> {
+        self.request(Call {
+            method: "GET",
+            path: &format!("me/board?sort={}", sort.as_query()),
+            body: None,
+            authed: true,
+            key: "my_board",
+            min_gap: Duration::from_secs(60),
+            bucket: Some(QuotaBucket::Reads),
+            bypass_gate: false,
+        })
+        .await
+    }
+
+    /// 我打过分的地图（`GET /me/maps`）。最近的在前，最多 200 张。    ///
     /// 需要 `maps` 普通权限，计入个人每天的读取次数。这个接口只有 `GET`；
     /// 同一个路径的 `POST` 是「添加地图」，要 `maps.write` 敏感权限，本客户端
     /// 不申请，所以那条路走不通是**设计如此**，不是漏了。

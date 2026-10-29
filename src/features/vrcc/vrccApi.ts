@@ -255,6 +255,22 @@ export const vrccApi = {
     myMaps: () => call(() => commands.appVrccMyMaps()),
 
     /**
+     * 公开地图页：分数分布、去过的人数、房间上限、多小咕实测。
+     *
+     * 不需要连接。这张图不在榜上时服务器回 `404`，那**是正常状态**，
+     * 后端把它转成 null，不是错误。
+     */
+    mapPage: (world: string) => call(() => commands.appVrccMapPage(world)),
+
+    /**
+     * 玩家视角地图榜：比公开榜多「我去过几次、热评、名次、介绍首行」。
+     *
+     * 需要 `maps` 普通权限。`sort` 多一个 `went`（我去过的）。
+     */
+    myBoard: (sort: VrccMyBoardSort = 'top') =>
+        call(() => commands.appVrccMyBoard(sort)),
+
+    /**
      * 第一步设备授权：拿码。
      *
      * 要哪些权限由 Rust 侧按当前 `X-Client` 决定（`device_auth_scope`）：
@@ -360,3 +376,11 @@ export type VrccStickers = NonNullable<
 export type VrccSticker = NonNullable<VrccStickers['stickers']>[string];
 export type VrccRatedMaps = Awaited<ReturnType<typeof commands.appVrccMyMaps>>;
 export type VrccRatedMap = NonNullable<VrccRatedMaps['maps']>[number];
+export type VrccMapPage = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccMapPage>>
+>;
+export type VrccMyBoard = Awaited<ReturnType<typeof commands.appVrccMyBoard>>;
+export type VrccMyBoardSort = NonNullable<
+    Parameters<typeof commands.appVrccMyBoard>[0]
+>;
+export type VrccMyBoardMap = NonNullable<VrccMyBoard['maps']>[number];
