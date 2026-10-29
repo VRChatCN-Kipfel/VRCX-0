@@ -169,6 +169,10 @@ function normalizeKind(kind: string | undefined): VrccErrorKind {
  *
  * 这**不是**给「老后端」留的兼容：所有 `app__vrcc_*` 命令的错误都由
  * `AppError::Vrcc` 产生，`layer` 是必填字段，不存在不带它的后端。
+ *
+ * 生产端（`vrcc_layer_name`）是穷举 `match`，加层级会直接编译失败，所以这里
+ * 认不出只可能是 bindings 与源码不同步。那是构建问题，不该在运行时「处理」，
+ * 但要让它响一声，别静默吸收。
  */
 function normalizeLayer(layer: string | undefined): VrccErrorLayer {
     switch (layer) {
@@ -179,6 +183,12 @@ function normalizeLayer(layer: string | undefined): VrccErrorLayer {
         case 'session':
             return layer;
         default:
+            if (import.meta.env.DEV && layer !== undefined) {
+                console.warn(
+                    '[vrcc] 认不出的错误层级，bindings 可能未同步',
+                    layer
+                );
+            }
             return 'server';
     }
 }

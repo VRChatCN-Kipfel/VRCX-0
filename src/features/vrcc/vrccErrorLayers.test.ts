@@ -82,24 +82,34 @@ describe('vrcc 错误分层', () => {
         expect(error.isOurBug).toBe(false);
     });
 
-    it('认不出的 layer 落到 server，而不是 transport', async () => {
+    it('认不出的 layer 落到 server，并且响一声', async () => {
         // 说成 `transport` 会把「服务器拒绝」误报成「你网络有问题」，
         // 玩家就会去排查一个根本没坏的网络。
+        //
+        // 生产端是穷举 match，认不出只可能是 bindings 未同步。那是构建问题，
+        // 运行时只做安全兜底，但要在 dev 下留个响声——所以这条顺带钉住警告。
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const error = await normalize({
             kind: 'other',
             layer: 'some-future-layer',
             need: null
         });
         expect(error.layer).toBe('server');
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('认不出的错误层级'),
+            'some-future-layer'
+        );
+        warn.mockRestore();
     });
 
     it('认不出的 transportKind 落到 null', async () => {
+        // `layer` 用合法值，免得这条顺带触发上面那条警告。
         const error = await normalize({
             kind: 'other',
-            layer: 'some-future-layer',
+            layer: 'transport',
             transportKind: 'quantum'
         });
-        expect(error.layer).toBe('server');
+        expect(error.layer).toBe('transport');
         expect(error.transportKind).toBeNull();
     });
 
