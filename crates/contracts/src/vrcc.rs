@@ -28,64 +28,154 @@ pub const VRCC_MAX_BODY_BYTES: usize = 2048;
 ///
 /// `Clone` 是给「先判断能不能重试、再把原错误交出去」这类调用点用的
 /// （见 `VrccService::disconnect`）。
+///
+/// # 为什么是 struct 而不是 enum
+///
+/// 早先这里是一个 12 个变体的 enum，把**四种不同层级**的失败平铺在一起：
+/// 我们自己的编码 bug、传输层失败、服务器拒绝、会话状态。结果是玩家会看到
+/// 「请求正文超过 2048 字节上限」这种本不该外露的内部错误，而「网络不通」
+/// 和「服务器拒绝」也分不开。
+///
+/// 现在只回答两件事：[`ErrorLayer`] 说**发生在哪一层**，[`ErrorDetail`]
+/// 说**具体是什么**。层级判断只做一次，消费方不必再逐个变体去猜。
+///
+/// # 为什么 HTTP 语义收敛成一个变体
+///
+/// 早年按错误码加了 `RateLimited` / `TooSoon` / `QuotaExhausted` / `Paused`
+/// / `NotReady` / `ConnectPaused` 六个变体，每来一个新错误码就要加一个。
+/// 但官方错误码有三十多个，这条路走不完。
+///
+/// 现在统一记成 `Http { status, error, … }`，**错误只忠实记录 HTTP 事实，
+/// 业务判断交给消费方**。同一个码在不同调用点反应本来就可能不同——
+/// 比如 `409 busy` 表示「星卡还在生成」，而 `429 busy` 表示「连接功能暂停
+/// 到次日」，官方文档明说这两种只能按状态码区分（README「网页上的动作和
+/// 打分的错误码」）。把这种判断焊死在产生错误的地方是错的。
 #[derive(Clone, Debug, thiserror::Error)]
-pub enum VrccError {
+#[error("{}", .detail)]
+pub struct VrccError {
+    /// 失败发生在哪一层。**先看这个，再看 `detail`。**
+    pub layer: ErrorLayer,
+    pub detail: ErrorDetail,
+}
+
+impl VrccError {
+    pub fn new(layer: ErrorLayer, detail: ErrorDetail) -> Self {
+        Self { layer, detail }
+    }
+
+    /// 拿到 HTTP 语义细节；不是服务器拒绝时为 `None`。
+    pub fn http(&self) -> Option<&HttpDetail> {
+        match &self.detail {
+            ErrorDetail::Http(http) => Some(http),
+            _ => None,
+        }
+    }
+
+    /// 这个错误是不是「我们自己的 bug」，**不该显示给玩家**。
+    ///
+    /// 拼错路径、正文超限都是我们自己构造请求时出的错。以前它们和
+    /// 「额度用尽」挤在同一个 toast 队列里，玩家看到的是
+    /// 「请求正文超过 2048 字节上限」——和自己毫无关系的信息。
+    pub fn is_our_bug(&self) -> bool {
+        self.layer == ErrorLayer::Input
+    }
+}
+
+/// 失败发生在哪一层。
+///
+/// 这就是「网络层还是应用层」这个问题的答案，一个字段即可，不必从变体去猜。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorLayer {
+    /// **我们自己的 bug**：路径拼错、正文超限。玩家不该看到这类错误。
+    Input,
+    /// **传输层**：请求没送到，也没拿到任何响应。
+    Transport,
+    /// **服务器拒绝**：拿到了响应，但状态码不是 2xx。
+    Server,
+    /// **会话状态**：令牌缺失或失效，和网络无关。
+    Session,
+}
+
+/// 传输层失败卡在哪个环节。
+///
+/// 判据全部来自 `reqwest::Error` 的类型判断（`is_dns` / `is_connect` /
+/// `is_timeout` / `is_body`），不是对错误文案做字符串匹配。
+///
+/// **注意 `is_dns` 的盲区**：走 SOCKS5 代理时代理串会被改写成 `socks5h://`
+/// （见 `vrcx_0_core::proxy::with_remote_dns`），域名由代理那边解析。
+/// 那种情况下本机根本不做 DNS 查询，解析失败会表现为 `Connect` 而不是 `Dns`。
+/// 所以看到 `Connect` 时不能断言「不是 DNS 问题」。
+///
+/// 另外：RST、端口拒绝、运营商封锁在操作系统层面表现一致，都是建连失败，
+/// 这里无法进一步区分，也不会假装能区分。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransportKind {
+    /// 本机域名解析失败。
+    Dns,
+    /// 建立连接失败（端口不通、RST、代理未启动、SOCKS5 握手失败等）。
+    Connect,
+    /// 连接或读取超时。
+    Timeout,
+    /// 响应体读到一半中断。
+    Body,
+    /// 其它传输错误。
+    Other,
+}
+
+/// 服务器拒绝时，官方在正文里给的细节。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HttpDetail {
+    pub status: u16,
+    /// 官方的错误码，如 `too_soon` / `quota` / `busy` / `map_wait`。
+    /// **这个串是稳定的**，业务分支应当按它（配合 `status`）判断。
+    pub error: String,
+    /// 缺哪一项权限或前置条件。
+    pub need: Option<String>,
+    /// 补充原因（哪些错误码会给：`yq_words`、`msg_words` 等）。
+    pub why: Option<String>,
+    /// `Retry-After` 响应头的秒数。1.9.0 起所有 429 都带。
+    pub retry_after: Option<u64>,
+    /// 发起这次调用的是哪个接口（`device_code` / `today` …）。
+    ///
+    /// 同一个错误码在不同接口下含义可能不同，消费方需要它才能给出准确提示。
+    /// 典型例子：`429 too_many` 在 `device_code` 上是「按网络出口 IP 算的
+    /// 每天 30 个，换网络可立刻再用」，在别的接口上才是「你自己的次数用完了」。
+    pub op: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum ErrorDetail {
     #[error("星遇同频 token 缺失，请先连接")]
     TokenMissing,
     #[error("路径必须相对 /api/v1/：{0}")]
     AbsolutePath(String),
     #[error("请求正文超过 {VRCC_MAX_BODY_BYTES} 字节上限")]
     BodyTooLarge,
-    #[error("星遇同频限流：{0}")]
-    RateLimited(String),
-    /// 429 `too_soon`：两次轮询间隔太短。等 `retry_after_secs` 再问，
-    /// 不触发长时间退避——这不是配额问题，只是问勤了。
-    #[error("星遇同频轮询太快，{retry_after_secs} 秒后再问")]
-    TooSoon { retry_after_secs: u64 },
-    #[error("星遇同频额度已用尽：{0}")]
-    QuotaExhausted(String),
-    /// `503 stop`：停站维护。令牌没事，等到 `until` 以后再试。
-    ///
-    /// 只有「网页上的动作」那一批（今天的星等）会这样回答；提醒、星卡、
-    /// 地图榜停站时照常。
-    #[error("星遇同频停站维护中{}", stop_suffix(.say))]
-    Paused {
-        say: Option<String>,
-        until: Option<i64>,
+    #[error("星遇同频接口暂时不可用：{message}")]
+    Transport {
+        kind: TransportKind,
+        /// 原始错误文案，**只用于日志与排查**。玩家看到的文案应当按 `kind` 出。
+        message: String,
     },
-    /// `409 busy`：**这一轮的星卡还在生成**，过一会儿再问。
-    ///
-    /// 官方把它和 `429 busy` 用了同一个 `error` 串，含义却相反：
-    /// 这个是「等一下就好」，那个是「连接功能今天关了」。所以两者必须分开，
-    /// 不能靠 `error == "busy"` 一处判断——那正是这里要避免的坑。
-    ///
-    /// 只有「网页上的动作」那一批（今天的星、连向我等）会这样回答。
-    #[error("星遇同频这一轮的星卡还在生成，请稍后再试")]
-    NotReady,
-    /// `429 busy`：**全站今天输错的连接码太多，连接功能暂停到次日**。
-    ///
-    /// 和本机的额度无关：玩家自己的次数可能一次都没用。
-    /// 所以不能归进 [`VrccError::QuotaExhausted`]（那会说成「今天的次数用完了」，
-    /// 是错的，还会让玩家反复重试）。
-    #[error("星遇同频的连接功能今天已暂停（全站错误码过多），请明天再试")]
-    ConnectPaused,
-    #[error("星遇同频接口返回 HTTP {status}（{error}）")]
-    Api {
-        status: u16,
-        error: String,
-        need: Option<String>,
-        why: Option<String>,
-    },
-    #[error("星遇同频接口暂时不可用：{0}")]
-    Transport(String),
     #[error("星遇同频返回无法解析：{0}")]
     Decode(String),
+    #[error("{}", http_display(.0))]
+    Http(HttpDetail),
 }
 
-fn stop_suffix(say: &Option<String>) -> String {
-    match say.as_deref().map(str::trim).filter(|say| !say.is_empty()) {
-        Some(say) => format!("：{say}"),
-        None => String::new(),
+/// `Http` 的显示文案。
+///
+/// 只保留「服务器说不行」这个事实和官方错误码，不再拼中文解释——那些
+/// 交给前端按 `(status, error, op)` 出 i18n。早先这里拼出了
+/// 「今天的次数用完了，约 3 小时 后恢复」这种高度定制的句子，一旦文案要改
+/// 就得改后端，而且没法本地化。
+fn http_display(http: &HttpDetail) -> String {
+    match http.retry_after {
+        Some(secs) => format!(
+            "星遇同频接口返回 HTTP {}（{}），{} 秒后可重试",
+            http.status, http.error, secs
+        ),
+        None => format!("星遇同频接口返回 HTTP {}（{}）", http.status, http.error),
     }
 }
 
@@ -98,14 +188,8 @@ impl VrccError {
     /// （1.9.0 起签名图片失效用这个码，原来也叫 `gone`）和 `not_found`
     /// （查的地图不在榜上、或旧服务器还没有这个接口），这些都**不该**触发重新授权。
     pub fn is_gone(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 404,
-                error,
-                ..
-            } if error == "gone"
-        )
+        self.http()
+            .is_some_and(|http| http.status == 404 && http.error == "gone")
     }
 
     /// `404 not_found`：没有这个接口，或查的东西不在。
@@ -113,22 +197,20 @@ impl VrccError {
     /// 新接口（`me/unread`、`me/notes`、`announcements`）在还没更新的服务器上
     /// 就是这样回答的，调用方据此安静地不显示，而不是报错。
     pub fn is_not_found(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 404,
-                error,
-                ..
-            } if error == "not_found"
-        )
+        self.http()
+            .is_some_and(|http| http.status == 404 && http.error == "not_found")
     }
 
     /// 「等一下再试」这一类：不是故障，也不是玩家做错了什么。
     ///
-    /// 目前是 `409 busy`（这一轮的星卡还在生成）。界面应显示「稍后再试」，
+    /// `409 busy`（这一轮的星卡还在生成）。界面应显示「稍后再试」，
     /// **不要**引导玩家重新授权，也不要渲染成错误横幅。
+    ///
+    /// 必须**连带状态码**判断：`429 busy` 用的是同一个 `error` 串，含义却是
+    /// 「全站连接功能暂停到次日」，两者只能按状态码区分（官方文档原话）。
     pub fn is_not_ready(&self) -> bool {
-        matches!(self, VrccError::NotReady)
+        self.http()
+            .is_some_and(|http| http.status == 409 && http.error == "busy")
     }
 
     /// 需要重新授权的情况。照官方错误码表逐条来：
@@ -138,59 +220,41 @@ impl VrccError {
     /// - `401 token`：没带令牌或格式不对
     /// - `403 scope`：缺权限，要玩家重新授权时勾上 `need` 那一项
     pub fn needs_reauth(&self) -> bool {
-        if self.is_gone() {
+        if self.is_gone() || matches!(self.detail, ErrorDetail::TokenMissing) {
             return true;
         }
-        matches!(self, VrccError::Api { status: 401, .. })
-            || matches!(
-                self,
-                VrccError::Api {
-                    status: 403,
-                    error,
-                    ..
-                } if matches!(
-                    error.as_str(),
+        let Some(http) = self.http() else {
+            return false;
+        };
+        http.status == 401
+            || (http.status == 403
+                && matches!(
+                    http.error.as_str(),
                     "client_mismatch"
                         | "client_unknown"
                         | "client_off"
                         | "client_missing"
                         | "scope"
                         | "scope_unreviewed"
-                )
-            )
-            || matches!(self, VrccError::TokenMissing)
+                ))
     }
 
     /// 缺哪个权限。前端据此提示「需要重新授权并勾上 X」。
     pub fn needed_scope(&self) -> Option<&str> {
-        match self {
-            VrccError::Api { need, .. } => need.as_deref(),
-            _ => None,
-        }
+        self.http().and_then(|http| http.need.as_deref())
     }
 
     /// 设备授权期间「玩家还没点同意」，调用方应等 `interval` 秒再来问。
     pub fn is_authorization_pending(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 400,
-                error,
-                ..
-            } if error == "authorization_pending"
-        )
+        self.http()
+            .is_some_and(|http| http.status == 400 && http.error == "authorization_pending")
     }
 
     /// 设备授权走到终态：玩家取消，或码过期/已用过。
     pub fn is_device_auth_terminal(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 400,
-                error,
-                ..
-            } if error == "access_denied" || error == "expired_token"
-        )
+        self.http().is_some_and(|http| {
+            http.status == 400 && (http.error == "access_denied" || http.error == "expired_token")
+        })
     }
 }
 
