@@ -116,4 +116,49 @@ describe('VrccMutualsPanel', () => {
         // 留「—」会让玩家以为记录丢了，所以这里应该是彻底没有这个节点。
         expect(screen.queryByText('now')).toBeNull();
     });
+
+    it('四个有专属色的星群各上各的色', () => {
+        const { container } = render(
+            <VrccMutualsPanel
+                connected
+                mutuals={
+                    {
+                        stars: [
+                            { n: 1, name: 'G', group: 'G' },
+                            { n: 2, name: 'W', group: 'W' },
+                            { n: 3, name: 'Z', group: 'Z' },
+                            { n: 4, name: 'L', group: 'L' }
+                        ]
+                    } as never
+                }
+                onOpenUser={() => {}}
+            />
+        );
+        const dots = container.querySelectorAll('li > span[aria-hidden]');
+        expect(dots).toHaveLength(4);
+        const colors = Array.from(dots).map(
+            (dot) => (dot as HTMLElement).style.backgroundColor
+        );
+        expect(colors).toEqual([
+            'rgb(77, 180, 255)',
+            'rgb(255, 181, 71)',
+            'rgb(214, 155, 255)',
+            'rgb(95, 224, 180)'
+        ]);
+    });
+
+    it('万象（A）没有专属色，退回前景色而不是硬造一个', () => {
+        const { container } = render(
+            <VrccMutualsPanel
+                connected
+                mutuals={{ stars: [{ n: 5, name: 'A', group: 'A' }] } as never}
+                onOpenUser={() => {}}
+            />
+        );
+        const dot = container.querySelector(
+            'li > span[aria-hidden]'
+        ) as HTMLElement;
+        // 官方颜色表里没有 A，官方也用文字色，所以这里不该有内联底色。
+        expect(dot.style.backgroundColor).toBe('');
+    });
 });

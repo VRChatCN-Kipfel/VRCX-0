@@ -2,6 +2,7 @@ import { ExternalLink, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { formatRelativeTime } from '@/lib/dateTime';
+import { vrccStarGroupColor } from '@/shared/constants/vrccStarGroup';
 import { Button } from '@/ui/shadcn/button';
 
 import type { VrccMutuals } from '../vrccApi';
@@ -82,11 +83,26 @@ export function VrccMutualsPanel({
                     const linkedAt = star.at
                         ? formatRelativeTime(star.at, { style: 'short' })
                         : '';
+                    // 星群色点。`A`（万象）没有专属色，官方也是用文字色，
+                    // 所以查不到就用 `currentColor` 跟着文字走，不硬造一个。
+                    const groupColor = vrccStarGroupColor(star.group);
                     return (
                         <li
                             key={star.n}
                             className="flex items-center gap-3 px-3 py-2"
                         >
+                            <span
+                                aria-hidden
+                                className="text-muted-foreground size-2 shrink-0 rounded-full"
+                                style={
+                                    groupColor
+                                        ? { backgroundColor: groupColor }
+                                        : undefined
+                                }
+                                title={
+                                    groupColor ? undefined : (star.group ?? '')
+                                }
+                            />
                             <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
                                 #{star.n}
                             </span>
