@@ -6,6 +6,7 @@ import { vrccStarGroupColor } from '@/shared/constants/vrccStarGroup';
 import { Button } from '@/ui/shadcn/button';
 
 import type { VrccMutuals } from '../vrccApi';
+import { VrccCommunityGroup } from './VrccCommunityGroup';
 
 /**
  * 「互相连上」的星友列表。
@@ -22,7 +23,8 @@ export function VrccMutualsPanel({
     connected,
     mutuals,
     mutualsError,
-    onOpenUser
+    onOpenUser,
+    onOpenGroup
 }: {
     connected: boolean;
     mutuals: VrccMutuals | null;
@@ -32,6 +34,8 @@ export function VrccMutualsPanel({
      */
     mutualsError?: string | null;
     onOpenUser: (userId: string) => void;
+    /** 打开 VRCX-0 自己的群组详情窗。加入动作由玩家在那里自己点。 */
+    onOpenGroup: (groupId: string) => void;
 }) {
     const { t } = useTranslation();
 
@@ -68,85 +72,90 @@ export function VrccMutualsPanel({
     }
 
     return (
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border">
-            <ul className="divide-y">
-                {stars.map((star) => {
-                    const userId = star.vrcUser ?? '';
-                    // 没有 vrcUser 说明对方没公开「已验证」，就无法打开玩家页。
-                    // 这时只显示名字，不给一个点了没反应的按钮。
-                    const canOpen = userId.startsWith('usr_');
-                    // 我给 TA 的分（1.12.0 起）：0–5，半颗星一档，0 是没打；
-                    // 连上当天和旧服务器都没有。
-                    const mine = star.rate?.mine ?? 0;
-                    // 连上的时间（毫秒时间戳）。旧服务器和缺少字段时没有，
-                    // 这时整块不渲染——留一个「—」会让人以为记录丢了。
-                    const linkedAt = star.at
-                        ? formatRelativeTime(star.at, { style: 'short' })
-                        : '';
-                    // 星群色点。`A`（万象）没有专属色，官方也是用文字色，
-                    // 所以查不到就用 `currentColor` 跟着文字走，不硬造一个。
-                    const groupColor = vrccStarGroupColor(star.group);
-                    return (
-                        <li
-                            key={star.n}
-                            className="flex items-center gap-3 px-3 py-2"
-                        >
-                            <span
-                                aria-hidden
-                                className="text-muted-foreground size-2 shrink-0 rounded-full"
-                                style={
-                                    groupColor
-                                        ? { backgroundColor: groupColor }
-                                        : undefined
-                                }
-                                title={
-                                    groupColor ? undefined : (star.group ?? '')
-                                }
-                            />
-                            <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
-                                #{star.n}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-medium">
-                                    {star.name ?? t('vrcc.mutuals.unnamed')}
-                                </div>
-                                <div className="text-muted-foreground truncate text-xs">
-                                    {star.vrc ?? '—'}
-                                </div>
-                            </div>
-                            {mine > 0 && (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border">
+                <ul className="divide-y">
+                    {stars.map((star) => {
+                        const userId = star.vrcUser ?? '';
+                        // 没有 vrcUser 说明对方没公开「已验证」，就无法打开玩家页。
+                        // 这时只显示名字，不给一个点了没反应的按钮。
+                        const canOpen = userId.startsWith('usr_');
+                        // 我给 TA 的分（1.12.0 起）：0–5，半颗星一档，0 是没打；
+                        // 连上当天和旧服务器都没有。
+                        const mine = star.rate?.mine ?? 0;
+                        // 连上的时间（毫秒时间戳）。旧服务器和缺少字段时没有，
+                        // 这时整块不渲染——留一个「—」会让人以为记录丢了。
+                        const linkedAt = star.at
+                            ? formatRelativeTime(star.at, { style: 'short' })
+                            : '';
+                        // 星群色点。`A`（万象）没有专属色，官方也是用文字色，
+                        // 所以查不到就用 `currentColor` 跟着文字走，不硬造一个。
+                        const groupColor = vrccStarGroupColor(star.group);
+                        return (
+                            <li
+                                key={star.n}
+                                className="flex items-center gap-3 px-3 py-2"
+                            >
                                 <span
-                                    className="text-muted-foreground shrink-0 text-xs tabular-nums"
-                                    title={t('vrcc.mutuals.rate_mine')}
-                                >
-                                    ★ {mine}
+                                    aria-hidden
+                                    className="text-muted-foreground size-2 shrink-0 rounded-full"
+                                    style={
+                                        groupColor
+                                            ? { backgroundColor: groupColor }
+                                            : undefined
+                                    }
+                                    title={
+                                        groupColor
+                                            ? undefined
+                                            : (star.group ?? '')
+                                    }
+                                />
+                                <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
+                                    #{star.n}
                                 </span>
-                            )}
-                            {/* 「什么时候连上的」和「我打的分」是两件事，
+                                <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-medium">
+                                        {star.name ?? t('vrcc.mutuals.unnamed')}
+                                    </div>
+                                    <div className="text-muted-foreground truncate text-xs">
+                                        {star.vrc ?? '—'}
+                                    </div>
+                                </div>
+                                {mine > 0 && (
+                                    <span
+                                        className="text-muted-foreground shrink-0 text-xs tabular-nums"
+                                        title={t('vrcc.mutuals.rate_mine')}
+                                    >
+                                        ★ {mine}
+                                    </span>
+                                )}
+                                {/* 「什么时候连上的」和「我打的分」是两件事，
                                 所以各占一个位置，不合并进同一处文案。 */}
-                            {linkedAt && (
-                                <span
-                                    className="text-muted-foreground shrink-0 text-xs tabular-nums"
-                                    title={t('vrcc.mutuals.linked_at')}
-                                >
-                                    {linkedAt}
-                                </span>
-                            )}
-                            {canOpen && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="shrink-0"
-                                    onClick={() => onOpenUser(userId)}
-                                    title={t('vrcc.mutuals.open_profile')}
-                                >
-                                    <ExternalLink className="size-3.5" />
-                                </Button>
-                            )}
-                        </li>
-                    );
-                })}
-            </ul>
+                                {linkedAt && (
+                                    <span
+                                        className="text-muted-foreground shrink-0 text-xs tabular-nums"
+                                        title={t('vrcc.mutuals.linked_at')}
+                                    >
+                                        {linkedAt}
+                                    </span>
+                                )}
+                                {canOpen && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="shrink-0"
+                                        onClick={() => onOpenUser(userId)}
+                                        title={t('vrcc.mutuals.open_profile')}
+                                    >
+                                        <ExternalLink className="size-3.5" />
+                                    </Button>
+                                )}
+                            </li>
+                        );
+                    })}
+                </ul>
+            </div>
+            <VrccCommunityGroup onOpenGroup={onOpenGroup} />
         </div>
     );
 }

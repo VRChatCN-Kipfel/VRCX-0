@@ -882,6 +882,15 @@
             "rate_mine": "My rating for them",
             "linked_at": "When you linked"
         },
+        "community": {
+            "label": "Community",
+            "name": "The VRChat Chinese Community group",
+            "hint": "Join to find other VRChat players",
+            "joined": "Joined",
+            "joined_hint": "You are already in this group",
+            "join": "Join",
+            "open": "Open in the VRChat group dialog"
+        },
         "unread": {
             "inbox": "Linked me",
             "cross": "Crossings",

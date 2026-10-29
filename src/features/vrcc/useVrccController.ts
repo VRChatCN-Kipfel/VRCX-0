@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { tauriClient } from '@/platform/tauri/client';
 import { copyTextToClipboard } from '@/services/clipboardService';
-import { openUserDialog, openWorldDialog } from '@/services/dialogService';
+import {
+    openGroupDialog,
+    openUserDialog,
+    openWorldDialog
+} from '@/services/dialogService';
 import i18n from '@/services/i18nService';
 import { openExternalLink } from '@/services/shellIntegrationService';
 import { toast } from '@/services/toastService';
@@ -864,6 +868,17 @@ export function useVrccController() {
         openUserDialog({ userId });
     }, []);
 
+    /**
+     * 打开 VRCX-0 自己的群组详情窗。
+     *
+     * 和 `openUser` 同一条合规边界：社区群组的入口只负责把玩家带到我们
+     * 自己的群组页，**加入由玩家在那个界面里自己点**，程序不代发请求。
+     */
+    const openGroup = useCallback((groupId: string) => {
+        if (!groupId.startsWith('grp_')) return;
+        openGroupDialog({ groupId });
+    }, []);
+
     return {
         ...state,
         setTab,
@@ -876,6 +891,7 @@ export function useVrccController() {
         beginDeviceAuth,
         disconnect,
         openWorld,
-        openUser
+        openUser,
+        openGroup
     };
 }

@@ -886,6 +886,15 @@
             "rate_mine": "我給 TA 的分",
             "linked_at": "連上的時間"
         },
+        "community": {
+            "label": "社群",
+            "name": "VRChat 中文社群 VRCC 的 VRChat 群組",
+            "hint": "加入後可以在 VRChat 裡找到同好",
+            "joined": "已加入",
+            "joined_hint": "你已經在群組裡了",
+            "join": "加入",
+            "open": "在 VRChat 群組詳情裡開啟"
+        },
         "unread": {
             "inbox": "連向我",
             "cross": "星軌相交",

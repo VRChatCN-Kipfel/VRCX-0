@@ -101,6 +101,7 @@ describe('VrccMutualsPanel', () => {
                 connected
                 mutuals={{ stars } as never}
                 onOpenUser={() => {}}
+                onOpenGroup={() => {}}
             />
         );
     }
@@ -132,6 +133,7 @@ describe('VrccMutualsPanel', () => {
                     } as never
                 }
                 onOpenUser={() => {}}
+                onOpenGroup={() => {}}
             />
         );
         const dots = container.querySelectorAll('li > span[aria-hidden]');
@@ -153,6 +155,7 @@ describe('VrccMutualsPanel', () => {
                 connected
                 mutuals={{ stars: [{ n: 5, name: 'A', group: 'A' }] } as never}
                 onOpenUser={() => {}}
+                onOpenGroup={() => {}}
             />
         );
         const dot = container.querySelector(

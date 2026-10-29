@@ -107,7 +107,8 @@ export function VrccPage() {
         beginDeviceAuth,
         disconnect,
         openWorld,
-        openUser
+        openUser,
+        openGroup
     } = useVrccController();
 
     const connected = connection?.connected ?? false;
@@ -324,6 +325,7 @@ export function VrccPage() {
                                 mutuals={mutuals}
                                 mutualsError={mutualsError}
                                 onOpenUser={openUser}
+                                onOpenGroup={openGroup}
                             />
                         </TabsContent>
 
