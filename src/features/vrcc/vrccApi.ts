@@ -17,19 +17,82 @@ export type VrccErrorKind =
     | 'transport'
     | 'other';
 
+/**
+ * 失败发生在哪一层。
+ *
+ * 这是「是网络问题还是业务问题」这个问题的答案，一个字段就够了：
+ * - `input`：我们自己构造请求出了错，**不该显示给玩家**
+ * - `client`：被本机限流拦下，请求没发出去（服务可能是好的）
+ * - `transport`：请求发了但没拿到响应（DNS / 建连 / 超时 / 响应中断）
+ * - `server`：拿到了响应，服务器拒绝
+ * - `session`：令牌缺失或失效
+ */
+export type VrccErrorLayer =
+    | 'input'
+    | 'client'
+    | 'transport'
+    | 'server'
+    | 'session';
+
+/**
+ * 传输层卡在哪一步。
+ *
+ * 判据来自 reqwest 的类型判断，不是对错误文案做字符串匹配。
+ *
+ * **`dns` 有盲区**：走 SOCKS5 代理时代理串是 `socks5h://`，域名由代理那边
+ * 解析，本机根本不做 DNS 查询。那种情况下解析失败会表现为 `connect`。
+ * 所以看到 `connect` 不能断言「不是 DNS 问题」。
+ *
+ * 另外 RST、端口拒绝、运营商封锁在系统层面表现一致，都是建连失败，
+ * 这里无法进一步区分。
+ */
+export type VrccTransportKind =
+    | 'dns'
+    | 'connect'
+    | 'timeout'
+    | 'body'
+    | 'other';
+
 export class VrccError extends Error {
     readonly kind: VrccErrorKind;
+    readonly layer: VrccErrorLayer;
     readonly scope: string | null;
+    /** 传输层卡在哪一步；不是传输层错误时为 `null`。 */
+    readonly transportKind: VrccTransportKind | null;
+    /**
+     * 发起这次调用的接口标识（`device_code` / `today` …）。
+     *
+     * 同一个错误码在不同接口下含义可能不同。典型例子：`429 too_many` 在
+     * `device_code` 上是「按网络出口 IP 算的每天 30 个，换网络可立刻再用」，
+     * 在别的接口上才是「你自己的次数用完了」。
+     */
+    readonly op: string | null;
 
     constructor(
         message: string,
         kind: VrccErrorKind,
-        scope: string | null = null
+        scope: string | null = null,
+        layer: VrccErrorLayer = 'server',
+        transportKind: VrccTransportKind | null = null,
+        op: string | null = null
     ) {
         super(message);
         this.name = 'VrccError';
         this.kind = kind;
+        this.layer = layer;
         this.scope = scope;
+        this.transportKind = transportKind;
+        this.op = op;
+    }
+
+    /** 我们自己的 bug：界面不该把它当成玩家可处理的问题展示。 */
+    get isOurBug(): boolean {
+        return this.layer === 'input';
+    }
+
+    /** 是不是网络层的问题。 */
+    get isNetwork(): boolean {
+        return this.layer === 'transport';
     }
 }
 
@@ -47,14 +110,21 @@ async function normalizeError(error: unknown): Promise<VrccError> {
     return new VrccError(
         message,
         normalizeKind(detail?.kind),
-        detail?.need ?? null
+        detail?.need ?? null,
+        normalizeLayer(detail?.layer),
+        normalizeTransportKind(detail?.transportKind),
+        detail?.op ?? null
     );
 }
 
 /** 后端给出的结构化细节；老后端或非 vrcc 错误时没有这一项。 */
-function readVrccDetail(
-    error: unknown
-): { kind?: string; need?: string | null } | null {
+function readVrccDetail(error: unknown): {
+    kind?: string;
+    layer?: string;
+    need?: string | null;
+    transportKind?: string | null;
+    op?: string | null;
+} | null {
     if (!error || typeof error !== 'object') {
         return null;
     }
@@ -62,7 +132,13 @@ function readVrccDetail(
     if (!detail || typeof detail !== 'object') {
         return null;
     }
-    return detail as { kind?: string; need?: string | null };
+    return detail as {
+        kind?: string;
+        layer?: string;
+        need?: string | null;
+        transportKind?: string | null;
+        op?: string | null;
+    };
 }
 
 /** 只接受已知的六个类别，别的一律当 `other`，免得后端加了新类别前端崩。 */
@@ -76,6 +152,38 @@ function normalizeKind(kind: string | undefined): VrccErrorKind {
             return kind;
         default:
             return 'other';
+    }
+}
+
+/** 只接受已知的五个层级；老后端没有这个字段时回落到 `server`。 */
+function normalizeLayer(layer: string | undefined): VrccErrorLayer {
+    switch (layer) {
+        case 'input':
+        case 'client':
+        case 'transport':
+        case 'server':
+        case 'session':
+            return layer;
+        default:
+            // 老后端不带 `layer`。那些版本里能出错的几乎都是服务器拒绝，
+            // 归 `server` 比归 `transport` 更保守——不会把它们误报成网络故障。
+            return 'server';
+    }
+}
+
+/** 只接受已知的五种传输环节。 */
+function normalizeTransportKind(
+    kind: string | null | undefined
+): VrccTransportKind | null {
+    switch (kind) {
+        case 'dns':
+        case 'connect':
+        case 'timeout':
+        case 'body':
+        case 'other':
+            return kind;
+        default:
+            return null;
     }
 }
 

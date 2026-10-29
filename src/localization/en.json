@@ -868,7 +868,13 @@
             "expired": "The previous connection is no longer valid: it was disconnected on vrcc.cc, authorized again elsewhere, or unused for 90 days. Please connect again."
         },
         "error": {
-            "unknown": "The action failed. Please try again."
+            "unknown": "The action failed. Please try again.",
+            "network": {
+                "connect": "Cannot reach vrcc.cc — the connection may be blocked. If you use a proxy, check that it works.",
+                "dns": "Cannot resolve vrcc.cc. Check your network or try a different DNS.",
+                "timeout": "Connecting to vrcc.cc timed out. Please try again later.",
+                "generic": "The connection to vrcc.cc was interrupted. Please try again later."
+            }
         },
         "mutuals": {
             "need_connect": "Connect to Xingyu Tongpin to see who you are mutually linked with",

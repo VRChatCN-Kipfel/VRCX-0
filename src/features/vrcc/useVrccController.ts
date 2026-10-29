@@ -55,6 +55,46 @@ const BOARD_REUSE_MS = 60_000;
  */
 const DEVICE_AUTH_COOLDOWN_SECS = 5;
 
+/**
+ * 把结构化错误翻译成一句玩家看得懂的话。
+ *
+ * **为什么不直接用 `error.message`**：那是后端给的原文，传输层失败时里面是
+ * `error sending request for url (…)` 这种英文技术串，玩家既看不懂，也判断
+ * 不了该查网络还是该重试。
+ *
+ * 现在按 `layer` + `transportKind` 出文案：
+ * - `input`：我们自己的 bug，只说「操作失败」，细节留给日志
+ * - `transport`：告诉玩家卡在哪一步（DNS / 连不上 / 超时 / 代理）
+ * - `session` / `server`：沿用后端的描述，那些本来就是给人看的
+ *
+ * **不假装能分辨「被封」**：RST、端口拒绝、运营商拦截在系统层面一模一样，
+ * 都是建连失败。文案写「可能被拦截」，不写「已被拦截」。
+ */
+export function describeVrccError(error: VrccError): string {
+    if (error.layer === 'input') {
+        // 不该发生。真发生了说明我们构造请求出了错，玩家帮不上忙。
+        return i18n.t('vrcc.error.unknown');
+    }
+
+    if (error.layer === 'transport') {
+        const kind = error.transportKind;
+        if (kind === 'timeout') {
+            return i18n.t('vrcc.error.network.timeout');
+        }
+        // DNS 与建连对玩家的意义不同：前者换 DNS/换网络可能好，后者多半要开代理。
+        // 注意走 SOCKS5 代理时 DNS 由代理解析，这里只会看到 `connect`。
+        if (kind === 'connect') {
+            return i18n.t('vrcc.error.network.connect');
+        }
+        if (kind === 'dns') {
+            return i18n.t('vrcc.error.network.dns');
+        }
+        return i18n.t('vrcc.error.network.generic');
+    }
+
+    return error.message || i18n.t('vrcc.error.unknown');
+}
+
 export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'me';
 
 /** 「提醒」页签里看哪一个：最近的提醒，还是通知中心。 */
@@ -195,7 +235,7 @@ export function useVrccController() {
                       );
             toast.add({
                 type: 'error',
-                title: normalized.message || i18n.t('vrcc.error.unknown')
+                title: describeVrccError(normalized)
             });
             patch({ error: normalized });
             if (normalized.kind === 'needsReauth') {
