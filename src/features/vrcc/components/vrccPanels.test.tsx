@@ -214,6 +214,42 @@ describe('VrccMutualsPanel', () => {
         expect(names[2]).toContain('third');
     });
 
+    it('同状态之间保持服务端顺序，即使是十几条的大列表', () => {
+        // 三个元素时怎么排都像对的——V8 对短数组用插入排序，天然稳定，
+        // 上面那条用例因此证不了什么。这里用 13 条、交错两种状态，让
+        // 「同状态被重新排序」有机会真的暴露出来。
+        const stars = Array.from({ length: 13 }, (_, index) => ({
+            n: index + 1,
+            name: `star-${index + 1}`,
+            vrcUser: `usr_${index + 1}`
+        }));
+        // 下标 0/3/6/9/12 在线，其余离线，交错排列。
+        for (const index of [0, 3, 6, 9, 12]) {
+            presenceState.online.add(`usr_${index + 1}`);
+        }
+
+        const { container } = render(
+            <VrccMutualsPanel
+                connected
+                mutuals={{ stars } as never}
+                onOpenUser={() => {}}
+                onOpenGroup={() => {}}
+            />
+        );
+        const names = Array.from(container.querySelectorAll('li')).map(
+            (row) => row.textContent ?? ''
+        );
+
+        // 期望：先把在线的按原顺序排出来，再是离线的按原顺序。
+        const onlineNames = [1, 4, 7, 10, 13].map((n) => `star-${n}`);
+        const offlineNames = [2, 3, 5, 6, 8, 9, 11, 12].map((n) => `star-${n}`);
+        const expected = [...onlineNames, ...offlineNames];
+
+        expected.forEach((name, position) => {
+            expect(names[position]).toContain(name);
+        });
+    });
+
     it('好友表没就绪时不显示三态标签', () => {
         presenceState.ready = false;
         const { container } = render(
