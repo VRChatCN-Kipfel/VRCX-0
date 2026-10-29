@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import type { NotificationRow as NotificationRecord } from '@/repositories/notificationPersistenceRepository';
 import { convertFileUrlToImageUrl } from '@/services/entityMediaService';
 import { getDismissResponse } from '@/shared/utils/notificationResponse';
+import { isVrccNotificationLink } from '@/shared/utils/vrccNotification';
 import { Button } from '@/ui/shadcn/button';
 import {
     DropdownMenu,
@@ -126,7 +127,10 @@ export function NotificationRow({
             />
         </span>
     ) : null;
-    const linkButton = view.link?.text ? (
+    const linkButtonText = isVrccNotificationLink(view.link?.href)
+        ? t('view.notification.actions.open_vrcc')
+        : view.link?.text;
+    const linkButton = linkButtonText ? (
         <Button
             type="button"
             variant="link"
@@ -135,7 +139,7 @@ export function NotificationRow({
             onClick={() => handlers.onOpenLink(view.link?.href)}
         >
             <LinkIcon data-icon="inline-start" />
-            <span className="truncate">{view.link.text}</span>
+            <span className="truncate">{linkButtonText}</span>
         </Button>
     ) : null;
     const hasHeadline = Boolean(view.headline);

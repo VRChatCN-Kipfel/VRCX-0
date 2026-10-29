@@ -4,8 +4,9 @@ use serde_json::json;
 
 use super::{
     notification_add_v1, notification_add_v2, notification_friend_requests_sync,
-    notification_has_unseen_action_required, notification_list_query, notification_mark_seen,
-    NotificationListItemOutput, NotificationListQueryInput,
+    notification_has_unseen_action_required, notification_has_unseen_action_required_excluding,
+    notification_list_query, notification_mark_seen, NotificationListItemOutput,
+    NotificationListQueryInput,
 };
 use crate::{DatabaseService, Error};
 
@@ -338,5 +339,79 @@ fn unseen_indicator_matches_frontend_action_required_rules() -> Result<(), Error
         "2000-01-01T00:00:00Z",
     )?;
     assert!(!notification_has_unseen_action_required(&db, user_id)?);
+    Ok(())
+}
+
+/// 站外提醒（id 以 `vrcc_` 开头）不该点亮托盘。
+///
+/// 托盘红点的语义是「有件事在等你处理」。星遇同频的提醒是「有人连向了你」
+/// 这类读一眼就好的信息，挂上去会让图标常亮成一盏状态灯；而 v2 表此前对
+/// type 完全不设过滤，任何未读行都会命中。
+#[test]
+fn out_of_app_notices_do_not_light_the_unseen_indicator() -> Result<(), Error> {
+    let (_dir, db) = test_db("unseen-indicator-vrcc")?;
+    let user_id = "usr_owner";
+
+    add_v2(&db, user_id, "vrcc_42", "2026-09-01T00:00:02Z", false, "")?;
+    // 站外提醒是未读、且永不过期，但仍然不算「需要处理」。
+    assert!(!notification_has_unseen_action_required(&db, user_id)?);
+
+    // 真正的待办出现时照样要亮。
+    add_v2(
+        &db,
+        user_id,
+        "unseen_v2",
+        "2026-09-01T00:00:03Z",
+        false,
+        "2099-01-01T00:00:00Z",
+    )?;
+    assert!(notification_has_unseen_action_required(&db, user_id)?);
+
+    // 标掉待办之后，只剩站外提醒，红点要灭。
+    notification_mark_seen(&db, user_id.into(), "unseen_v2".into(), 2)?;
+    assert!(!notification_has_unseen_action_required(&db, user_id)?);
+    Ok(())
+}
+
+/// 排除前缀由调用方给，空串必须被丢弃。
+///
+/// `NOT LIKE '%'` 会匹配所有行，等于把托盘永久关死——这是最坏的失败方向：
+/// 玩家再也看不到任何好友请求的红点，而且不会报错。
+#[test]
+fn a_blank_excluded_prefix_does_not_disable_the_indicator() -> Result<(), Error> {
+    let (_dir, db) = test_db("unseen-indicator-blank-prefix")?;
+    let user_id = "usr_owner";
+
+    add_v2(
+        &db,
+        user_id,
+        "unseen_v2",
+        "2026-09-01T00:00:02Z",
+        false,
+        "2099-01-01T00:00:00Z",
+    )?;
+
+    assert!(notification_has_unseen_action_required_excluding(
+        &db,
+        user_id,
+        &[""]
+    )?);
+
+    // 多个前缀并列时每个各占一个绑定参数，互不吞并。
+    add_v2(&db, user_id, "vrcc_7", "2026-09-01T00:00:03Z", false, "")?;
+    add_v2(&db, user_id, "other_9", "2026-09-01T00:00:04Z", false, "")?;
+    assert!(notification_has_unseen_action_required_excluding(
+        &db,
+        user_id,
+        &["vrcc_", "other_"]
+    )?);
+
+    // 只剩被排除的两类时，红点应当灭掉。
+    notification_mark_seen(&db, user_id.into(), "unseen_v2".into(), 2)?;
+    assert!(!notification_has_unseen_action_required_excluding(
+        &db,
+        user_id,
+        &["vrcc_", "other_"]
+    )?);
     Ok(())
 }

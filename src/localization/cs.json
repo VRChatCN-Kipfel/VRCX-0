@@ -1993,7 +1993,8 @@
                 "decline": "Odmítnout",
                 "delete_log": "Smazat upozornění",
                 "decline_with_message": "Odmítnout se zprávou",
-                "ignore_locally": "Ignorovat lokálně"
+                "ignore_locally": "Ignorovat lokálně",
+                "open_vrcc": "Open Xingyu Tongpin"
             },
             "filters": {
                 "requestInvite": "Žádost o pozvánku",
@@ -2062,6 +2063,9 @@
                 "votetokick": "Hlasování o vyhození",
                 "twitchdrop": {
                     "fulfilled": "Twitch Drop přijat"
+                },
+                "vrcc": {
+                    "notice": "Notice"
                 }
             },
             "description": {

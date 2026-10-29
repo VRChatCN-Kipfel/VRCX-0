@@ -11,6 +11,7 @@ import i18n from '@/services/i18nService';
 import { openExternalLink } from '@/services/shellIntegrationService';
 import { toast } from '@/services/toastService';
 import { useRuntimeStore } from '@/state/runtimeStore';
+import { useVrcNotificationStore } from '@/state/vrcNotificationStore';
 
 import {
     vrccApi,
@@ -316,6 +317,19 @@ export function useVrccController() {
         async (mark = false) => {
             const recent = await vrccApi.recentNotifications(mark);
             patch({ recent });
+            if (mark) {
+                // 后端借这次调用把通知中心里那几行按服务端游标标成了已读。
+                // 通知中心是另一条查询、另一份内存快照，不重读就还挂着红点。
+                useVrcNotificationStore
+                    .getState()
+                    .loadForCurrentUser()
+                    .catch((error: unknown) => {
+                        console.warn(
+                            '[vrcc] notification centre reload failed:',
+                            error
+                        );
+                    });
+            }
         },
         [patch]
     );

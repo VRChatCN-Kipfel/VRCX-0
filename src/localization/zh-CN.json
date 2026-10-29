@@ -1976,7 +1976,8 @@
                 "decline": "拒绝",
                 "delete_log": "删除通知",
                 "decline_with_message": "拒绝并回复",
-                "ignore_locally": "仅本地忽略"
+                "ignore_locally": "仅本地忽略",
+                "open_vrcc": "打开星遇同频"
             },
             "filters": {
                 "requestInvite": "申请加入",
@@ -2045,6 +2046,9 @@
                 "votetokick": "投票踢出",
                 "twitchdrop": {
                     "fulfilled": "Twitch Drop 已发放"
+                },
+                "vrcc": {
+                    "notice": "提醒"
                 }
             },
             "description": {

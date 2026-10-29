@@ -17,10 +17,15 @@ import {
     openExternalLink
 } from '@/services/entityMediaService';
 import { toast } from '@/services/toastService';
+import { openVrccNotificationCenter } from '@/services/vrccNotificationService';
 import { hasGroupIdPrefix } from '@/shared/constants/vrchatIds';
 import { parseLocation } from '@/shared/utils/location';
 import { getNotificationTs } from '@/shared/utils/notificationCategory';
 import { isRecord } from '@/shared/utils/record';
+import {
+    isVrccNotification,
+    isVrccNotificationLink
+} from '@/shared/utils/vrccNotification';
 
 type CachedInstanceLike = Record<string, unknown> & {
     closedAt?: string | null;
@@ -128,6 +133,9 @@ export function canDeclineNotification(
         type !== 'message' &&
         type !== 'boop' &&
         type !== 'groupChange' &&
+        // 站外提醒的「拒绝」没有对口的外部接口：VRChat 不认识这个 id，
+        // 点下去只会换来一个必然失败的网络请求。
+        !isVrccNotification(notification) &&
         !type.includes('group.') &&
         !type.includes('moderation.') &&
         !type.includes('instance.') &&
@@ -194,6 +202,10 @@ function openNotificationLink(link: unknown) {
     const value = String(link || '').trim();
     if (!value) {
         return false;
+    }
+    if (isVrccNotificationLink(value)) {
+        openVrccNotificationCenter();
+        return true;
     }
     if (value.startsWith('user:')) {
         const userId = value.slice('user:'.length);

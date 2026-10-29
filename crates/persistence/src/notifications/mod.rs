@@ -4,7 +4,8 @@ mod types;
 mod write;
 
 pub use query::{
-    notification_has_unseen_action_required, notification_list_query, notification_rows_query,
+    notification_has_unseen_action_required, notification_has_unseen_action_required_excluding,
+    notification_list_query, notification_rows_query, UNSEEN_ACTION_EXCLUDED_ID_PREFIXES,
 };
 pub use types::{
     NotificationListItemOutput, NotificationListQueryInput, NotificationRowsOutput,
@@ -13,7 +14,8 @@ pub use types::{
 pub use write::{
     notification_add_v1, notification_add_v2, notification_delete, notification_expire,
     notification_friend_requests_sync, notification_mark_seen, notification_mark_seen_local_bulk,
-    notification_update_expired, notification_v2_expire, notification_v2_mark_seen,
+    notification_mark_seen_up_to, notification_update_expired, notification_v2_expire,
+    notification_v2_mark_seen,
 };
 
 #[cfg(test)]
