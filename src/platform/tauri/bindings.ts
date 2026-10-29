@@ -344,6 +344,15 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_boards', { limit, sort });
     },
     /**
+     * 按世界 ID 批量查地图。不需要连接。
+     *
+     * 一次最多 20 张，**只返回在榜上的**——结果条数可能少于传入的数量，前端要
+     * 按 `world` 去配，不能按下标对应。
+     */
+    async appVrccMaps(worlds: string[]): Promise<VrccBoard> {
+        return await TAURI_INVOKE('app__vrcc_maps', { worlds });
+    },
+    /**
      * 服务探活。用来在页面上显示「星遇同频现在可用吗」。
      */
     async appVrccStatus(): Promise<VrccStatus> {

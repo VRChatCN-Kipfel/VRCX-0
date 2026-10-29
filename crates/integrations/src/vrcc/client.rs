@@ -53,6 +53,9 @@ pub use vrcx_0_contracts::vrcc::VrccError;
 /// 官方限制 POST 正文最大 2 KB。
 const MAX_BODY_BYTES: usize = vrcx_0_contracts::vrcc::VRCC_MAX_BODY_BYTES;
 
+/// `GET /maps?ids=` 一次最多查几张。超过官方就回 `400 bad_request`。
+const MAX_BATCH_WORLDS: usize = 20;
+
 /// `/device/code` 的本地限流键。
 ///
 /// 单独拎成常量是因为 `429` 的文案要按它分流：这个额度的维度是**网络出口
@@ -789,6 +792,33 @@ impl VrccClient {
         .await
     }
 
+    /// 按世界 ID 批量查地图（`GET /maps?ids=`）。
+    ///
+    /// 官方上限 20 张，**只返回在榜上的那些**——所以返回的条数可能少于传入
+    /// 的数量，调用方不能按下标一一对应，要按 `world` 去配。这里在发请求前
+    /// 就先截到 20，免得服务器回 `400`。
+    ///
+    /// 空列表直接发一个空请求没有意义，也会白白占一次读取，所以本地短路。
+    pub async fn maps(&self, worlds: &[String]) -> Result<VrccBoard, VrccError> {
+        let Some(path) = batch_maps_path(worlds) else {
+            // 空列表没什么可问的，也不该白占一次读取。
+            return Ok(VrccBoard::default());
+        };
+        self.request(Call {
+            method: "GET",
+            path: &path,
+            body: None,
+            authed: false,
+            // 和单张查询共用一个间隔：两处问的都是同一份地图数据，
+            // 分开计时只会让连点两次时多打一次网络。
+            key: "map",
+            min_gap: Duration::from_secs(30),
+            bucket: None,
+            bypass_gate: false,
+        })
+        .await
+    }
+
     /// 公告和停站（1.12.0 起）。不用令牌，停站时也能问，服务器缓存 1 分钟。
     ///
     /// 旧服务器没有这个接口，回答 `404 not_found`。
@@ -1023,6 +1053,24 @@ fn boards_path(limit: u32, sort: VrccBoardSort) -> String {
         VrccBoardSort::Top => format!("boards/maps?limit={limit}"),
         other => format!("boards/maps?limit={limit}&sort={}", other.as_query()),
     }
+}
+
+/// 批量查地图的路径；一条有效 ID 都没有时返回 `None`，让调用方短路。
+///
+/// 官方一次最多 20 张，超了直接 `400 bad_request`，所以在本地先截断。
+/// 空串和重复项也在这里去掉：调用方传来的列表来自别处，不能指望它干净。
+fn batch_maps_path(worlds: &[String]) -> Option<String> {
+    let mut seen = std::collections::HashSet::new();
+    let ids: Vec<&str> = worlds
+        .iter()
+        .map(|world| world.trim())
+        .filter(|world| !world.is_empty() && seen.insert(*world))
+        .take(MAX_BATCH_WORLDS)
+        .collect();
+    if ids.is_empty() {
+        return None;
+    }
+    Some(format!("maps?ids={}", ids.join(",")))
 }
 
 /// 「最近的提醒」的路径。
@@ -1779,6 +1827,40 @@ mod tests {
             boards_path(5, VrccBoardSort::New),
             "boards/maps?limit=5&sort=new"
         );
+    }
+
+    /// 批量查地图的路径。
+    ///
+    /// 三件事必须同时成立：去掉空串、去重、截到 20 —— 官方超过 20 个直接回
+    /// `400 bad_request`，而调用方传进来的列表来自别处，不能指望它已经干净。
+    #[test]
+    fn batch_map_paths_dedupe_and_stop_at_twenty() {
+        let one = vec!["wrld_a".to_string()];
+        assert_eq!(batch_maps_path(&one), Some("maps?ids=wrld_a".to_string()));
+
+        // 空白与重复都不该进查询串。
+        let noisy = vec![
+            "wrld_a".to_string(),
+            "  wrld_a ".to_string(),
+            String::new(),
+            "   ".to_string(),
+            "wrld_b".to_string(),
+        ];
+        assert_eq!(
+            batch_maps_path(&noisy),
+            Some("maps?ids=wrld_a,wrld_b".to_string())
+        );
+
+        // 一条都没有时返回 None，让调用方短路，不发空请求。
+        assert_eq!(batch_maps_path(&[]), None);
+        assert_eq!(batch_maps_path(&[String::new()]), None);
+
+        // 25 个只发前 20 个。
+        let many: Vec<String> = (0..25).map(|index| format!("wrld_{index}")).collect();
+        let path = batch_maps_path(&many).expect("should build a path");
+        assert_eq!(path.matches(',').count(), MAX_BATCH_WORLDS - 1);
+        assert!(path.contains("wrld_19"));
+        assert!(!path.contains("wrld_20"));
     }
 
     /// 北京时间零点换算。

@@ -163,6 +163,9 @@ impl VrccRemote for FakeRemote {
     fn boards<'a>(&'a self, _limit: u32, _sort: VrccBoardSort) -> VrccFuture<'a, VrccBoard> {
         Box::pin(async move { Err(transport("fake")) })
     }
+    fn maps<'a>(&'a self, _worlds: &'a [String]) -> VrccFuture<'a, VrccBoard> {
+        Box::pin(async move { Err(transport("fake")) })
+    }
     fn status<'a>(&'a self) -> VrccFuture<'a, VrccStatus> {
         Box::pin(async move { Err(transport("fake")) })
     }

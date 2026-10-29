@@ -48,6 +48,10 @@ impl VrccRemote for VrccRemoteAdapter {
         Box::pin(async move { self.client().boards(limit, sort).await })
     }
 
+    fn maps<'a>(&'a self, worlds: &'a [String]) -> VrccFuture<'a, VrccBoard> {
+        Box::pin(async move { self.client().maps(worlds).await })
+    }
+
     fn status<'a>(&'a self) -> VrccFuture<'a, VrccStatus> {
         Box::pin(async move { self.client().status().await })
     }

@@ -112,6 +112,24 @@ pub async fn app__vrcc_boards(
         .map_err(|failure| AppError::Vrcc { failure })
 }
 
+/// 按世界 ID 批量查地图。不需要连接。
+///
+/// 一次最多 20 张，**只返回在榜上的**——结果条数可能少于传入的数量，前端要
+/// 按 `world` 去配，不能按下标对应。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_maps(
+    state: State<'_, AppState>,
+    worlds: Vec<String>,
+) -> Result<VrccBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .maps(&worlds)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
 /// 公告和停站。不需要连接。服务器还没有这个接口时返回 `null`。
 #[tauri::command]
 #[specta::specta]

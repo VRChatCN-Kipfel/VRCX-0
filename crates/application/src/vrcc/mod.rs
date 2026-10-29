@@ -84,6 +84,7 @@ pub struct VrccLocalUsage {
 pub trait VrccRemote: Send + Sync {
     // -- 开放数据（不需要连接） -------------------------------------------
     fn boards<'a>(&'a self, limit: u32, sort: VrccBoardSort) -> VrccFuture<'a, VrccBoard>;
+    fn maps<'a>(&'a self, worlds: &'a [String]) -> VrccFuture<'a, VrccBoard>;
     fn status<'a>(&'a self) -> VrccFuture<'a, VrccStatus>;
     fn fetch_site_asset<'a>(&'a self, path: &'a str) -> VrccFuture<'a, Vec<u8>>;
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements>;
@@ -599,6 +600,18 @@ impl VrccService {
     /// 服务状态。
     pub async fn status(&self) -> std::result::Result<VrccStatus, VrccError> {
         self.remote.status().await
+    }
+
+    /// 批量查地图（`GET /maps?ids=`）。
+    ///
+    /// 只返回**在榜上**的那些，所以结果条数可能少于传入的数量；调用方要按
+    /// `world` 去配，不能按下标对应。
+    ///
+    /// 这里不接「本地限流就把旧结果还给他」那套：批量查询是调用方自己
+    /// 攒出来的一次性请求，没有可回退的缓存，而拿别的批次的答案冒充这一批
+    /// 会直接给出错的地图数据——那比报一句「太频繁」危险得多。
+    pub async fn maps(&self, worlds: &[String]) -> std::result::Result<VrccBoard, VrccError> {
+        self.remote.maps(worlds).await
     }
 
     /// 取站点上的静态资源（通知图标之类）。

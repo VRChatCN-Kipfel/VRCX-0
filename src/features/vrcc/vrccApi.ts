@@ -230,6 +230,14 @@ export const vrccApi = {
     boards: (limit = 20, sort: VrccBoardSort = 'top') =>
         call(() => commands.appVrccBoards(limit, sort)),
 
+    /**
+     * 按世界 ID 批量查地图（`GET /maps?ids=`）。不需要连接。
+     *
+     * 一次最多 20 张，**只返回在榜上的**——结果条数可能少于传入的数量，
+     * 用 `world` 去配，不要按下标对应。
+     */
+    maps: (worlds: string[]) => call(() => commands.appVrccMaps(worlds)),
+
     status: () => call(() => commands.appVrccStatus()),
 
     /** 公告和停站。不需要连接。服务器还没有这个接口时为 null。 */

@@ -128,6 +128,14 @@ impl DesktopVrccRuntime {
             .map_err(|error| VrccFailure::from_error(&error))
     }
 
+    /// 批量查地图：开放数据，不需要连接。只返回在榜上的。
+    pub async fn maps(&self, worlds: &[String]) -> Result<VrccBoard, VrccFailure> {
+        self.service
+            .maps(worlds)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
     pub async fn status(&self) -> Result<VrccStatus, VrccFailure> {
         self.service
             .status()
