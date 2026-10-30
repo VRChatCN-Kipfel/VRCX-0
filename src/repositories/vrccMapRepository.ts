@@ -124,6 +124,125 @@ export async function voteVrccMapContent(
 }
 
 /**
+ * 榜单封面的「便宜路」：批量读本地世界缓存，**零网络**。
+ *
+ * `appWorldSummariesGet` 背后是 `world_summaries_get`，直接查 SQLite 的
+ * `cache_world`，不发任何请求。命中的行可以直接用 VRChat 自己的原图，
+ * 比星遇那种小缩略图清楚得多。
+ *
+ * 未命中的 id 不会出现在返回的 map 里——这是**预期**，调用方据此回退到
+ * 星遇的图，同时触发 [`prefetchVrccWorldCovers`] 去补。
+ */
+export async function readVrccWorldCovers(
+    worldIds: string[]
+): Promise<Record<string, string>> {
+    if (!worldIds.length) {
+        return {};
+    }
+    try {
+        const summaries = await commands.appWorldSummariesGet(worldIds);
+        const covers: Record<string, string> = {};
+        for (const [id, summary] of Object.entries(summaries)) {
+            if (!summary) {
+                continue;
+            }
+            // `imageUrl` 是完整原图，`thumbnailImageUrl` 是更小的缩略图。
+            // 榜单一行只有 32px，用缩略图就够；两者都没有就不记这一项。
+            const url = summary.thumbnailImageUrl || summary.imageUrl;
+            if (url) {
+                covers[id] = url;
+            }
+        }
+        return covers;
+    } catch {
+        // 读缓存失败不该让榜单显示不出来——退回全部用星遇的图。
+        return {};
+    }
+}
+
+/**
+ * 榜单封面的「贵的路」：从 VRChat 拉世界记录，让下次能用原图。
+ *
+ * ## 为什么要有这一条
+ *
+ * 星遇返回的 `img` 是**很小**的缩略图，够看清但不够好；而 VRChat 自己的
+ * 原图清楚得多。问题是要拿到它得先有世界记录，VRChat 又**没有批量接口**，
+ * 一次只能问一个。
+ *
+ * 所以策略是：**这一页先用星遇的小图顶上，后台慢慢把 VRChat 记录补进本地
+ * 缓存**。看得越多，下次命中率越高，最终整页都能显示原图，而星遇那层始终
+ * 是「不空窗」的保证。
+ *
+ * ## 并发 2–3 而不是一把梭
+ *
+ * 20 行就是 20 个请求，榜单还有 top/week/new 三种排序，切一轮可能几十个
+ * 不同的世界。全并发会撞上 VRChat 的接口限流，**而限流影响的是整个客户端**，
+ * 不只是这个榜单。所以限制并发、失败就跳过（下次再来）。
+ *
+ * ## 不缓存图片字节
+ *
+ * 这里缓存的是**世界记录**（含图片地址），不是图片本身。所以「用 VRChat
+ * 原图」仍然是一次从 VRChat CDN 的图片请求，省掉的是查记录那一步。
+ *
+ * 星遇的图同样不需要我们缓存：它带 `Cache-Control: max-age=14400`，
+ * 浏览器和 Cloudflare 都会兜住。
+ *
+ * @returns 成功写入缓存的数量，仅供调试/测试观察
+ */
+export async function prefetchVrccWorldCovers(
+    worldIds: string[],
+    options: {
+        /** 已缓存、无需再拉的世界；调用方从 [`readVrccWorldCovers`] 得到。 */
+        known?: Readonly<Record<string, string>>;
+        /** 并发上限，默认 3。 */
+        concurrency?: number;
+        /** 外部取消信号：切排序或关页面时用来及时收手。 */
+        signal?: AbortSignal;
+    } = {}
+): Promise<number> {
+    const known = options.known ?? {};
+    const concurrency = Math.max(1, options.concurrency ?? 3);
+    const pending = [...new Set(worldIds)].filter(
+        (id) => id.startsWith('wrld_') && !known[id]
+    );
+    if (!pending.length) {
+        return 0;
+    }
+
+    let cursor = 0;
+    let stored = 0;
+    let aborted = false;
+
+    async function worker() {
+        while (!aborted && cursor < pending.length) {
+            if (options.signal?.aborted) {
+                aborted = true;
+                return;
+            }
+            const id = pending[cursor++];
+            if (!id) {
+                return;
+            }
+            try {
+                // `appWorldGet` 会顺带写进 `cache_world`，下一次
+                // `readVrccWorldCovers` 就能读到。
+                await commands.appWorldGet({ worldId: id, force: false });
+                stored += 1;
+            } catch {
+                // 单个失败就跳过：世界可能已删除、可能限流。下一轮再来。
+            }
+        }
+    }
+
+    await Promise.all(
+        Array.from({ length: Math.min(concurrency, pending.length) }, () =>
+            worker()
+        )
+    );
+    return stored;
+}
+
+/**
  * 当前令牌有没有某项权限。
  *
  * ## 为什么要问后端

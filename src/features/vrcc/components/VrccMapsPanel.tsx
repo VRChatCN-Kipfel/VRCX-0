@@ -1,5 +1,5 @@
 import { ExternalLink, RefreshCw } from 'lucide-react';
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { openExternalLink } from '@/services/shellIntegrationService';
@@ -11,6 +11,8 @@ import {
     ToggleGroupSeparator
 } from '@/ui/shadcn/toggle-group';
 
+import { useVrccRowVisibility } from '../useVrccRowVisibility';
+import { useVrccWorldCovers } from '../useVrccWorldCovers';
 import type { VrccBoard, VrccBoardSort } from '../vrccApi';
 import { vrccCoverUrl } from '../vrccCover';
 import { VrccCover } from './VrccCover';
@@ -51,6 +53,17 @@ export function VrccMapsPanel({
     const { t } = useTranslation();
     const maps = boards?.maps ?? [];
     const min = boards?.min;
+
+    // 封面：VRChat 的记录（清楚）优先，没有就退到星遇的小图；
+    // 不可视的行连星遇的图也不挂，省下那次请求。
+    // 依赖 `boards` 而不是上面那个 `?? []` 出来的 `maps`：后者为空时每次
+    // 渲染都是新数组，会让 useMemo 形同虚设。
+    const worldIds = useMemo(
+        () => (boards?.maps ?? []).map((map) => map.world),
+        [boards]
+    );
+    const { visible, observe } = useVrccRowVisibility();
+    const covers = useVrccWorldCovers(worldIds, visible);
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -112,6 +125,11 @@ export function VrccMapsPanel({
                             return (
                                 <li
                                     key={map.world}
+                                    // 用整个 `<li>` 观察，而不是那个 32px 的图：
+                                    // 判断的是「这一行有没有露在视口里」。
+                                    ref={(element) =>
+                                        observe(element, map.world)
+                                    }
                                     className="hover:bg-muted/40 group flex items-center gap-3 px-3 py-2"
                                 >
                                     {/* 点整行打开 VRCX-0 自己的世界详情窗：这是
@@ -130,17 +148,23 @@ export function VrccMapsPanel({
                                         >
                                             {place ?? '—'}
                                         </span>
-                                        {/* 封面。`boards/maps` 至今只给 `img`
-                                        （相对路径），没有 `imgUrl`；两个字段
-                                        都交给 `vrccCoverUrl`，将来官方补上
-                                        `imgUrl` 时这里不用改。没有封面或加载
-                                        失败时组件返回 null，行退回纯文字，
-                                        不占位也不撑高。 */}
+                                        {/* 封面。两级来源：
+                                        1. VRChat 的世界图（清楚，来自本地缓存）；
+                                        2. 缓存没命中且**这一行可见**时，用星遇
+                                           的小图顶上，保证不空窗。
+                                        不可视的行两者都不挂——星遇那次请求省下来，
+                                        VRChat 的记录交给后台预载，滚下去时就有了。
+                                        加载失败时组件整体返回 null，行退回纯文字。 */}
                                         <VrccCover
-                                            src={vrccCoverUrl(
-                                                map.imgUrl,
-                                                map.img
-                                            )}
+                                            src={
+                                                covers[map.world] ??
+                                                (visible.has(map.world)
+                                                    ? vrccCoverUrl(
+                                                          map.imgUrl,
+                                                          map.img
+                                                      )
+                                                    : null)
+                                            }
                                             className="size-8 shrink-0 rounded object-cover"
                                         />
                                         <div className="min-w-0 flex-1">
