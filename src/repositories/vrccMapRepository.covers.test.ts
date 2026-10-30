@@ -64,7 +64,7 @@ describe('prefetchVrccWorldCovers', () => {
     it('跳过已缓存的、非 wrld_ 的和重复的', async () => {
         const stored = await prefetchVrccWorldCovers(
             ['wrld_a', 'wrld_a', 'wrld_b', 'not-a-world', ''],
-            { known: { wrld_a: 'thumb-a' } }
+            { known: { wrld_a: 'thumb-a' }, gapMs: 0 }
         );
 
         // 只剩 wrld_b 需要拉
@@ -82,11 +82,10 @@ describe('prefetchVrccWorldCovers', () => {
                 : Promise.resolve({})
         );
 
-        const stored = await prefetchVrccWorldCovers([
-            'wrld_bad',
-            'wrld_ok',
-            'wrld_ok2'
-        ]);
+        const stored = await prefetchVrccWorldCovers(
+            ['wrld_bad', 'wrld_ok', 'wrld_ok2'],
+            { gapMs: 0 }
+        );
 
         expect(stored).toBe(2);
         expect(appWorldGet).toHaveBeenCalledTimes(3);
@@ -105,7 +104,7 @@ describe('prefetchVrccWorldCovers', () => {
 
         await prefetchVrccWorldCovers(
             ['wrld_1', 'wrld_2', 'wrld_3', 'wrld_4', 'wrld_5', 'wrld_6'],
-            { concurrency: 2 }
+            { concurrency: 2, gapMs: 0 }
         );
 
         expect(peak).toBeLessThanOrEqual(2);
@@ -120,12 +119,51 @@ describe('prefetchVrccWorldCovers', () => {
 
         const stored = await prefetchVrccWorldCovers(
             ['wrld_1', 'wrld_2', 'wrld_3', 'wrld_4'],
-            { concurrency: 1, signal: controller.signal }
+            { concurrency: 1, gapMs: 0, signal: controller.signal }
         );
 
         // 第一个跑完之后发现已取消，剩下的不再发
         expect(stored).toBe(1);
         expect(appWorldGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('请求之间留间隔，不把一页的请求一次打出去', async () => {
+        const stamps: number[] = [];
+        appWorldGet.mockImplementation(async () => {
+            stamps.push(Date.now());
+            return {};
+        });
+
+        await prefetchVrccWorldCovers(['wrld_1', 'wrld_2', 'wrld_3'], {
+            concurrency: 1,
+            gapMs: 40
+        });
+
+        expect(stamps).toHaveLength(3);
+        for (let index = 1; index < stamps.length; index += 1) {
+            const gap =
+                (stamps[index] as number) - (stamps[index - 1] as number);
+            // 留一点调度误差，但绝不能是「同一瞬间一起打出去」
+            expect(gap).toBeGreaterThanOrEqual(30);
+        }
+    });
+
+    it('取消信号能打断等待，不用等满一个间隔', async () => {
+        const controller = new AbortController();
+        appWorldGet.mockImplementation(async () => {
+            // 第一个请求返回后立刻取消：下一个间隔应该马上结束，而不是干等 5 秒
+            setTimeout(() => controller.abort(), 0);
+            return {};
+        });
+
+        const started = Date.now();
+        await prefetchVrccWorldCovers(['wrld_1', 'wrld_2', 'wrld_3'], {
+            concurrency: 1,
+            gapMs: 5000,
+            signal: controller.signal
+        });
+
+        expect(Date.now() - started).toBeLessThan(2000);
     });
 });
 

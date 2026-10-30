@@ -202,6 +202,30 @@ export async function readVrccWorldCovers(
 }
 
 /**
+ * 可被取消信号打断的等待。
+ *
+ * 预载途中切排序或关页面时，`AbortController` 会立刻叫醒这里，不用等满一个间隔
+ * ——否则最多白等一个 500 毫秒才收手。
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (ms <= 0 || signal?.aborted) {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = () => {
+            if (timer !== undefined) {
+                clearTimeout(timer);
+            }
+            signal?.removeEventListener('abort', finish);
+            resolve();
+        };
+        timer = setTimeout(finish, ms);
+        signal?.addEventListener('abort', finish, { once: true });
+    });
+}
+
+/**
  * 榜单封面的「贵的路」：从 VRChat 拉世界记录，让下次能用原图。
  *
  * ## 为什么要有这一条
@@ -214,11 +238,15 @@ export async function readVrccWorldCovers(
  * 缓存**。看得越多，下次命中率越高，最终整页都能显示原图，而星遇那层始终
  * 是「不空窗」的保证。
  *
- * ## 并发 2–3 而不是一把梭
+ * ## 一次只跑一个，两次之间留间隔
  *
- * 20 行就是 20 个请求，榜单还有 top/week/new 三种排序，切一轮可能几十个
- * 不同的世界。全并发会撞上 VRChat 的接口限流，**而限流影响的是整个客户端**，
- * 不只是这个榜单。所以限制并发、失败就跳过（下次再来）。
+ * 20 行就是 20 个请求，榜单还有 top/week/new 三种排序，切一轮可能几十个不同的
+ * 世界。三个并发、中间不留空隙，等于一口气把几十个请求打给 VRChat——**它的限流
+ * 拖累的是整个客户端**，不只是这个榜单。所以默认单并发、两次之间隔 500 毫秒，
+ * 一页大约十秒补完，全程在后台，玩家看不到等待。
+ *
+ * 也考虑过「只补视口附近那几行」：那样列表尾部永远补不到，玩家滚到底还是小图，
+ * 下次打开又从整页的小图开始。放慢速度能让它最终收敛——慢，但会好。
  *
  * ## 不缓存图片字节
  *
@@ -235,14 +263,17 @@ export async function prefetchVrccWorldCovers(
     options: {
         /** 已缓存、无需再拉的世界；调用方从 [`readVrccWorldCovers`] 得到。 */
         known?: Readonly<Record<string, string>>;
-        /** 并发上限，默认 3。 */
+        /** 并发上限，默认 1。 */
         concurrency?: number;
+        /** 两次请求之间的间隔（毫秒），默认 500。 */
+        gapMs?: number;
         /** 外部取消信号：切排序或关页面时用来及时收手。 */
         signal?: AbortSignal;
     } = {}
 ): Promise<number> {
     const known = options.known ?? {};
-    const concurrency = Math.max(1, options.concurrency ?? 3);
+    const concurrency = Math.max(1, options.concurrency ?? 1);
+    const gapMs = Math.max(0, options.gapMs ?? 500);
     const pending = [...new Set(worldIds)].filter(
         (id) => id.startsWith('wrld_') && !known[id]
     );
@@ -272,6 +303,8 @@ export async function prefetchVrccWorldCovers(
             } catch {
                 // 单个失败就跳过：世界可能已删除、可能限流。下一轮再来。
             }
+            // 无论成败都停一下再问下一个：撞上 VRChat 的限流要整个客户端一起等。
+            await sleep(gapMs, options.signal);
         }
     }
 
