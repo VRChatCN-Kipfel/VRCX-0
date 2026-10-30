@@ -1,10 +1,19 @@
 import { cn } from '@/lib/utils';
 
-/** 星星的尺寸档位。`xs` 给榜单行，`sm` 给短评署名，`md` 给主评分区。 */
+/**
+ * 星星的尺寸档位。
+ *
+ * `xs` 给榜单行，`sm` 给短评署名，`md` 给地图页主评分区，`lg` 给概览卡。
+ *
+ * 概览卡原来和标题挤在同一行，只能塞 12px；标题独占一行之后读数有了整行
+ * 宽度，星星可以明显大于旁边的分数——星负责扫视，数字负责比较，星的绝对
+ * 尺寸不吃紧，只要别把标题压下去就行。
+ */
 const SIZE_CLASS = {
     xs: 'size-2.5',
     sm: 'size-3',
-    md: 'size-5'
+    md: 'size-5',
+    lg: 'size-6'
 } as const;
 
 export type VrccStarSize = keyof typeof SIZE_CLASS;

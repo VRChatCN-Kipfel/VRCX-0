@@ -1,69 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
+import { VrccStars } from '@/components/vrcc/VrccStars';
 import { vrccPublicMapQueryOptions } from '@/repositories/vrccMapRepository';
-
-/**
- * 五颗星。
- *
- * 颜色走 `text-primary`，也就是 `var(--primary)`——它在 `globals.css` 里由
- * `--vrcx-theme-primary` 一路派生下来，玩家换强调色、装社区主题时星星会跟着变。
- * **不写死任何色值**：官方站点那套金色是它们的视觉资产，我们不用。
- *
- * 分数是 1–10，按 `score / 2` 折成 0–5 星，不足一颗的按比例部分填充。
- */
-function StarRating({
-    score,
-    className
-}: {
-    score: number;
-    className?: string;
-}) {
-    const filled = Math.max(0, Math.min(5, score / 2));
-
-    return (
-        <span
-            className={cn('inline-flex items-center gap-px', className)}
-            role="img"
-            aria-label={score.toFixed(1)}
-        >
-            {[0, 1, 2, 3, 4].map((index) => {
-                // 每颗星占 1 分，超出的比例决定这颗星填多少
-                const ratio = Math.max(0, Math.min(1, filled - index));
-                return (
-                    <span
-                        key={index}
-                        className="relative inline-block size-3 leading-none"
-                    >
-                        <StarGlyph className="text-muted-foreground/35 absolute inset-0" />
-                        {ratio > 0 ? (
-                            <span
-                                className="absolute inset-0 overflow-hidden"
-                                style={{ width: `${ratio * 100}%` }}
-                            >
-                                <StarGlyph className="text-primary size-3" />
-                            </span>
-                        ) : null}
-                    </span>
-                );
-            })}
-        </span>
-    );
-}
-
-function StarGlyph({ className }: { className?: string }) {
-    return (
-        <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            className={cn('size-3', className)}
-            fill="currentColor"
-        >
-            <path d="M12 3.4l2.6 5.5 6 .8-4.4 4.2 1.1 6L12 17l-5.3 2.9 1.1-6-4.4-4.2 6-.8z" />
-        </svg>
-    );
-}
 
 /**
  * 世界详情左下角的「星遇同频评分」。
@@ -75,6 +14,22 @@ function StarGlyph({ className }: { className?: string }) {
  * - **不放名次**。名次会让作者之间产生攀比；这一块是给玩家看「这张图好不好」，
  *   不是排行榜入口。完整的名次在「星遇同频」标签页里。
  * - **不放任何人的名字或头像**。上榜作品与作者信息一概不出现。
+ *
+ * ## 三行的排布
+ *
+ * ```
+ * 星遇同频评分
+ *                  ★★★★☆ 9.8
+ *                    27 人打分
+ * 数据来源于 …
+ * ```
+ *
+ * 星级与分数**不再和标题同行**。挤在一行时左边只剩「星遇同频评分」一个词，
+ * 右边要同时放下星级、分数两样东西，标题和读数互相挤，星级也只能缩到 12px。
+ * 标题独占一行之后读数有了整行宽度，星星可以放大一档。
+ *
+ * **右对齐保留**：读数是「数值」，数值贴右边缘才方便纵向比较，人数跟着它
+ * 也贴右——这两行在视觉上是一组。只有标题和来源声明是左对齐的。
  *
  * ## 数据从哪来
  *
@@ -101,7 +56,7 @@ export function WorldVrccRating({ worldId }: { worldId: string }) {
         return (
             <WorldVrccRatingShell
                 value={
-                    <span className="text-foreground font-medium tabular-nums">
+                    <span className="text-foreground text-sm font-medium tabular-nums">
                         ⋯
                     </span>
                 }
@@ -142,12 +97,12 @@ export function WorldVrccRating({ worldId }: { worldId: string }) {
     return (
         <WorldVrccRatingShell
             value={
-                <span className="flex items-center gap-1.5">
-                    <StarRating score={avg} />
-                    <span className="text-foreground font-medium tabular-nums">
+                <>
+                    <VrccStars score={avg} size="lg" />
+                    <span className="text-foreground text-sm font-medium tabular-nums">
                         {avg.toFixed(1)}
                     </span>
-                </span>
+                </>
             }
             note={t('dialog.world.vrcc.raters', { count: raters })}
         />
@@ -155,9 +110,9 @@ export function WorldVrccRating({ worldId }: { worldId: string }) {
 }
 
 /**
- * 那一块的统一外壳：标签 + 值 + 一行说明 + 来源声明。
+ * 那一块的统一外壳：标题左一行、读数与人数贴右两行、来源声明左一行。
  *
- * 用 `col-span-2` 占满整行——外层是两列网格，星级加数字再加两行小字塞不进半栏。
+ * 用 `col-span-2` 占满整行——外层是两列网格，星、分数、人数塞不进半栏。
  */
 function WorldVrccRatingShell({
     value,
@@ -177,15 +132,17 @@ function WorldVrccRatingShell({
     // 整块像附注，和它独立成卡片的意图自相矛盾。来源声明仍然留在弱化层。
     return (
         <div className="bg-card mt-3 min-w-0 rounded-lg border p-2.5">
-            <div className="flex min-w-0 items-baseline gap-1.5">
-                <span className="text-foreground truncate text-xs font-medium">
-                    {t('dialog.world.vrcc.rating')}
+            <div className="text-foreground truncate text-xs font-medium">
+                {t('dialog.world.vrcc.rating')}
+            </div>
+            {/* 读数贴右：`justify-end` 兑现原来 `ml-auto` 的位置。
+                人数是下一行同一边缘，两行成一组。 */}
+            <div className="mt-1 flex min-w-0 justify-end">
+                <span className="flex shrink-0 items-center gap-1.5">
+                    {value}
                 </span>
-                <span className="ml-auto shrink-0 text-sm">{value}</span>
             </div>
             {note ? (
-                // 靠右：它描述的是上一行右侧那个分数（「8.4」是 412 人打出来的），
-                // 右对齐后两行在视觉上是一组，左对齐会读成标题的续行。
                 <div className="text-foreground mt-1 text-right text-[11px] leading-tight">
                     {note}
                 </div>

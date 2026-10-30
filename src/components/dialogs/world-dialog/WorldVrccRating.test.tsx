@@ -77,6 +77,31 @@ describe('WorldVrccRating', () => {
         expect(screen.getByText('412 人打分')).toBeTruthy();
     });
 
+    it('星级与分数在标题下面一行，不和标题挤在一起', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        renderWithClient(<WorldVrccRating worldId="wrld_test" />);
+
+        const title = await screen.findByText('dialog.world.vrcc.rating');
+        // 等真数据到齐。只等标题会停在 `⋯` 那一帧，那时还没有星星。
+        await screen.findByText('8.4');
+        const stars = screen.getByRole('img');
+
+        // 在同一个容器里就又变回「左边一个词、右边一堆数字」那一版了
+        expect(title.contains(stars)).toBe(false);
+        // 顺序是标题在前、读数在后
+        expect(
+            title.compareDocumentPosition(stars) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        // 自己独占一行之后星星该是放大那一档（24px），不是原来的 12px
+        expect(stars.firstElementChild?.className).toContain('size-6');
+        // 换行不等于换对齐：读数与人数仍然贴右
+        expect(screen.getByText('412 人打分').className).toContain(
+            'text-right'
+        );
+        expect(stars.closest('div')?.className).toContain('justify-end');
+    });
+
     it('名次不出现在概览里', async () => {
         appVrccMapPage.mockResolvedValue(mapPage());
         renderWithClient(<WorldVrccRating worldId="wrld_test" />);
