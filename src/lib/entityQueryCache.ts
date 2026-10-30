@@ -44,6 +44,15 @@ export const entityQueryPolicies = Object.freeze({
         retry: 1,
         refetchOnWindowFocus: false
     }),
+    // 地图在星遇同频榜上的公开信息。半小时是刻意的：判断的是「在不在榜、
+    // 大概几分」这类变化很慢的事实，而且官方自己最多 5 分钟才更新一次。
+    // 缓存短了，玩家翻世界列表就等于在刷接口。
+    vrccMapPage: Object.freeze({
+        staleTime: 30 * MINUTE_MS,
+        gcTime: 120 * MINUTE_MS,
+        retry: 1,
+        refetchOnWindowFocus: false
+    }),
     groupCollection: Object.freeze({
         staleTime: 60 * SECOND_MS,
         gcTime: 300 * SECOND_MS,
@@ -196,6 +205,27 @@ export const queryKeys = Object.freeze({
             ['worlds', 'user', params.userId, stableParams(params)],
             endpoint
         ),
+    // 这张地图在星遇同频地图榜上的公开信息。`endpoint` 这里恒为空串，但
+    // **不能省掉这一段**：`withEndpoint` 只在非空时才追加，所以传空串的
+    // 结果本身是干净的；而一旦有人手拼键、漏掉这一段，键的长度就和这里
+    // 不一致，缓存永远命中不了——A2 那个 bug 就是这么来的。
+    worldVrcc: (worldId: string, endpoint: string = '') =>
+        withEndpoint(['world', worldId, 'vrcc'], endpoint),
+    // 带令牌的地图页。**必须与 `worldVrcc` 分开**：两条路的缓存时长、失效
+    // 条件、以及「未连接时会失败」这个性质都不同，共用一个键会让公开数据
+    // 被登录数据顶掉，反之亦然。`sort` 也进键：`hot` 和 `new` 是两份不同的
+    // 列表，玩家切了排序不该看到上一份。
+    worldVrccSignedIn: (
+        worldId: string,
+        sort: 'hot' | 'new' = 'hot',
+        endpoint: string = ''
+    ) => withEndpoint(['world', worldId, 'vrcc', 'signedIn', sort], endpoint),
+    // 当前令牌是否有某项权限。全局一份，按 scope 名分键。
+    vrccScope: (scope: string) => ['vrcc', 'scope', scope] as const,
+    // 一张地图在榜上的状态（board / pending / off）。只有带令牌的接口能区分
+    // 「未收录」和「待审核」，所以独立一个键，不与公开页共用。
+    worldVrccMine: (worldId: string) =>
+        ['world', worldId, 'vrcc', 'mine'] as const,
     groupMembers: (params: VrchatGroupMembersInput, endpoint: string = '') =>
         withEndpoint(
             ['group', params.groupId, 'members', stableParams(params)],

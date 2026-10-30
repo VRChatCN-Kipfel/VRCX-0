@@ -13,8 +13,9 @@
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMapPage, VrccMutuals,
-    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications, VrccRatedMaps,
-    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread,
+    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccNotifications,
+    VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
+    VrccTokenResponse, VrccUnread, VrccVote, VrccVoteKind, VrccVoteResult,
 };
 use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
 
@@ -70,6 +71,36 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn map_page<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMapPage> {
         Box::pin(async move { self.client().map_page(world).await })
+    }
+
+    fn my_map_page<'a>(
+        &'a self,
+        world: &'a str,
+        sort: Option<&'a str>,
+    ) -> VrccFuture<'a, VrccMyMapPage> {
+        Box::pin(async move { self.client().my_map_page(world, sort).await })
+    }
+
+    fn rate_map<'a>(
+        &'a self,
+        world: &'a str,
+        score: i64,
+        text: &'a VrccRatingText,
+    ) -> VrccFuture<'a, VrccMyMap> {
+        Box::pin(async move { self.client().rate_map(world, score, text).await })
+    }
+
+    fn delete_map_rating<'a>(&'a self, world: &'a str) -> VrccFuture<'a, ()> {
+        Box::pin(async move { self.client().delete_map_rating(world).await })
+    }
+
+    fn vote_map_content<'a>(
+        &'a self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> VrccFuture<'a, VrccVoteResult> {
+        Box::pin(async move { self.client().vote_map_content(kind, id, vote).await })
     }
 
     fn my_board<'a>(&'a self, sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {

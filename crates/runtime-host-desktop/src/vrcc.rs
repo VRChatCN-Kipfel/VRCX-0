@@ -7,8 +7,9 @@ use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage,
-    VrccMyBoard, VrccMyBoardSort, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus,
-    VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps,
+    VrccRatingText, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread,
+    VrccUsageSnapshot, VrccVote, VrccVoteKind, VrccVoteResult, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -308,6 +309,55 @@ impl DesktopVrccRuntime {
     pub async fn map_page(&self, world: &str) -> Result<Option<VrccMapPage>, VrccFailure> {
         self.service
             .map_page(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+    /// 不在榜上时（`404`）返回 `None`。
+    pub async fn my_map_page(
+        &self,
+        world: &str,
+        sort: Option<&str>,
+    ) -> Result<Option<VrccMyMapPage>, VrccFailure> {
+        self.service
+            .my_map_page(world, sort)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+    ///
+    /// 写操作不做任何重试：失败原样交给界面，由玩家决定要不要再点一次。
+    pub async fn rate_map(
+        &self,
+        world: &str,
+        score: i64,
+        text: &VrccRatingText,
+    ) -> Result<VrccMyMap, VrccFailure> {
+        self.service
+            .rate_map(world, score, text)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 删掉自己给这张图的评分。需要 `maps.rate`。
+    pub async fn delete_map_rating(&self, world: &str) -> Result<(), VrccFailure> {
+        self.service
+            .delete_map_rating(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 给短评投票。需要 `maps.write` 敏感权限。写操作，不重试。
+    pub async fn vote_map_content(
+        &self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> Result<VrccVoteResult, VrccFailure> {
+        self.service
+            .vote_map_content(kind, id, vote)
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

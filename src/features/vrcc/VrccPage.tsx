@@ -320,8 +320,11 @@ export function VrccPage() {
 
                         <TabsContent value="maps" className="min-h-0 flex-1">
                             {/* 所在地图卡片放在榜单上方：玩家最关心的是
-                                «我现在这张图怎么样»，而不是全站排行。 */}
-                            {myMap && (
+                                «我现在这张图怎么样»，而不是全站排行。
+                                `off` 是硬阻断：服务层不再把它折成 null，
+                                所以这里必须自己判断——官方要求此时隐藏
+                                这张图的卡片。 */}
+                            {myMap && myMap.off !== true && (
                                 <VrccCurrentMapCard
                                     map={myMap}
                                     onOpenWorld={openWorld}

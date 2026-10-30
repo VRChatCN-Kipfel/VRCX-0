@@ -1,8 +1,13 @@
 /**
  * 星遇同频站点与封面地址。
  *
- * 官方给的 `img` 是**相对路径**（形如 `/api/match?xdimg=…`），要接在站点
- * origin 后面才能当图片地址用；`imgUrl`（1.11.0 起）则是完整网址。
+ * 官方 `boards/maps` 的 `img` **现在就是完整绝对网址**，形如
+ * `https://vrcc.cc/maps/<worldId>.jpg`（实测确认，不是早前记录的
+ * `/api/match?xdimg=…` 那种内部接口）。它带 `Cache-Control: max-age=14400`，
+ * 浏览器与 Cloudflare 会缓存，我们不需要自己存。
+ *
+ * `imgUrl`（1.11.0 起）是同一张封面的另一个字段，但 `boards/maps` 至今
+ * **不返回**它，只有 `me/board`、地图页、`me/maps/{world}` 才有。
  *
  * 这一层只负责把两者统一成「一个可以直接放进 `<img src>` 的字符串」，
  * 不判断图片存不存在——那是 `onError` 的事。

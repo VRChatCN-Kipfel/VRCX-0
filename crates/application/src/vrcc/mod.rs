@@ -12,9 +12,10 @@ use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMapPage,
-    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications,
-    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse,
-    VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
+    VrccNotifications, VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus,
+    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccVote,
+    VrccVoteKind, VrccVoteResult, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -91,6 +92,26 @@ pub trait VrccRemote: Send + Sync {
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements>;
     fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers>;
     fn map_page<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMapPage>;
+    fn my_map_page<'a>(
+        &'a self,
+        world: &'a str,
+        sort: Option<&'a str>,
+    ) -> VrccFuture<'a, VrccMyMapPage>;
+    // -- 写操作（需要 maps.rate） ------------------------------------------
+    fn rate_map<'a>(
+        &'a self,
+        world: &'a str,
+        score: i64,
+        text: &'a VrccRatingText,
+    ) -> VrccFuture<'a, VrccMyMap>;
+    fn delete_map_rating<'a>(&'a self, world: &'a str) -> VrccFuture<'a, ()>;
+    // -- 写操作（需要 maps.write） -----------------------------------------
+    fn vote_map_content<'a>(
+        &'a self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> VrccFuture<'a, VrccVoteResult>;
 
     // -- 设备授权 ----------------------------------------------------------
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode>;
@@ -244,7 +265,10 @@ pub fn classify_vrcc_error(error: &VrccError) -> (VrccErrorKind, Option<String>)
         ErrorDetail::TokenMissing => VrccErrorKind::NeedsReauth,
         // 我们自己的 bug，界面上只配显示「操作失败」。它本不该发生，
         // 落在这里说明代码有问题，会由日志暴露出来。
-        ErrorDetail::AbsolutePath(_) | ErrorDetail::BodyTooLarge => VrccErrorKind::Other,
+        ErrorDetail::AbsolutePath(_)
+        | ErrorDetail::BodyTooLarge
+        | ErrorDetail::InvalidArgument(_)
+        | ErrorDetail::MissingArgument(_) => VrccErrorKind::Other,
         ErrorDetail::Transport { .. } | ErrorDetail::Decode(_) => VrccErrorKind::Transport,
         ErrorDetail::ThrottledLocally { .. } => VrccErrorKind::Throttled,
         ErrorDetail::Http(http) => {
@@ -797,9 +821,21 @@ impl VrccService {
 
     /// 当前所在地图在地图榜上的状态与我自己的评分。
     ///
-    /// 需要 `maps`（普通权限）。官方的硬性要求是 `off` 为 `true` 时客户端不要
-    /// 显示打分面板；这里在 `off` 时直接返回 `None`，调用方拿不到对象就不可能
-    /// 误显示——比在每个 UI 分支里记得判断 `off` 更可靠。
+    /// 需要 `maps`（普通权限）。
+    ///
+    /// ## `off` 不再折成 `None`
+    ///
+    /// 官方的硬性要求是 `off` 为 `true` 时客户端不要显示这张图的卡片。早先的
+    /// 做法是直接返回 `None`——调用方拿不到对象就不可能误显示，看起来更可靠。
+    ///
+    /// 但那样会把**三种完全不同的情况压成同一个 `None`**：被合规隐藏、
+    /// 玩家没连接、以及「查不到」。界面上只能一律显示「不在榜上」，其中
+    /// 「被隐藏」那种说法虽然不算错，却让玩家不知道真正的原因。
+    ///
+    /// 现在把 `off` 原样交给界面，由它**显示一句「为遵守相关条款不得展示」**。
+    /// 这仍然满足「不显示这张图的卡片」——不给任何数据，只说明原因。代价是
+    /// **每个调用点都必须自己判断 `off`**，所以两处调用点（所在地图卡、世界
+    /// 详情页）都做了显式判断，不要依赖「反正拿不到」。
     pub async fn my_map(&self, world: &str) -> std::result::Result<Option<VrccMyMap>, VrccError> {
         // 只认 wrld_…：带房间实例号的 location 会让接口查错图。
         let world = vrcx_0_core::location::world_id_from_location(world);
@@ -813,11 +849,11 @@ impl VrccService {
             .await
             .map_err(|error| self.settle(error))?;
         if !map.is_visible() {
+            // 只是记一条日志，仍然把对象交出去——界面要用 `off` 说明原因。
             tracing::debug!(
                 world = %world,
-                "vrcc: this map is not shown to this player, hiding the card"
+                "vrcc: this map is not shown to this player, the UI must hide its data"
             );
-            return Ok(None);
         }
         Ok(Some(map))
     }
@@ -909,6 +945,119 @@ impl VrccService {
             Err(error) if error.is_not_found() => Ok(None),
             Err(error) => Err(self.settle(error)),
         }
+    }
+
+    /// 带令牌的地图页：完整短评列表 + 我的评分（需要 `maps` 普通权限）。
+    ///
+    /// 与公开版 [`Self::map_page`] 的区别是**能看到别人的评价**。公开版按
+    /// 官方说明「短评和介绍不给」，只有一条热评。
+    ///
+    /// 不在榜上时服务器回 `404 not_found`——那是正常状态（这张图还没上榜），
+    /// 转成 `None`，让界面说「不在榜上」而不是报错。
+    ///
+    /// 未连接时先拒绝，不把一个必然 `TokenMissing` 的请求发出去。
+    pub async fn my_map_page(
+        &self,
+        world: &str,
+        sort: Option<&str>,
+    ) -> std::result::Result<Option<VrccMyMapPage>, VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            return Ok(None);
+        }
+        self.ensure_connected()?;
+        match self.remote.my_map_page(&world, sort).await {
+            Ok(page) => Ok(Some(page)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(self.settle(error)),
+        }
+    }
+
+    /// 给地图打分 / 写短评（需要 `maps.rate` 敏感权限）。
+    ///
+    /// ## 这是写操作，只允许由玩家每次主动点击触发
+    ///
+    /// 官方《使用要求》把打分列为敏感写操作，明确禁止自动与批量。所以这里
+    /// **不做任何重试或自动续发**：失败就把错误原样交给界面，由玩家决定要不要
+    /// 再点一次。这与读接口的策略相反（那些失败会退回缓存），因为「重试一次
+    /// 写」和「重试一次读」的后果完全不同。
+    ///
+    /// ## 短评没通过审核要原样报出来
+    ///
+    /// `yq_words` / `yq_empty` 不是网络故障，是内容被拒。界面需要拿 `why`
+    /// 告诉玩家具体原因（例如「请不要在短评里留联系方式」）。所以这里不做
+    /// 任何降级，让错误一路带着 `why` 上到界面。
+    pub async fn rate_map(
+        &self,
+        world: &str,
+        score: i64,
+        text: &VrccRatingText,
+    ) -> std::result::Result<VrccMyMap, VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            // 读接口遇到空 ID 会安静地返回 `None`，写接口不能：一个写操作
+            // 「什么都没发生」是最坏的结局——玩家会以为提交成功了。
+            return Err(VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("world"),
+            ));
+        }
+        self.ensure_connected()?;
+        self.remote
+            .rate_map(&world, score, text)
+            .await
+            .map_err(|error| self.settle(error))
+    }
+
+    /// 删掉自己给这张图的评分（需要 `maps.rate`）。
+    ///
+    /// 同样是写操作，不做重试。`404` 表示本来就没打过分——对它而言目标已经
+    /// 达成，所以按成功处理，免得玩家看到一句莫名其妙的错误。
+    pub async fn delete_map_rating(&self, world: &str) -> std::result::Result<(), VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            return Err(VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("world"),
+            ));
+        }
+        self.ensure_connected()?;
+        match self.remote.delete_map_rating(&world).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.is_not_found() => Ok(()),
+            Err(error) => Err(self.settle(error)),
+        }
+    }
+
+    /// 给短评投票（需要 `maps.write` 敏感权限）。
+    ///
+    /// ## 不能给自己的内容投票
+    ///
+    /// 这条规则在服务端，但**界面和这里都要提前拦**：让玩家点下去再收到一个
+    /// 403 是最差的体验。所以这里除了转发，还在本地挡掉「投自己的票」——
+    /// 我们拿不到「这条是不是我的」以外的信息，判据由调用方传进来。
+    ///
+    /// 实际上调用方（界面）已经按 `VrccMapRate::mine` 禁用了按钮，这里不再
+    /// 重复判断：多一处判断就多一处会和服务端分叉的地方。
+    ///
+    /// 写操作：不重试（重试等于投两次）。
+    pub async fn vote_map_content(
+        &self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> std::result::Result<VrccVoteResult, VrccError> {
+        if id <= 0 {
+            return Err(VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("id"),
+            ));
+        }
+        self.ensure_connected()?;
+        self.remote
+            .vote_map_content(kind, id, vote)
+            .await
+            .map_err(|error| self.settle(error))
     }
 
     /// 玩家视角地图榜（需要 `maps` 普通权限）。

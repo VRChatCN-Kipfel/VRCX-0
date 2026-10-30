@@ -58,6 +58,7 @@ import {
     resolveLaunchLocation,
     worldInstanceEntries
 } from './WorldDialogViewParts';
+import { WorldVrccRating } from './WorldVrccRating';
 
 export type { WorldWorldScreenshots } from './useWorldDialogScreenshots';
 
@@ -373,6 +374,12 @@ export function WorldDialogTabbedView({
         });
     const tabs = [
         { value: 'instances', label: t('dialog.world.instances.header') },
+        // 星遇同频标签页。只在有世界 ID 时出现——没有 ID 时查不了任何东西。
+        // 放在「游玩过的房间」之前：它是这张图本身的信息，而播放记录是
+        // 我自己的历史，先生后己。
+        ...(world.id
+            ? [{ value: 'vrcc', label: t('dialog.world.vrcc.tab') }]
+            : []),
         {
             value: 'visit-history',
             label: t('dialog.previous_instances.header')
@@ -579,10 +586,18 @@ export function WorldDialogTabbedView({
             <EntityDialogTwoColumnLayout
                 railMaxHeight="50vh"
                 rail={
-                    <WorldDialogOverviewSection
-                        headerModel={headerModel}
-                        headerCommands={headerCommands}
-                    />
+                    <>
+                        <WorldDialogOverviewSection
+                            headerModel={headerModel}
+                            headerCommands={headerCommands}
+                        />
+                        {/* 星遇同频评分单独成块，与概览卡片平级、留出间隔。
+                            塞进概览卡片内部的话，它会和世界 ID、分享链接挤成
+                            一片，读不出「这是另一家平台的数据」。 */}
+                        {headerModel.world.id ? (
+                            <WorldVrccRating worldId={headerModel.world.id} />
+                        ) : null}
+                    </>
                 }
             >
                 <WorldDialogTabPanels

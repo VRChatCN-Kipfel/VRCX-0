@@ -109,6 +109,8 @@ struct FakeRemote {
     connection: Mutex<VrccConnection>,
     /// 下一次个人调用返回的错误。
     next_error: Mutex<Option<VrccError>>,
+    /// `my_map` 的返回。设了就用它，没设就按「令牌缺失」处理。
+    my_map: Mutex<Option<VrccMyMap>>,
     /// `recent_notifications` 的返回。
     recent: Mutex<Option<VrccRecentNotifications>>,
     /// `unread` 的返回。
@@ -225,6 +227,9 @@ impl VrccRemote for FakeRemote {
             if let Some(error) = self.take_error() {
                 return Err(error);
             }
+            if let Some(map) = self.my_map.lock().unwrap().clone() {
+                return Ok(map);
+            }
             Err(token_missing())
         })
     }
@@ -244,6 +249,55 @@ impl VrccRemote for FakeRemote {
             // 公开接口：没有令牌也能答。默认给一份空页面，让「404 转 None」
             // 这类测试只要注入错误就能覆盖到。
             Ok(VrccMapPage::default())
+        })
+    }
+    fn my_map_page<'a>(
+        &'a self,
+        _world: &'a str,
+        _sort: Option<&'a str>,
+    ) -> VrccFuture<'a, VrccMyMapPage> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            // 带令牌的页面：默认给一份空的，让「404 转 None」「未连接先拒绝」
+            // 这类测试只要注入错误就能覆盖到。
+            Ok(VrccMyMapPage::default())
+        })
+    }
+    fn rate_map<'a>(
+        &'a self,
+        _world: &'a str,
+        _score: i64,
+        _text: &'a VrccRatingText,
+    ) -> VrccFuture<'a, VrccMyMap> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            // 写操作默认成功，返回一份空的地图状态。
+            Ok(VrccMyMap::default())
+        })
+    }
+    fn delete_map_rating<'a>(&'a self, _world: &'a str) -> VrccFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Ok(())
+        })
+    }
+    fn vote_map_content<'a>(
+        &'a self,
+        _kind: VrccVoteKind,
+        _id: i64,
+        _vote: VrccVote,
+    ) -> VrccFuture<'a, VrccVoteResult> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Ok(VrccVoteResult::default())
         })
     }
     fn my_board<'a>(&'a self, _sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
@@ -708,7 +762,10 @@ async fn connected_guard_blocks_personal_calls_when_disconnected() {
 async fn device_auth_asks_for_the_scope_that_fits_the_client() {
     let cases = [
         ("dev-test", "profile notifications maps"),
-        ("app_0123456789abcdef", "profile notifications maps mutuals"),
+        (
+            "app_0123456789abcdef",
+            "profile notifications maps mutuals maps.rate maps.write",
+        ),
     ];
     for (client, expected) in cases {
         let remote = FakeRemote::new();
@@ -971,6 +1028,129 @@ fn connected_service() -> (VrccService, Arc<FakeRemote>, Arc<MemoryStore>) {
 
 /// 地图页是没有令牌也能读的公开接口。
 ///
+/// 带令牌的地图页：404 同样是「不在榜上」，不是故障。
+///
+/// 这一条和公开版分开测，因为两条路径的 `ensure_connected` 行为不同：
+/// 公开版不要求连接，带令牌版**要求**。
+#[tokio::test]
+async fn the_signed_in_map_page_treats_404_as_absent() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(404, "not_found"));
+
+    assert!(
+        service.my_map_page("wrld_x", None).await.unwrap().is_none(),
+        "404 should read as 'this world is not on the board', not as a failure"
+    );
+
+    // 真的故障仍然要报出去。
+    remote.set_error(http(500, "server"));
+    let error = service.my_map_page("wrld_x", None).await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Server);
+}
+
+/// `off` 的地图要**原样交给界面**，不能折成 `None`。
+///
+/// 折成 `None` 会把「被合规隐藏」「没连接」「查不到」压成同一个结果，界面
+/// 只能一律说「不在榜上」。界面拿不到 `off` 就没法说明真正的原因。
+///
+/// 代价是每个调用点都必须自己判断 `off`——所以这条测试钉住「服务层不会替
+/// 调用方挡掉」这个约定，免得有人又把它折回去。
+#[tokio::test]
+async fn a_hidden_map_is_returned_with_its_off_flag_intact() {
+    let (service, remote, _store) = connected_service();
+    *remote.my_map.lock().unwrap() = Some(VrccMyMap {
+        world: Some("wrld_x".into()),
+        off: Some(true),
+        ..VrccMyMap::default()
+    });
+
+    let map = service
+        .my_map("wrld_x")
+        .await
+        .expect("a hidden map is not an error")
+        .expect("the caller needs the object to explain why it is hidden");
+
+    assert_eq!(map.off, Some(true));
+    assert!(!map.is_visible());
+}
+
+/// 未连接时直接拒绝，不把一个必然 `TokenMissing` 的请求发出去。
+#[tokio::test]
+async fn the_signed_in_map_page_refuses_before_sending_when_disconnected() {
+    // 空的 store + 没 mark_connected 的 remote = 从没连过的玩家。
+    // **不能**用 `connected_service()` 再 `disconnect()`：那个 store 里已经有
+    // 令牌，`ensure_connected` 看的是 store，断开并不会让检查失败。
+    let store: Arc<dyn VrccTokenStore> = Arc::new(MemoryStore::default());
+    let remote = FakeRemote::new();
+    let service = VrccService::new(store, Arc::clone(&remote) as Arc<dyn VrccRemote>);
+
+    let error = service.my_map_page("wrld_x", None).await.unwrap_err();
+    assert!(error.needs_reauth());
+    // 没注入过错误且没有走到网络，说明请求是被本地拦下的。
+    assert!(remote.take_error().is_none());
+}
+
+/// 写操作遇到空世界 ID 必须**失败**，不能安静成功。
+///
+/// 读接口在这种情况下返回 `Ok(None)` 是合理的（「没有这一页」），但写操作
+/// 「什么都没发生」是最坏的结局——玩家会以为打分提交了。
+#[tokio::test]
+async fn rating_a_map_without_a_world_id_fails_instead_of_silently_succeeding() {
+    let (service, _remote, _store) = connected_service();
+
+    let error = service
+        .rate_map("", 8, &VrccRatingText::Keep)
+        .await
+        .unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Input);
+
+    let error = service.delete_map_rating("").await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Input);
+}
+
+/// 未连接时写操作先拒绝，不把必然失败的请求发出去。
+#[tokio::test]
+async fn rating_refuses_before_sending_when_disconnected() {
+    let store: Arc<dyn VrccTokenStore> = Arc::new(MemoryStore::default());
+    let remote = FakeRemote::new();
+    let service = VrccService::new(store, Arc::clone(&remote) as Arc<dyn VrccRemote>);
+
+    let error = service
+        .rate_map("wrld_x", 8, &VrccRatingText::Keep)
+        .await
+        .unwrap_err();
+    assert!(error.needs_reauth());
+    assert!(remote.take_error().is_none());
+}
+
+/// 删评分遇到 `404` 当作成功：目标本来就已达成。
+///
+/// 玩家看到「删除失败」会以为评分还在，然后反复点。
+#[tokio::test]
+async fn deleting_a_rating_that_is_already_gone_is_not_an_error() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(404, "not_found"));
+
+    assert!(service.delete_map_rating("wrld_x").await.is_ok());
+}
+
+/// 短评被审核拒绝时，错误要能一路带到界面。
+///
+/// `yq_words` 不是网络故障，服务器会在 `why` 里说明原因，那句话对玩家比
+/// 「操作失败」有用得多。
+#[tokio::test]
+async fn a_rejected_comment_keeps_its_reason() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(400, "yq_words"));
+
+    let error = service
+        .rate_map("wrld_x", 8, &VrccRatingText::Write("留个联系方式".into()))
+        .await
+        .unwrap_err();
+    // 这是服务器拒绝，不是传输失败；界面据此显示「提交失败」+ 原因
+    assert_eq!(error.layer, ErrorLayer::Server);
+}
+
 /// 不在榜上时服务器回 `404 not_found`——那是**这张图还没上榜**，不是故障。
 /// 如果这里改成把 404 当错误抛出去，一张新图就会显示成「服务坏了」。
 #[tokio::test]
