@@ -6,10 +6,12 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const appVrccMapPage = vi.fn();
+const appVrccMyMapPage = vi.fn();
 
 vi.mock('@/platform/tauri/bindings', () => ({
     commands: {
-        appVrccMapPage: (...args: unknown[]) => appVrccMapPage(...args)
+        appVrccMapPage: (...args: unknown[]) => appVrccMapPage(...args),
+        appVrccMyMapPage: (...args: unknown[]) => appVrccMyMapPage(...args)
     }
 }));
 
@@ -92,6 +94,10 @@ function mapPage(
 describe('WorldVrccPanel', () => {
     beforeEach(() => {
         appVrccMapPage.mockReset();
+        appVrccMyMapPage.mockReset();
+        // 默认「未连接」：绝大多数测试关心的是公开那一半，不该被额外的
+        // 登录查询干扰。需要登录数据的用例自己覆盖这个默认值。
+        appVrccMyMapPage.mockRejectedValue(new Error('not connected'));
     });
 
     afterEach(() => {
@@ -193,5 +199,114 @@ describe('WorldVrccPanel', () => {
     it('世界 ID 为空时一个请求都不发', () => {
         renderWithClient(<WorldVrccPanel worldId="" />);
         expect(appVrccMapPage).not.toHaveBeenCalled();
+    });
+
+    // -- 登录之后才有的一半 ------------------------------------------------
+
+    function myMapPage(overrides: Record<string, unknown> = {}) {
+        return {
+            map: { world: 'wrld_test', avg: 8.4, raters: 412 },
+            intro: null,
+            rates: [
+                {
+                    id: 1,
+                    text: '光影很舒服',
+                    score: 9,
+                    who: { name: '某位漫游星', group: 'G' },
+                    mine: false
+                },
+                {
+                    id: 2,
+                    text: '我写的这条',
+                    score: 7,
+                    who: { name: '我', me: true },
+                    mine: true
+                }
+            ],
+            mine: { rate: { score: 7, text: '我写的这条', check: 'ok' } },
+            sort: 'hot',
+            ...overrides
+        };
+    }
+
+    it('连上之后显示我的评分与全部短评', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(myMapPage());
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(await screen.findByText('光影很舒服')).toBeTruthy();
+        // 「我写的这条」出现两次（我的评分块 + 列表里那条），用 getAllByText。
+        expect(screen.getAllByText('我写的这条').length).toBe(2);
+        expect(screen.getByText('dialog.world.vrcc.my_rating')).toBeTruthy();
+        // 自己那条带「我」标记
+        expect(screen.getByText('dialog.world.vrcc.mine')).toBeTruthy();
+    });
+
+    it('短评里带分数', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(myMapPage());
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        await screen.findByText('光影很舒服');
+        expect(screen.getByText('9 / 10')).toBeTruthy();
+    });
+
+    it('没连接时不报错，只在短评处退回一行说明', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        // beforeEach 已让登录查询失败
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        // 公开那一半照常
+        expect(await screen.findByText('8.4')).toBeTruthy();
+        // 短评处给说明，而不是整页报错。登录查询带 retry:1，要等它跑完，
+        // 期间显示的是「加载中」。
+        expect(
+            await screen.findByText('dialog.world.vrcc.words_hint', undefined, {
+                timeout: 5000
+            })
+        ).toBeTruthy();
+    }, 10000);
+
+    it('审核中和未通过的短评标出状态', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({
+                mine: { rate: { score: 7, text: '待审', check: 'wait' } }
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.check_wait')
+        ).toBeTruthy();
+    });
+
+    it('被折叠的短评不渲染', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({
+                rates: [
+                    { id: 9, text: '这条被折叠了', score: 3, folded: true },
+                    { id: 1, text: '正常的一条', score: 8 }
+                ]
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        await screen.findByText('正常的一条');
+        expect(screen.queryByText('这条被折叠了')).toBeNull();
+    });
+
+    it('没打过分时说还没打，不显示 0 分', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({ mine: null, rates: [] })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.not_rated_by_me')
+        ).toBeTruthy();
+        expect(screen.getByText('dialog.world.vrcc.no_words_yet')).toBeTruthy();
     });
 });

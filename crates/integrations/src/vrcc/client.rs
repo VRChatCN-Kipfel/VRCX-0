@@ -25,9 +25,9 @@ use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
     ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMapPage,
-    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications,
-    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse,
-    VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
+    VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
+    VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -836,6 +836,40 @@ impl VrccClient {
             key: "map_page",
             min_gap: Duration::from_secs(60),
             bucket: None,
+            bypass_gate: false,
+        })
+        .await
+    }
+
+    /// 带令牌的地图页（`GET /me/maps/{world}/page`）。需要 `maps` 普通权限。
+    ///
+    /// 比公开版 [`Self::map_page`] 多出：**完整短评列表**、地图介绍、正在开的
+    /// 房，以及我自己打的分与写的短评。公开版按官方说明「短评和介绍不给」，
+    /// 所以想看别人的评价只能走这一条。
+    ///
+    /// `sort` 只认 `hot` / `new`，别的值由服务器按默认处理。
+    ///
+    /// 它算个人每天的读取次数（`Reads` 那一份），和公开版 `bucket: None`
+    /// 不同——这条带令牌，服务器会记在玩家账上。
+    pub async fn my_map_page(
+        &self,
+        world: &str,
+        sort: Option<&str>,
+    ) -> Result<VrccMyMapPage, VrccError> {
+        let path = match sort {
+            Some(sort) if !sort.is_empty() => {
+                format!("me/maps/{world}/page?sort={sort}")
+            }
+            _ => format!("me/maps/{world}/page"),
+        };
+        self.request(Call {
+            method: "GET",
+            path: &path,
+            body: None,
+            authed: true,
+            key: "my_map_page",
+            min_gap: Duration::from_secs(30),
+            bucket: Some(QuotaBucket::Reads),
             bypass_gate: false,
         })
         .await

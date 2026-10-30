@@ -443,6 +443,18 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_map_page', { world });
     },
     /**
+     * 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+     *
+     * 不在榜上时（`404`）返回 `null`；未连接时返回需要连接的失败，不会被当成
+     * 「这张图不在榜」。
+     */
+    async appVrccMyMapPage(
+        world: string,
+        sort: string | null
+    ): Promise<VrccMyMapPage | null> {
+        return await TAURI_INVOKE('app__vrcc_my_map_page', { world, sort });
+    },
+    /**
      * 玩家视角地图榜。需要 `maps` 普通权限。
      */
     async appVrccMyBoard(sort: VrccMyBoardSort | null): Promise<VrccMyBoard> {
@@ -7515,6 +7527,17 @@ export type VrccMapHot = {
     went?: boolean | null;
 };
 /**
+ * 地图介绍。
+ */
+export type VrccMapIntro = {
+    id?: number | null;
+    text?: string | null;
+    up?: number | null;
+    down?: number | null;
+    at?: number | null;
+    who?: VrccMapRateWho | null;
+};
+/**
  * `GET /maps/{world}/page`：公开地图页（1.13.0 起，**不需要令牌**）。
  *
  * 和 vrcc.cc 上每张地图的页面一样：榜上那一行、分数分布、去过的人数、
@@ -7586,6 +7609,83 @@ export type VrccMapPerf = {
      * 挂房的分钟数（实测时为 `null`）。
      */
     minutes?: number | null;
+};
+/**
+ * 一条打分记录（短评）：`/me/maps/{world}/page` 的 `rates[]` 与 `mine.rate`。
+ *
+ * 公开的地图页**不给**这个列表，只有带令牌的 `/me/…/page` 才有。官方还会按
+ * 令牌权限调整写者身份：有 `mutuals` 且客户端审核通过时给对方的 `n`，
+ * 否则一律匿名成 `{"name": "某位<星位>", "group": "G"}`。**我们只照原样显示
+ * `who`，不自己拼匿名格式**——那是服务器的职责，我们拼就可能在权限变化时
+ * 显示错的东西。
+ */
+export type VrccMapRate = {
+    /**
+     * 这条打分的编号。
+     */
+    id?: number | null;
+    /**
+     * 短评正文；没写短评时是 `null`。
+     */
+    text?: string | null;
+    /**
+     * 打的分（1–10）。
+     */
+    score?: number | null;
+    /**
+     * 赞、踩的计数。
+     */
+    up?: number | null;
+    down?: number | null;
+    /**
+     * 打分时间（毫秒）。
+     */
+    at?: number | null;
+    /**
+     * 写者。字段形状由服务器按权限决定，这里宽松处理。
+     */
+    who?: VrccMapRateWho | null;
+    /**
+     * 是不是我写的。
+     */
+    mine?: boolean | null;
+    /**
+     * 我投的票：`1` 赞 / `-1` 踩 / `0` 没投。
+     */
+    vote?: number | null;
+    /**
+     * 被折叠（内容或作者被隐藏）。
+     */
+    folded?: boolean | null;
+    /**
+     * 只有 `mine.rate` 才有：审核状态（`wait` / `ok` / `hidden`）。
+     */
+    check?: string | null;
+};
+/**
+ * 一条打分里「写者」的身份。
+ *
+ * 官方按权限决定给多少：审核通过的客户端 + `mutuals` 能看到别人的 `n` 和
+ * VRChat 名字；否则只有匿名的「某位<星位>」。**这里全部是 `Option`**——
+ * 缺字段是常态，不是异常。
+ */
+export type VrccMapRateWho = {
+    n?: number | null;
+    name?: string | null;
+    /**
+     * 星群代号（`G` / `W` / `Z` / `L` / `A`）。
+     */
+    group?: string | null;
+    photo?: boolean | null;
+    /**
+     * 互相连上时对方的 VRChat 名字。
+     */
+    vrc?: string | null;
+    mutual?: boolean | null;
+    /**
+     * 是不是我。
+     */
+    me?: boolean | null;
 };
 /**
  * 我给一颗互相连上的星的评价，和网页上互相连上的卡一样。
@@ -7791,6 +7891,47 @@ export type VrccMyMap = {
      * 同一张封面的完整网址（1.11.0 起）。有它就不用自己拼。
      */
     imgUrl?: string | null;
+};
+/**
+ * `/me/maps/{world}/page`：带令牌的地图页（1.13.0 起）。
+ *
+ * 比公开版多出：完整短评列表、地图介绍、正在开的房，以及**我自己的评分**。
+ * 需要 `maps` 普通权限（我们已有），因此不需要重新授权。
+ */
+export type VrccMyMapPage = {
+    /**
+     * 榜上的那一行。
+     */
+    map?: VrccBoardMap | null;
+    /**
+     * 地图介绍；没有时是 `null`。
+     */
+    intro?: VrccMapIntro | null;
+    /**
+     * 短评列表，按 `sort` 排。
+     */
+    rates?: VrccMapRate[];
+    /**
+     * 我自己的评分与短评。
+     */
+    mine?: VrccMyRate | null;
+    /**
+     * 当前的排序方式（`hot` / `new`）。
+     */
+    sort?: string | null;
+};
+/**
+ * 「我的」那一小块：自己打的分数与短评。
+ */
+export type VrccMyRate = {
+    /**
+     * 我的打分记录；没打过分时是 `null`。
+     */
+    rate?: VrccMapRate | null;
+    /**
+     * 我写的地图介绍；没有时是 `null`。
+     */
+    intro?: VrccMapIntro | null;
 };
 /**
  * 通知中心的一条（`GET /me/notes`，1.13.0 起）。

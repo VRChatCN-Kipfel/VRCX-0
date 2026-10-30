@@ -3,10 +3,17 @@ import { ExternalLinkIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
-import { vrccPublicMapQueryOptions } from '@/repositories/vrccMapRepository';
+import type { VrccMyMapPage } from '@/platform/tauri/bindings';
+import {
+    vrccMyMapPageQueryOptions,
+    vrccPublicMapQueryOptions
+} from '@/repositories/vrccMapRepository';
 import { Button } from '@/ui/shadcn/button';
 
 import { VrccFactRow, VrccScoreSpread } from './WorldVrccPanelParts';
+
+/** 一条短评。从绑定类型里派生，免得两处各写一份形状。 */
+type VrccMapRate = NonNullable<VrccMyMapPage['rates']>[number];
 
 /**
  * 「星遇同频」标签页。
@@ -30,6 +37,13 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     const { t } = useTranslation();
     const query = useQuery({
         ...vrccPublicMapQueryOptions(worldId),
+        enabled: Boolean(worldId)
+    });
+
+    // 登录版：完整短评列表 + 我的评分。未连接时这个查询会失败，
+    // 但**不把页面变成错误页**——公开的那一半照常显示，只是没有短评列表。
+    const signedIn = useQuery({
+        ...vrccMyMapPageQueryOptions(worldId),
         enabled: Boolean(worldId)
     });
 
@@ -174,10 +188,17 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                 </div>
             ) : null}
 
-            {/* 完整短评要令牌，下一批才有 */}
-            <div className="text-muted-foreground text-[11px] leading-relaxed">
-                {t('dialog.world.vrcc.words_hint')}
-            </div>
+            {/* 我的评分 + 完整短评列表（需要连接）。
+                未连接或读失败时退回一行说明，不把整页变成错误。 */}
+            {signedIn.data ? (
+                <VrccSignedInSection page={signedIn.data} />
+            ) : (
+                <div className="text-muted-foreground text-[11px] leading-relaxed">
+                    {signedIn.isPending
+                        ? t('common.loading', '加载中…')
+                        : t('dialog.world.vrcc.words_hint')}
+                </div>
+            )}
 
             {/* 去网页看完整页面 */}
             {map.page ? (
@@ -256,5 +277,128 @@ function StarGlyphLarge({ className }: { className?: string }) {
         >
             <path d="M12 3.4l2.6 5.5 6 .8-4.4 4.2 1.1 6L12 17l-5.3 2.9 1.1-6-4.4-4.2 6-.8z" />
         </svg>
+    );
+}
+
+/**
+ * 连接之后才有的一半：我的评分 + 完整短评列表。
+ *
+ * ## 为什么单独拆出来
+ *
+ * 它由另一个查询驱动（`/me/maps/{world}/page`），失败的原因和公开那一半
+ * 完全不同：公开版失败是网络问题，这里失败多半是**没连接**。混在一个组件里
+ * 会让「未连接」表现为「整页的加载失败」，那对玩家是误导。
+ *
+ * ## 显示什么
+ *
+ * 自己的那一条置顶并标明「我的评分」，下面按服务器给的顺序列出所有人的
+ * 短评。**不自己拼匿名格式**：`who` 的完整程度由服务器按令牌权限决定，
+ * 我们照原样显示，拼了反而会在权限变化时显示错的东西。
+ */
+function VrccSignedInSection({ page }: { page: VrccMyMapPage }) {
+    const { t } = useTranslation();
+    const mine = page.mine?.rate ?? null;
+    const rates = (page.rates ?? []).filter((rate) => rate && !rate.folded);
+
+    return (
+        <div className="flex flex-col gap-3">
+            {/* 我的评分 */}
+            <div className="bg-card rounded-lg border p-3">
+                <div className="text-muted-foreground mb-1.5 text-xs font-medium">
+                    {t('dialog.world.vrcc.my_rating')}
+                </div>
+                {mine && typeof mine.score === 'number' ? (
+                    <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-lg leading-none font-semibold tabular-nums">
+                                {mine.score}
+                            </span>
+                            <span className="text-muted-foreground text-xs">
+                                / 10
+                            </span>
+                            {mine.check && mine.check !== 'ok' ? (
+                                <span className="bg-muted text-muted-foreground rounded px-1 text-[10px]">
+                                    {t(
+                                        mine.check === 'wait'
+                                            ? 'dialog.world.vrcc.check_wait'
+                                            : 'dialog.world.vrcc.check_hidden'
+                                    )}
+                                </span>
+                            ) : null}
+                        </div>
+                        {mine.text ? (
+                            <div className="text-sm leading-relaxed break-words whitespace-pre-wrap">
+                                {mine.text}
+                            </div>
+                        ) : (
+                            <div className="text-muted-foreground text-[11px]">
+                                {t('dialog.world.vrcc.no_words')}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="text-muted-foreground text-[11px]">
+                        {t('dialog.world.vrcc.not_rated_by_me')}
+                    </div>
+                )}
+            </div>
+
+            {/* 所有人的短评 */}
+            <div className="flex flex-col gap-2">
+                <div className="text-muted-foreground text-xs font-medium">
+                    {t('dialog.world.vrcc.all_words', { count: rates.length })}
+                </div>
+                {rates.length ? (
+                    rates.map((rate, index) => (
+                        <VrccMapRateRow
+                            key={rate.id ?? `${rate.who?.n ?? 'x'}-${index}`}
+                            rate={rate}
+                        />
+                    ))
+                ) : (
+                    <div className="text-muted-foreground text-[11px]">
+                        {t('dialog.world.vrcc.no_words_yet')}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/** 一条短评：分数、正文、署名、时间。 */
+function VrccMapRateRow({ rate }: { rate: VrccMapRate }) {
+    const { t } = useTranslation();
+    const who = rate.who;
+    // 服务器给的署名可能只有匿名的「某位<星位>」，也可能带 VRChat 名字。
+    // 有 VRChat 名字就显示它，否则显示 name，两者都没有才退回占位。
+    const name = who?.vrc || who?.name || null;
+    const score = typeof rate.score === 'number' ? rate.score : null;
+    const hasText = Boolean(rate.text && rate.text.trim());
+
+    return (
+        <div className="bg-card rounded-lg border p-2.5">
+            <div className="flex min-w-0 items-center gap-2 text-[11px]">
+                {name ? (
+                    <span className="text-foreground truncate font-medium">
+                        {name}
+                    </span>
+                ) : null}
+                {rate.mine ? (
+                    <span className="bg-primary/15 text-primary shrink-0 rounded px-1 text-[10px]">
+                        {t('dialog.world.vrcc.mine')}
+                    </span>
+                ) : null}
+                {score !== null ? (
+                    <span className="text-muted-foreground ml-auto shrink-0 tabular-nums">
+                        {score} / 10
+                    </span>
+                ) : null}
+            </div>
+            {hasText ? (
+                <div className="mt-1 text-sm leading-relaxed break-words whitespace-pre-wrap">
+                    {rate.text}
+                </div>
+            ) : null}
+        </div>
     );
 }

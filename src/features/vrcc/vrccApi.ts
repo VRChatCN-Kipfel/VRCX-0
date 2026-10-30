@@ -263,6 +263,18 @@ export const vrccApi = {
     mapPage: (world: string) => call(() => commands.appVrccMapPage(world)),
 
     /**
+     * 带令牌的地图页：**完整短评列表** + 我的评分 + 地图介绍。
+     *
+     * 需要 `maps` 普通权限（已有，不需要重新授权）。公开版按官方说明「短评和
+     * 介绍不给」，想看别人的评价只能走这一条；未连接时会失败。
+     *
+     * `sort` 只认 `hot` / `new`，传 null 用服务器默认。
+     * 不在榜上时（`404`）后端转成 null，不是错误。
+     */
+    myMapPage: (world: string, sort: 'hot' | 'new' | null = null) =>
+        call(() => commands.appVrccMyMapPage(world, sort)),
+
+    /**
      * 玩家视角地图榜：比公开榜多「我去过几次、热评、名次、介绍首行」。
      *
      * 需要 `maps` 普通权限。`sort` 多一个 `went`（我去过的）。
@@ -379,6 +391,11 @@ export type VrccRatedMap = NonNullable<VrccRatedMaps['maps']>[number];
 export type VrccMapPage = NonNullable<
     Awaited<ReturnType<typeof commands.appVrccMapPage>>
 >;
+export type VrccMyMapPage = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccMyMapPage>>
+>;
+export type VrccMapRate = NonNullable<VrccMyMapPage['rates']>[number];
+export type VrccMapRateWho = NonNullable<VrccMapRate['who']>;
 export type VrccMyBoard = Awaited<ReturnType<typeof commands.appVrccMyBoard>>;
 export type VrccMyBoardSort = NonNullable<
     Parameters<typeof commands.appVrccMyBoard>[0]

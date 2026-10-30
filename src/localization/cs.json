@@ -4897,7 +4897,15 @@
                 "not_listed_hint": "This world is not on the VRCC map board yet.",
                 "load_failed": "Could not read VRCC data right now.",
                 "rank": "Board rank #{rank}",
-                "open_page": "Open the map page in your browser"
+                "open_page": "Open the map page in your browser",
+                "my_rating": "My rating",
+                "not_rated_by_me": "You have not rated this world yet.",
+                "no_words": "No comment written.",
+                "all_words": "All comments ({count})",
+                "no_words_yet": "No comments yet.",
+                "mine": "Me",
+                "check_wait": "Pending review",
+                "check_hidden": "Rejected"
             }
         },
         "avatar": {

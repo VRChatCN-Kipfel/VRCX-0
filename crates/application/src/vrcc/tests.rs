@@ -246,6 +246,20 @@ impl VrccRemote for FakeRemote {
             Ok(VrccMapPage::default())
         })
     }
+    fn my_map_page<'a>(
+        &'a self,
+        _world: &'a str,
+        _sort: Option<&'a str>,
+    ) -> VrccFuture<'a, VrccMyMapPage> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            // 带令牌的页面：默认给一份空的，让「404 转 None」「未连接先拒绝」
+            // 这类测试只要注入错误就能覆盖到。
+            Ok(VrccMyMapPage::default())
+        })
+    }
     fn my_board<'a>(&'a self, _sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
         Box::pin(async move {
             if let Some(error) = self.take_error() {
@@ -971,6 +985,42 @@ fn connected_service() -> (VrccService, Arc<FakeRemote>, Arc<MemoryStore>) {
 
 /// 地图页是没有令牌也能读的公开接口。
 ///
+/// 带令牌的地图页：404 同样是「不在榜上」，不是故障。
+///
+/// 这一条和公开版分开测，因为两条路径的 `ensure_connected` 行为不同：
+/// 公开版不要求连接，带令牌版**要求**。
+#[tokio::test]
+async fn the_signed_in_map_page_treats_404_as_absent() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(404, "not_found"));
+
+    assert!(
+        service.my_map_page("wrld_x", None).await.unwrap().is_none(),
+        "404 should read as 'this world is not on the board', not as a failure"
+    );
+
+    // 真的故障仍然要报出去。
+    remote.set_error(http(500, "server"));
+    let error = service.my_map_page("wrld_x", None).await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Server);
+}
+
+/// 未连接时直接拒绝，不把一个必然 `TokenMissing` 的请求发出去。
+#[tokio::test]
+async fn the_signed_in_map_page_refuses_before_sending_when_disconnected() {
+    // 空的 store + 没 mark_connected 的 remote = 从没连过的玩家。
+    // **不能**用 `connected_service()` 再 `disconnect()`：那个 store 里已经有
+    // 令牌，`ensure_connected` 看的是 store，断开并不会让检查失败。
+    let store: Arc<dyn VrccTokenStore> = Arc::new(MemoryStore::default());
+    let remote = FakeRemote::new();
+    let service = VrccService::new(store, Arc::clone(&remote) as Arc<dyn VrccRemote>);
+
+    let error = service.my_map_page("wrld_x", None).await.unwrap_err();
+    assert!(error.needs_reauth());
+    // 没注入过错误且没有走到网络，说明请求是被本地拦下的。
+    assert!(remote.take_error().is_none());
+}
+
 /// 不在榜上时服务器回 `404 not_found`——那是**这张图还没上榜**，不是故障。
 /// 如果这里改成把 404 当错误抛出去，一张新图就会显示成「服务坏了」。
 #[tokio::test]

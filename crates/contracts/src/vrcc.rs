@@ -1400,6 +1400,131 @@ pub struct VrccMapPage {
     pub at: i64,
 }
 
+/// 一条打分记录（短评）：`/me/maps/{world}/page` 的 `rates[]` 与 `mine.rate`。
+///
+/// 公开的地图页**不给**这个列表，只有带令牌的 `/me/…/page` 才有。官方还会按
+/// 令牌权限调整写者身份：有 `mutuals` 且客户端审核通过时给对方的 `n`，
+/// 否则一律匿名成 `{"name": "某位<星位>", "group": "G"}`。**我们只照原样显示
+/// `who`，不自己拼匿名格式**——那是服务器的职责，我们拼就可能在权限变化时
+/// 显示错的东西。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapRate {
+    /// 这条打分的编号。
+    #[serde(default)]
+    pub id: Option<i64>,
+    /// 短评正文；没写短评时是 `null`。
+    #[serde(default)]
+    pub text: Option<String>,
+    /// 打的分（1–10）。
+    #[serde(default)]
+    pub score: Option<i64>,
+    /// 赞、踩的计数。
+    #[serde(default)]
+    pub up: Option<i64>,
+    #[serde(default)]
+    pub down: Option<i64>,
+    /// 打分时间（毫秒）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// 写者。字段形状由服务器按权限决定，这里宽松处理。
+    #[serde(default)]
+    pub who: Option<VrccMapRateWho>,
+    /// 是不是我写的。
+    #[serde(default)]
+    pub mine: Option<bool>,
+    /// 我投的票：`1` 赞 / `-1` 踩 / `0` 没投。
+    #[serde(default)]
+    pub vote: Option<i64>,
+    /// 被折叠（内容或作者被隐藏）。
+    #[serde(default)]
+    pub folded: Option<bool>,
+    /// 只有 `mine.rate` 才有：审核状态（`wait` / `ok` / `hidden`）。
+    #[serde(default)]
+    pub check: Option<String>,
+}
+
+/// 一条打分里「写者」的身份。
+///
+/// 官方按权限决定给多少：审核通过的客户端 + `mutuals` 能看到别人的 `n` 和
+/// VRChat 名字；否则只有匿名的「某位<星位>」。**这里全部是 `Option`**——
+/// 缺字段是常态，不是异常。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapRateWho {
+    #[serde(default)]
+    pub n: Option<i64>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 星群代号（`G` / `W` / `Z` / `L` / `A`）。
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub photo: Option<bool>,
+    /// 互相连上时对方的 VRChat 名字。
+    #[serde(default)]
+    pub vrc: Option<String>,
+    #[serde(default)]
+    pub mutual: Option<bool>,
+    /// 是不是我。
+    #[serde(default)]
+    pub me: Option<bool>,
+}
+
+/// `/me/maps/{world}/page`：带令牌的地图页（1.13.0 起）。
+///
+/// 比公开版多出：完整短评列表、地图介绍、正在开的房，以及**我自己的评分**。
+/// 需要 `maps` 普通权限（我们已有），因此不需要重新授权。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyMapPage {
+    /// 榜上的那一行。
+    #[serde(default)]
+    pub map: Option<VrccBoardMap>,
+    /// 地图介绍；没有时是 `null`。
+    #[serde(default)]
+    pub intro: Option<VrccMapIntro>,
+    /// 短评列表，按 `sort` 排。
+    #[serde(default)]
+    pub rates: Vec<VrccMapRate>,
+    /// 我自己的评分与短评。
+    #[serde(default)]
+    pub mine: Option<VrccMyRate>,
+    /// 当前的排序方式（`hot` / `new`）。
+    #[serde(default)]
+    pub sort: Option<String>,
+}
+
+/// 地图介绍。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapIntro {
+    #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub up: Option<i64>,
+    #[serde(default)]
+    pub down: Option<i64>,
+    #[serde(default)]
+    pub at: Option<i64>,
+    #[serde(default)]
+    pub who: Option<VrccMapRateWho>,
+}
+
+/// 「我的」那一小块：自己打的分数与短评。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyRate {
+    /// 我的打分记录；没打过分时是 `null`。
+    #[serde(default)]
+    pub rate: Option<VrccMapRate>,
+    /// 我写的地图介绍；没有时是 `null`。
+    #[serde(default)]
+    pub intro: Option<VrccMapIntro>,
+}
+
 // ---------------------------------------------------------------------------
 // 错误体
 // ---------------------------------------------------------------------------

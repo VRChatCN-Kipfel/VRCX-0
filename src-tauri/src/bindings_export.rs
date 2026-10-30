@@ -216,6 +216,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             commands::application::vrcc::app__vrcc_my_map,
             commands::application::vrcc::app__vrcc_my_maps,
             commands::application::vrcc::app__vrcc_map_page,
+            commands::application::vrcc::app__vrcc_my_map_page,
             commands::application::vrcc::app__vrcc_my_board,
             commands::application::vrcc::app__vrcc_poll_notifications,
             commands::application::vrcc::app__vrcc_today,

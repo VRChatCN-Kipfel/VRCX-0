@@ -7,8 +7,8 @@ use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage,
-    VrccMyBoard, VrccMyBoardSort, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus,
-    VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccMyBoard, VrccMyBoardSort, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRecentNotifications,
+    VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -308,6 +308,19 @@ impl DesktopVrccRuntime {
     pub async fn map_page(&self, world: &str) -> Result<Option<VrccMapPage>, VrccFailure> {
         self.service
             .map_page(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+    /// 不在榜上时（`404`）返回 `None`。
+    pub async fn my_map_page(
+        &self,
+        world: &str,
+        sort: Option<&str>,
+    ) -> Result<Option<VrccMyMapPage>, VrccFailure> {
+        self.service
+            .my_map_page(world, sort)
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

@@ -211,6 +211,11 @@ export const queryKeys = Object.freeze({
     // 不一致，缓存永远命中不了——A2 那个 bug 就是这么来的。
     worldVrcc: (worldId: string, endpoint: string = '') =>
         withEndpoint(['world', worldId, 'vrcc'], endpoint),
+    // 带令牌的地图页。**必须与 `worldVrcc` 分开**：两条路的缓存时长、失效
+    // 条件、以及「未连接时会失败」这个性质都不同，共用一个键会让公开数据
+    // 被登录数据顶掉，反之亦然。
+    worldVrccSignedIn: (worldId: string, endpoint: string = '') =>
+        withEndpoint(['world', worldId, 'vrcc', 'signedIn'], endpoint),
     groupMembers: (params: VrchatGroupMembersInput, endpoint: string = '') =>
         withEndpoint(
             ['group', params.groupId, 'members', stableParams(params)],

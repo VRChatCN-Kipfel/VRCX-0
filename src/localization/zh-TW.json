@@ -4862,7 +4862,15 @@
                 "not_listed_hint": "星遇同頻地圖榜上還沒有這張圖。",
                 "load_failed": "暫時讀不到星遇同頻的資料。",
                 "rank": "地圖榜第 {rank} 名",
-                "open_page": "在瀏覽器開啟地圖頁"
+                "open_page": "在瀏覽器開啟地圖頁",
+                "my_rating": "我的評分",
+                "not_rated_by_me": "你還沒有給這張圖打分。",
+                "no_words": "沒有寫短評。",
+                "all_words": "全部短評（{count} 條）",
+                "no_words_yet": "還沒有人寫短評。",
+                "mine": "我",
+                "check_wait": "審核中",
+                "check_hidden": "未通過"
             }
         },
         "avatar": {

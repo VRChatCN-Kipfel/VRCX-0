@@ -4862,7 +4862,15 @@
                 "not_listed_hint": "星遇同频地图榜上还没有这张图。",
                 "load_failed": "暂时读不到星遇同频的数据。",
                 "rank": "地图榜第 {rank} 名",
-                "open_page": "在浏览器打开地图页"
+                "open_page": "在浏览器打开地图页",
+                "my_rating": "我的评分",
+                "not_rated_by_me": "你还没有给这张图打分。",
+                "no_words": "没有写短评。",
+                "all_words": "全部短评（{count} 条）",
+                "no_words_yet": "还没有人写短评。",
+                "mine": "我",
+                "check_wait": "审核中",
+                "check_hidden": "未通过"
             }
         },
         "avatar": {

@@ -12,9 +12,9 @@ use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMapPage,
-    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccNotes, VrccNotifications,
-    VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse,
-    VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
+    VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
+    VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -91,6 +91,11 @@ pub trait VrccRemote: Send + Sync {
     fn announcements<'a>(&'a self) -> VrccFuture<'a, VrccAnnouncements>;
     fn stickers<'a>(&'a self) -> VrccFuture<'a, VrccStickers>;
     fn map_page<'a>(&'a self, world: &'a str) -> VrccFuture<'a, VrccMapPage>;
+    fn my_map_page<'a>(
+        &'a self,
+        world: &'a str,
+        sort: Option<&'a str>,
+    ) -> VrccFuture<'a, VrccMyMapPage>;
 
     // -- 设备授权 ----------------------------------------------------------
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode>;
@@ -905,6 +910,32 @@ impl VrccService {
             return Ok(None);
         }
         match self.remote.map_page(&world).await {
+            Ok(page) => Ok(Some(page)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(self.settle(error)),
+        }
+    }
+
+    /// 带令牌的地图页：完整短评列表 + 我的评分（需要 `maps` 普通权限）。
+    ///
+    /// 与公开版 [`Self::map_page`] 的区别是**能看到别人的评价**。公开版按
+    /// 官方说明「短评和介绍不给」，只有一条热评。
+    ///
+    /// 不在榜上时服务器回 `404 not_found`——那是正常状态（这张图还没上榜），
+    /// 转成 `None`，让界面说「不在榜上」而不是报错。
+    ///
+    /// 未连接时先拒绝，不把一个必然 `TokenMissing` 的请求发出去。
+    pub async fn my_map_page(
+        &self,
+        world: &str,
+        sort: Option<&str>,
+    ) -> std::result::Result<Option<VrccMyMapPage>, VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            return Ok(None);
+        }
+        self.ensure_connected()?;
+        match self.remote.my_map_page(&world, sort).await {
             Ok(page) => Ok(Some(page)),
             Err(error) if error.is_not_found() => Ok(None),
             Err(error) => Err(self.settle(error)),

@@ -12,8 +12,8 @@ use tauri::State;
 use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage, VrccMyBoard,
-    VrccMyBoardSort, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers,
-    VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccMyBoardSort, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus,
+    VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
 };
 
 use crate::{error::AppError, state::AppState};
@@ -170,6 +170,25 @@ pub async fn app__vrcc_map_page(
         .runtime_host()
         .vrcc()
         .map_page(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+///
+/// 不在榜上时（`404`）返回 `null`；未连接时返回需要连接的失败，不会被当成
+/// 「这张图不在榜」。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_map_page(
+    state: State<'_, AppState>,
+    world: String,
+    sort: Option<String>,
+) -> Result<Option<VrccMyMapPage>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_map_page(&world, sort.as_deref())
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }

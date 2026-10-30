@@ -40,3 +40,26 @@ export function vrccPublicMapQueryOptions(worldId: string) {
         ...entityQueryPolicies.vrccMapPage
     });
 }
+
+/**
+ * 带令牌的地图页：完整短评列表 + 我的评分 + 地图介绍。
+ *
+ * 需要 `maps` 普通权限（已有，不需要玩家重新授权）。未连接时会失败——**这
+ * 是预期行为**：公开的那一半照常显示，只是没有别人的短评和自己那一条。
+ *
+ * 缓存策略**比公开版短**：短评会随时间增加，30 分钟太滞钝。这里沿用
+ * `vrccMapPage` 的 30 分钟只用于「在不在榜」这种慢变事实，短评不行。
+ */
+export function vrccMyMapPageQueryOptions(worldId: string) {
+    return queryOptions({
+        queryKey: queryKeys.worldVrccSignedIn(worldId),
+        queryFn: async () =>
+            worldId.startsWith('wrld_')
+                ? commands.appVrccMyMapPage(worldId, null)
+                : null,
+        staleTime: 5 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
+        retry: 1,
+        refetchOnWindowFocus: false
+    });
+}
