@@ -113,11 +113,17 @@ fn check_body_size(len: usize) -> Result<(), VrccError> {
 }
 
 /// 带每天次数的接口各自算在哪一份额度里（官方《频率限制》）。
+///
+/// **写操作不在这里面**：打分、赞踩、删除各有自己的一份（官方那张表把它们列在
+/// 「写，每个授权每天」），传 `bucket: None`。把它们记在读上不只是数字不准——
+/// `record_too_many` 会按收到的 429 把**那一整份**标记为用完直到北京时间零点，
+/// 于是「今天的地图赞踩用完了」会连带把提醒、连线、所在地图全部停掉。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum QuotaBucket {
     /// 第一份读：最近的提醒、星轨相交、互相连上、所在的地图、我打过分的地图。
     Reads,
-    /// 第二份读：今天的星、通知中心等，和第一份分开算。
+    /// 第二份读：今天的星、**地图榜和地图页**、全部介绍、通知中心等，
+    /// 和第一份分开算。
     MoreReads,
     /// `me/unread` 自己的一份。
     Unread,
@@ -870,7 +876,9 @@ impl VrccClient {
             authed: true,
             key: "my_map_page",
             min_gap: Duration::from_secs(30),
-            bucket: Some(QuotaBucket::Reads),
+            // 第二份读。官方《频率限制》把「地图榜和地图页」划进第二份，
+            // 和提醒、连线、所在地图那一份（第一份）分开算。
+            bucket: Some(QuotaBucket::MoreReads),
             bypass_gate: false,
         })
         .await
@@ -910,7 +918,9 @@ impl VrccClient {
             key: "rate_map",
             // 连点防重：服务器自己的额度才是权威，这里只挡手抖。
             min_gap: Duration::from_secs(2),
-            bucket: Some(QuotaBucket::Reads),
+            // 打分有自己的一份额度（官方《频率限制》：「和网页地图榜共用每天的
+            // 打分与添图次数」），**不算读**。
+            bucket: None,
             bypass_gate: false,
         })
         .await
@@ -929,7 +939,9 @@ impl VrccClient {
                 authed: true,
                 key: "delete_map_rating",
                 min_gap: Duration::from_secs(2),
-                bucket: Some(QuotaBucket::Reads),
+                // 删除算写（官方《频率限制》：「各种删除和合照合计 50」），
+                // 和读的 1000 次不是同一份额度。
+                bucket: None,
                 bypass_gate: false,
             })
             .await?;
@@ -968,7 +980,9 @@ impl VrccClient {
             key: "vote_map_content",
             // 连点防重。服务端自己也有额度，这里只挡手抖。
             min_gap: Duration::from_secs(1),
-            bucket: Some(QuotaBucket::Reads),
+            // 赞踩算写（官方《频率限制》：「地图赞踩 200」，每份授权每天），
+            // 不占读。
+            bucket: None,
             bypass_gate: false,
         })
         .await
@@ -1201,7 +1215,8 @@ impl VrccClient {
             authed: true,
             key: "my_board",
             min_gap: Duration::from_secs(60),
-            bucket: Some(QuotaBucket::Reads),
+            // 地图榜是第二份读（官方《频率限制》：「地图榜和地图页」）。
+            bucket: Some(QuotaBucket::MoreReads),
             bypass_gate: false,
         })
         .await
@@ -1366,6 +1381,97 @@ mod tests {
 
     fn client() -> VrccClient {
         VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())), None)
+    }
+
+    /// 起一个只回答一次的本地服务器，返回它的基址。
+    ///
+    /// 用真实 socket 而不是桩：这几条测的是「**哪一份**额度被扣了」，而那是
+    /// `request()` 根据状态码和响应头做的决定，只测纯函数碰不到。
+    async fn serve_once(status_line: &'static str, body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.flush().await;
+            }
+        });
+        format!("http://{addr}/")
+    }
+
+    /// 把客户端指到那个一次性服务器上。
+    fn client_at(base: String) -> VrccClient {
+        let mut client = client();
+        client.base = base;
+        client
+    }
+
+    /// 「这一份今天用完了」只停它自己，不能顺手把第一份读也停掉。
+    ///
+    /// 地图榜和地图页在官方《频率限制》里属于**第二份读**。早先它们和提醒、
+    /// 连线、所在地图共用 `Reads` 桶，而 `record_too_many` 会把吃到的 429 当成
+    /// 「这一份今天没了」标记到北京时间零点——于是玩家把地图榜刷满，连提醒都
+    /// 收不到。
+    #[tokio::test]
+    async fn burning_the_map_boards_daily_reads_does_not_stop_the_first_read_bucket() {
+        let base = serve_once(
+            "429 Too Many Requests\r\nRetry-After: 7200\r\nRateLimit-Limit: 1000\r\nRateLimit-Remaining: 0\r\nRateLimit-Reset: 7200",
+            r#"{"error":"too_many"}"#,
+        )
+        .await;
+        let client = client_at(base);
+
+        let error = client
+            .my_board(VrccMyBoardSort::Top)
+            .await
+            .expect_err("服务器回的是 429");
+        // 这是**服务端**说的「这一份今天没了」，不是本机拦下的。
+        assert!(
+            matches!(&error.detail, ErrorDetail::Http(http) if http.status == 429),
+            "{error:?}"
+        );
+
+        // 第一份读一点没受影响。
+        assert!(client.spend(QuotaBucket::Reads).is_ok());
+        // 第二份读按服务端的说法已经用满。
+        assert!(client.spend(QuotaBucket::MoreReads).is_err());
+    }
+
+    /// 写接口吃到当天的 429，不该动任何一份读额度，也不该让所有接口一起退避。
+    ///
+    /// 赞踩是「地图赞踩 200」、打分是「每天的打分与添图次数」、删除是「各种删除
+    /// 合计 50」——都是写，和读的 1000 次毫无关系。
+    #[tokio::test]
+    async fn a_vote_hitting_its_daily_limit_leaves_both_read_buckets_alone() {
+        let base = serve_once(
+            "429 Too Many Requests\r\nRetry-After: 7200\r\nRateLimit-Limit: 200\r\nRateLimit-Remaining: 0\r\nRateLimit-Reset: 7200",
+            r#"{"error":"too_many"}"#,
+        )
+        .await;
+        let client = client_at(base);
+
+        let error = client
+            .vote_map_content(VrccVoteKind::Rate, 7, VrccVote::Up)
+            .await
+            .expect_err("服务器回的是 429");
+        assert!(
+            matches!(&error.detail, ErrorDetail::Http(http) if http.status == 429),
+            "{error:?}"
+        );
+
+        assert!(client.spend(QuotaBucket::Reads).is_ok());
+        assert!(client.spend(QuotaBucket::MoreReads).is_ok());
+        // 也不该把所有接口一起退避到明天：那只会发生在「全站 429」时。
+        assert_eq!(client.local_usage().backoff_remaining, Duration::ZERO);
     }
 
     /// 标识的来源只有两层：构建期注入 > 源码默认，**没有运行时覆盖**。
