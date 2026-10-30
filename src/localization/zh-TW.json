@@ -4847,7 +4847,22 @@
                 "raters_other": "{count} 人評分",
                 "no_rating": "還沒有人評分",
                 "not_listed": "不在榜上",
-                "source": "資料來源於 VRC 中文社群所屬平台「星遇同頻」，非 VRChat 官方"
+                "source": "資料來源於 VRC 中文社群所屬平台「星遇同頻」，非 VRChat 官方",
+                "tab": "星遇同頻",
+                "spread": "分數分布",
+                "went": "去過",
+                "went_count": "{count} 人去過",
+                "cap": "房間上限",
+                "perf_platforms": "支援平台",
+                "perf_size": "下載大小",
+                "perf_load": "載入時間",
+                "hot": "熱評",
+                "hot_went": "去過",
+                "words_hint": "完整短評與評分需要連接星遇同頻帳戶。",
+                "not_listed_hint": "星遇同頻地圖榜上還沒有這張圖。",
+                "load_failed": "暫時讀不到星遇同頻的資料。",
+                "rank": "地圖榜第 {rank} 名",
+                "open_page": "在瀏覽器開啟地圖頁"
             }
         },
         "avatar": {

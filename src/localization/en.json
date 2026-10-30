@@ -4857,7 +4857,22 @@
                 "raters_other": "{count} ratings",
                 "no_rating": "Not rated yet",
                 "not_listed": "Not on the board",
-                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc."
+                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc.",
+                "tab": "VRCC",
+                "spread": "Score spread",
+                "went": "Visited",
+                "went_count": "{count} visits",
+                "cap": "Capacity",
+                "perf_platforms": "Platforms",
+                "perf_size": "Download",
+                "perf_load": "Load time",
+                "hot": "Top comment",
+                "hot_went": "visited",
+                "words_hint": "Full comments and rating need a connected VRCC account.",
+                "not_listed_hint": "This world is not on the VRCC map board yet.",
+                "load_failed": "Could not read VRCC data right now.",
+                "rank": "Board rank #{rank}",
+                "open_page": "Open the map page in your browser"
             }
         },
         "avatar": {

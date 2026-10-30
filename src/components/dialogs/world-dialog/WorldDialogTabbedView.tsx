@@ -390,6 +390,10 @@ export function WorldDialogTabbedView({
         ...(typeof world.storeId === 'string' && world.storeId
             ? [{ value: 'store', label: t('economy.store_header') }]
             : []),
+        // 星遇同频标签页。只在有世界 ID 时出现——没有 ID 时查不了任何东西。
+        ...(world.id
+            ? [{ value: 'vrcc', label: t('dialog.world.vrcc.tab') }]
+            : []),
         { value: 'json', label: t('dialog.world.json.header') }
     ];
 
