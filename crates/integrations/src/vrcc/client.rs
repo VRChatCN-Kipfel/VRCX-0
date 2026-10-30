@@ -366,6 +366,12 @@ impl VrccClient {
     }
 
     /// 只允许 `/api/v1/` 下的相对路径。这是硬约束，不提供绕过开关。
+    ///
+    /// 除了绝对地址，还要挡住**路径穿越**：`me/maps/{world}/page` 里的 `{world}`
+    /// 来自外部数据（VRChat 世界 ID），`wrld_x/../../me/notifications` 这种值在
+    /// 规范化之后会落到另一个接口上。世界 ID 在各自入口已经有严格校验（见
+    /// [`Self::validate_world`]），这里是第二道——写给「以后照着加接口、忘了校验
+    /// 参数」的那一天。
     fn validate_path(path: &str) -> Result<(), VrccError> {
         let lowered = path.to_ascii_lowercase();
         if lowered.starts_with("http") || path.starts_with("//") {
@@ -374,7 +380,43 @@ impl VrccClient {
                 ErrorDetail::AbsolutePath(path.to_string()),
             ));
         }
+        let suspicious = path.contains("..")
+            || path.contains('\\')
+            || path.contains('#')
+            || path.chars().any(char::is_control);
+        if suspicious {
+            return Err(VrccError::new(
+                ErrorLayer::Input,
+                ErrorDetail::InvalidArgument("path"),
+            ));
+        }
         Ok(())
+    }
+
+    /// 世界 ID 是不是官方认的形状：`wrld_` 加 36 位十六进制（含连字符）。
+    ///
+    /// 官方 `World` 的格式是 `^wrld_[0-9a-f-]{36}$`。这个值会被拼进 URL 路径，
+    /// 所以**发请求之前**就必须挡住：形状不对的 ID，我们没有任何理由替它发一次。
+    fn is_valid_world(world: &str) -> bool {
+        const TAIL_LEN: usize = 36;
+        let Some(tail) = world.strip_prefix("wrld_") else {
+            return false;
+        };
+        tail.len() == TAIL_LEN && tail.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-')
+    }
+
+    /// 形状不对就直接失败，不带着它去拼路径。
+    ///
+    /// 用 [`ErrorDetail::InvalidArgument`] 而不是 `AbsolutePath`：那个说的是「我们
+    /// 的路径拼错了」，这里说的是「调用方给的值不能用」，两者排查方向不同。
+    fn validate_world(world: &str) -> Result<(), VrccError> {
+        if Self::is_valid_world(world) {
+            return Ok(());
+        }
+        Err(VrccError::new(
+            ErrorLayer::Input,
+            ErrorDetail::InvalidArgument("world"),
+        ))
     }
 
     /// 拿到一次发送许可：检查退避、限流，必要时等待。
@@ -792,6 +834,7 @@ impl VrccClient {
 
     /// 单张地图详情。未上榜或未过审返回 `404 not_found`。
     pub async fn map(&self, world: &str) -> Result<VrccMapDetail, VrccError> {
+        Self::validate_world(world)?;
         self.request(Call {
             method: "GET",
             path: &format!("maps/{world}"),
@@ -813,7 +856,14 @@ impl VrccClient {
     ///
     /// 空列表直接发一个空请求没有意义，也会白白占一次读取，所以本地短路。
     pub async fn maps(&self, worlds: &[String]) -> Result<VrccBoard, VrccError> {
-        let Some(path) = batch_maps_path(worlds) else {
+        // 形状不对的 ID 直接丢掉：它要拼进查询串，留着只会污染整条路径。
+        // 批量接口的语义本来就是「有多少算多少」，少一张不算失败。
+        let valid: Vec<String> = worlds
+            .iter()
+            .filter(|world| Self::is_valid_world(world))
+            .cloned()
+            .collect();
+        let Some(path) = batch_maps_path(&valid) else {
             // 空列表没什么可问的，也不该白占一次读取。
             return Ok(VrccBoard::default());
         };
@@ -842,6 +892,7 @@ impl VrccClient {
     /// 全局键」的典型症状，和接口本身的频率无关。服务器最多 5 分钟才更新一次，
     /// 5 秒足够挡手抖。
     pub async fn map_page(&self, world: &str) -> Result<VrccMapPage, VrccError> {
+        Self::validate_world(world)?;
         self.request(Call {
             method: "GET",
             path: &format!("maps/{world}/page"),
@@ -876,6 +927,7 @@ impl VrccClient {
         world: &str,
         sort: Option<&str>,
     ) -> Result<VrccMyMapPage, VrccError> {
+        Self::validate_world(world)?;
         let sort = sort.map(str::trim).filter(|sort| !sort.is_empty());
         let path = match sort {
             Some(sort) => format!("me/maps/{world}/page?sort={sort}"),
@@ -919,6 +971,7 @@ impl VrccClient {
         score: i64,
         text: &VrccRatingText,
     ) -> Result<VrccMyMap, VrccError> {
+        Self::validate_world(world)?;
         let score = score.clamp(VrccRatingInput::MIN_SCORE, VrccRatingInput::MAX_SCORE);
         let mut body = json!({ "score": score });
         if let Some(text) = text.as_body_text() {
@@ -945,6 +998,7 @@ impl VrccClient {
     /// 需要 `maps.rate`。官方没说返回什么，所以这里只判断成功与否，
     /// 调用方刷新页面即可。
     pub async fn delete_map_rating(&self, world: &str) -> Result<(), VrccError> {
+        Self::validate_world(world)?;
         let response = self
             .request::<serde_json::Value>(Call {
                 method: "POST",
@@ -1206,7 +1260,10 @@ impl VrccClient {
     ///
     /// 限流器按路径分组，所以不同世界互不相干。早先它们共用一个键，玩家在 10 秒
     /// 内打开第二个世界详情就会被自己的限流器挡住。
+    ///
+    /// **形状不对的 ID 直接拒掉**，见 [`Self::validate_world`]。
     pub async fn my_map(&self, world: &str) -> Result<VrccMyMap, VrccError> {
+        Self::validate_world(world)?;
         self.request(Call {
             method: "GET",
             path: &format!("me/maps/{world}"),
@@ -1412,6 +1469,73 @@ mod tests {
 
     fn client() -> VrccClient {
         VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())), None)
+    }
+
+    /// 世界 ID 必须合官方 `World` 的结构（`wrld_` 加 36 位十六进制）。
+    ///
+    /// 这个值要拼进 URL 路径，`wrld_x/../../me/notifications` 这种在规范化之后会
+    /// 落到另一个接口上。写接口尤其不能靠「来源可信」来兜底。
+    ///
+    /// **大小写不管**：官方 schema 写的是小写，但大小写不影响路径安全，服务器两种
+    /// 都认；玩家从别处复制来的大写 ID 不该因为格式洁癖被挡掉。
+    #[test]
+    fn only_world_ids_of_the_documented_shape_pass() {
+        assert!(VrccClient::is_valid_world(
+            "wrld_4432ea9b-729c-46e3-8eaf-846aa0a37fdd"
+        ));
+        // 大写只是不规范，不是危险，照收。
+        assert!(VrccClient::is_valid_world(
+            "wrld_4432EA9B-729C-46E3-8EAF-846AA0A37FDD"
+        ));
+        for bad in [
+            "",
+            "wrld_",
+            "wrld_x",
+            // 少一位、多一位
+            "wrld_4432ea9b-729c-46e3-8eaf-846aa0a37fd",
+            "wrld_4432ea9b-729c-46e3-8eaf-846aa0a37fdda",
+            // 多一段、路径穿越
+            "wrld_4432ea9b-729c-46e3-8eaf-846aa0a37fdd/page",
+            "wrld_x/../../me/notifications",
+            "notwrld_4432ea9b-729c-46e3-8eaf-846aa0a37fdd",
+        ] {
+            assert!(!VrccClient::is_valid_world(bad), "{bad} 不该通过");
+        }
+    }
+
+    /// 形状不对的 ID 不会让请求跑出去。
+    ///
+    /// 这条走的是写接口：评分请求带着一个坏 ID 发出去，落点就是另一个 `me/…`
+    /// 接口，而且是以玩家的名义。
+    #[tokio::test]
+    async fn a_world_id_of_the_wrong_shape_never_reaches_the_network() {
+        let client = client();
+        let error = client
+            .rate_map("wrld_x/../../me/notifications", 8, &VrccRatingText::Clear)
+            .await
+            .expect_err("形状不对应当本地拒掉");
+        assert_eq!(error.layer, ErrorLayer::Input);
+        assert!(matches!(
+            error.detail,
+            ErrorDetail::InvalidArgument("world")
+        ));
+    }
+
+    /// 路径里的 `..`、反斜杠和片段标识都进不去。
+    #[test]
+    fn a_path_that_climbs_out_of_the_api_prefix_is_refused() {
+        for bad in [
+            "http://evil.example/me",
+            "//evil.example/me",
+            "me/maps/wrld_x/../../me/notifications",
+            "me\\maps",
+            "me/maps/x#frag",
+        ] {
+            assert!(VrccClient::validate_path(bad).is_err(), "{bad} 不该通过");
+        }
+        // 正常的相对路径与查询串照常放行。
+        assert!(VrccClient::validate_path("me/maps/wrld_x/page?sort=new").is_ok());
+        assert!(VrccClient::validate_path("boards?limit=20&sort=hot").is_ok());
     }
 
     /// 起一个本地服务器，按顺序回答 `connections` 次相同的响应，返回它的基址。

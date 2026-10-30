@@ -267,6 +267,7 @@ pub fn classify_vrcc_error(error: &VrccError) -> (VrccErrorKind, Option<String>)
         // 落在这里说明代码有问题，会由日志暴露出来。
         ErrorDetail::AbsolutePath(_)
         | ErrorDetail::BodyTooLarge
+        | ErrorDetail::InvalidArgument(_)
         | ErrorDetail::MissingArgument(_) => VrccErrorKind::Other,
         ErrorDetail::Transport { .. } | ErrorDetail::Decode(_) => VrccErrorKind::Transport,
         ErrorDetail::ThrottledLocally { .. } => VrccErrorKind::Throttled,

@@ -193,6 +193,13 @@ pub enum ErrorDetail {
     /// ——玩家会以为提交了。所以它需要一条玩家看得懂、又能指向我们代码的文案。
     #[error("星遇同频请求缺少必要参数：{0}")]
     MissingArgument(&'static str),
+    /// **参数格式不合法**：值给了，但不是这个接口认的形状。
+    ///
+    /// 和 [`Self::MissingArgument`] 分开：那个是「没给」，这个是「给了但不能用」
+    /// ——例如世界 ID 不是官方规定的 `wrld_` 加 36 位十六进制。两者都必须让请求
+    /// 在本地停下：世界 ID 要拼进 URL 路径，形状不对就没有发出去的理由。
+    #[error("星遇同频请求参数格式不对：{0}")]
+    InvalidArgument(&'static str),
     #[error("请求正文超过 {VRCC_MAX_BODY_BYTES} 字节上限")]
     BodyTooLarge,
     /// **本机限流**：请求没有发出去。
