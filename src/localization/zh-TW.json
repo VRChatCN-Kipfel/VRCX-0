@@ -4840,6 +4840,14 @@
                 "failed_to_update_value": "更新{value}失敗",
                 "value_copied": "已複製{value}",
                 "set_value_as_your_vrchat_home_world": "將 {value} 設為你的 VRChat 起始世界？"
+            },
+            "vrcc": {
+                "rating": "星遇同頻評分",
+                "raters_one": "{{count}} 人評分",
+                "raters_other": "{{count}} 人評分",
+                "no_rating": "還沒有人評分",
+                "not_listed": "不在榜上",
+                "source": "資料來源於 VRC 中文社群所屬平台「星遇同頻」，並非 VRChat 官方"
             }
         },
         "avatar": {

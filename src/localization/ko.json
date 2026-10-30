@@ -4783,6 +4783,14 @@
                 "failed_to_update_value": "{value} 항목을 업데이트하지 못했습니다.",
                 "value_copied": "{value} 복사됨",
                 "set_value_as_your_vrchat_home_world": "{value} 월드를 VRChat 홈 월드로 설정할까요?"
+            },
+            "vrcc": {
+                "rating": "VRCC rating",
+                "raters_one": "{{count}} rating",
+                "raters_other": "{{count}} ratings",
+                "no_rating": "Not rated yet",
+                "not_listed": "Not on the board",
+                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc."
             }
         },
         "avatar": {

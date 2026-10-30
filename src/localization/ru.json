@@ -4869,6 +4869,14 @@
                 "failed_to_update_value": "Не удалось обновить {value}",
                 "value_copied": "{value} скопировано",
                 "set_value_as_your_vrchat_home_world": "Сделать {value} домашним миром в VRChat?"
+            },
+            "vrcc": {
+                "rating": "VRCC rating",
+                "raters_one": "{{count}} rating",
+                "raters_other": "{{count}} ratings",
+                "no_rating": "Not rated yet",
+                "not_listed": "Not on the board",
+                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc."
             }
         },
         "avatar": {

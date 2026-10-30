@@ -4875,6 +4875,14 @@
                 "failed_to_update_value": "Nepodařilo se aktualizovat {value}",
                 "value_copied": "{value} zkopírováno",
                 "set_value_as_your_vrchat_home_world": "Nastavit {value} jako váš domovský svět VRChat?"
+            },
+            "vrcc": {
+                "rating": "VRCC rating",
+                "raters_one": "{{count}} rating",
+                "raters_other": "{{count}} ratings",
+                "no_rating": "Not rated yet",
+                "not_listed": "Not on the board",
+                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc."
             }
         },
         "avatar": {

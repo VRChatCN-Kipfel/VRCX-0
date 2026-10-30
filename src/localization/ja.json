@@ -4836,6 +4836,14 @@
                 "failed_to_update_value": "{value}の更新に失敗しました",
                 "value_copied": "{value}をコピーしました",
                 "set_value_as_your_vrchat_home_world": "{value} を VRChat のホームワールドに設定しますか？"
+            },
+            "vrcc": {
+                "rating": "VRCC rating",
+                "raters_one": "{{count}} rating",
+                "raters_other": "{{count}} ratings",
+                "no_rating": "Not rated yet",
+                "not_listed": "Not on the board",
+                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc."
             }
         },
         "avatar": {

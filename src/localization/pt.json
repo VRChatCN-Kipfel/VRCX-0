@@ -4843,6 +4843,14 @@
                 "failed_to_update_value": "Falha ao atualizar {value}",
                 "value_copied": "{value} copiado",
                 "set_value_as_your_vrchat_home_world": "Definir {value} como seu mundo inicial do VRChat?"
+            },
+            "vrcc": {
+                "rating": "VRCC rating",
+                "raters_one": "{{count}} rating",
+                "raters_other": "{{count}} ratings",
+                "no_rating": "Not rated yet",
+                "not_listed": "Not on the board",
+                "source": "Data from VRCC, a VRChat community platform; not affiliated with VRChat Inc."
             }
         },
         "avatar": {

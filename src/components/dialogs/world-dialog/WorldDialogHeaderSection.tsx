@@ -51,6 +51,7 @@ import {
     fileAnalysisSizeForPlatform,
     platformDisplayName
 } from './WorldDialogViewParts';
+import { WorldVrccRating } from './WorldVrccRating';
 
 function overviewValue(value: unknown) {
     return value || value === 0 ? String(value) : '—';
@@ -683,6 +684,10 @@ export function WorldDialogOverviewSection({
                 world={world}
                 worldUrl={worldUrl}
             />
+
+            {/* 星遇同频评分：星级 + 均分 + 人数 + 来源声明。
+                没有 id 时不挂，免得拿空串去查。 */}
+            {world.id ? <WorldVrccRating worldId={world.id} /> : null}
 
             {detail ? (
                 <div className="text-muted-foreground text-xs">
