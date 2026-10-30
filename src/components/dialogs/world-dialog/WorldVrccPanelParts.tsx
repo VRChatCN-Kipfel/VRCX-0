@@ -125,13 +125,18 @@ export function VrccSection({
 }) {
     return (
         <section className={cn('flex min-w-0 flex-col gap-2', className)}>
-            <div className="flex min-w-0 items-center gap-2 border-b pb-1.5">
+            {/* 标题栏不参与伸缩：它是这一节的固定头部。 */}
+            <div className="flex min-w-0 shrink-0 items-center gap-2 border-b pb-1.5">
                 <h4 className="text-muted-foreground shrink-0 text-xs font-medium">
                     {title}
                 </h4>
                 {aside ? <div className="ml-auto shrink-0">{aside}</div> : null}
             </div>
-            {children}
+            {/* 内容区自己成为一个 flex 列：这样调用方给 `className` 加
+                `min-h-0 flex-1` 时，里面的滚动容器才能真正拿到高度。
+                没有这一层，`flex:1` 只会作用到 section，子元素仍然是
+                auto 高，`overflow-y-auto` 永远不会触发。 */}
+            <div className="flex min-h-0 min-w-0 flex-col">{children}</div>
         </section>
     );
 }

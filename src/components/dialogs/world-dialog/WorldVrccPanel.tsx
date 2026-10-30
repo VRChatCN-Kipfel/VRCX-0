@@ -208,9 +208,13 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     );
 
     return (
-        <div className="flex min-w-0 flex-col gap-5 pb-2">
+        // `h-full` + 内部 flex：让这一页永远不超过标签页容器的高度。
+        // 前面的分节各占自己该占的，剩下的全部给短评区，由它自己滚动。
+        // 标签页容器本身是 `overflow-auto`（别的页签都靠它滚），我们不改它，
+        // 只是让这一页正好塞得进去。
+        <div className="flex h-full min-w-0 flex-col gap-5 overflow-hidden pb-2">
             {/* ① 指标行。点「配置」会在它正下方展开四宫格。 */}
-            <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 shrink-0 flex-col gap-2">
                 <VrccMetricRow items={metrics} />
                 <div ref={perfRef}>
                     <VrccCollapse open={perfOpen}>
@@ -222,7 +226,10 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
             </div>
 
             {/* ② 地图介绍 */}
-            <VrccSection title={t('dialog.world.vrcc.intro')}>
+            <VrccSection
+                title={t('dialog.world.vrcc.intro')}
+                className="shrink-0"
+            >
                 {intro ? (
                     <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
                         {intro}
@@ -237,7 +244,10 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
             </VrccSection>
 
             {/* ③ 打个分吧：主分数 + 大号星星 */}
-            <VrccSection title={t('dialog.world.vrcc.rate_section')}>
+            <VrccSection
+                title={t('dialog.world.vrcc.rate_section')}
+                className="shrink-0"
+            >
                 <div className="flex min-w-0 flex-col gap-2">
                     <div className="flex min-w-0 items-center gap-3">
                         <span className="text-3xl leading-none font-semibold tabular-nums">
@@ -274,9 +284,12 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                 </div>
             </VrccSection>
 
-            <VrccScoreSpread spread={spread} />
+            <div className="shrink-0">
+                <VrccScoreSpread spread={spread} />
+            </div>
 
-            {/* ④ 短评 */}
+            {/* ④ 短评。这一节吃掉剩余高度，列表在它内部滚动——
+                页面本身不需要滚动条。 */}
             <VrccSection
                 title={t('dialog.world.vrcc.comments_title')}
                 aside={
@@ -284,6 +297,7 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                         <SortToggle value={sort} onChange={setSort} />
                     ) : null
                 }
+                className="min-h-24 flex-1"
             >
                 {!signedIn.data ? (
                     <p className="text-muted-foreground text-xs leading-relaxed">
@@ -292,7 +306,7 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                             : t('dialog.world.vrcc.words_hint')}
                     </p>
                 ) : rates.length ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
                         {rates.map((rate, index) => (
                             <CommentCard
                                 key={
@@ -311,7 +325,10 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
 
             {/* ⑤ 热评：公开接口唯一给的一条，登录后没有短评列表时用它兜底 */}
             {!signedIn.data && map.hot?.text ? (
-                <VrccSection title={t('dialog.world.vrcc.hot')}>
+                <VrccSection
+                    title={t('dialog.world.vrcc.hot')}
+                    className="shrink-0"
+                >
                     <CommentCard
                         rate={{
                             text: map.hot.text,
