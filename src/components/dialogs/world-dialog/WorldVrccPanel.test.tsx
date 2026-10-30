@@ -350,6 +350,36 @@ describe('WorldVrccPanel', () => {
         ).toBeTruthy();
     });
 
+    it('限流时说清额度何时重置，不能只说「稍后重试」', async () => {
+        // 429 的额度按北京时间零点重置，一直点不会变好。
+        // 笼统的「稍后重试」会让玩家反复点。
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockRejectedValue(
+            Object.assign(new Error('too many'), {
+                vrcc: { kind: 'throttled', layer: 'server' }
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.unknown_throttled')
+        ).toBeTruthy();
+    });
+
+    it('还在生成时说「稍后再看」，不说要重试或重连', async () => {
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockRejectedValue(
+            Object.assign(new Error('busy'), {
+                vrcc: { kind: 'notReady', layer: 'server' }
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.unknown_notready')
+        ).toBeTruthy();
+    });
+
     it('请求失败时说读不到，不说「不在榜上」', async () => {
         // 这条要等重试跑完。策略里 `retry: 1` 会盖掉 QueryClient 的默认值，
         // 重试期间 `isPending` 仍为真，界面一直是「加载中」——所以给足超时。

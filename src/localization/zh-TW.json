@@ -4912,7 +4912,9 @@
                 "unknown_hint": "查不到你的投稿狀態，請稍後重試。",
                 "unknown_reauth": "登入已失效，請重新連接星遇同頻。",
                 "unknown_scope": "缺少查看地圖的權限，請重新連接時勾選同意。",
-                "unknown_network": "網路連接失敗，請檢查網路後重試。"
+                "unknown_network": "網路連接失敗，請檢查網路後重試。",
+                "unknown_throttled": "請求太頻繁，請稍後再試。今天的次數用完後會在北京時間零點重置。",
+                "unknown_notready": "這一輪還在生成，稍後再看。"
             }
         },
         "avatar": {

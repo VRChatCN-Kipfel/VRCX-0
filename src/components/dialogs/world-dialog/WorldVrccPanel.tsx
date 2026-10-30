@@ -204,19 +204,31 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
         }
 
         // 问过了但没问成。**按错误类别分开说**，因为处理方式完全不同：
-        // 令牌过期要重新连接、缺权限要勾同意、传输失败要查网络。
+        // 令牌过期要重新连接、缺权限要勾同意、传输失败要查网络、
+        // 限流要等（一直点也不会好）、生成中要再等一下。
         // 这些分类是后端算好随错误过来的，不用猜文案。
         if (myMapQuery.isError) {
             const failure = myMapQuery.error;
             const kind = failure instanceof VrccError ? failure.kind : 'other';
-            const hintKey =
-                kind === 'needsReauth'
-                    ? 'dialog.world.vrcc.unknown_reauth'
-                    : kind === 'missingScope'
-                      ? 'dialog.world.vrcc.unknown_scope'
-                      : kind === 'transport'
-                        ? 'dialog.world.vrcc.unknown_network'
-                        : 'dialog.world.vrcc.unknown_hint';
+            const hintKey = (() => {
+                switch (kind) {
+                    case 'needsReauth':
+                        return 'dialog.world.vrcc.unknown_reauth';
+                    case 'missingScope':
+                        return 'dialog.world.vrcc.unknown_scope';
+                    case 'transport':
+                        return 'dialog.world.vrcc.unknown_network';
+                    // 限流和「还在生成」都不是故障，让玩家等一下就好。
+                    // 「稍后重试」对限流是误导——额度按北京时间零点重置，
+                    // 玩家一直点不会变好，所以这句必须点明。
+                    case 'throttled':
+                        return 'dialog.world.vrcc.unknown_throttled';
+                    case 'notReady':
+                        return 'dialog.world.vrcc.unknown_notready';
+                    default:
+                        return 'dialog.world.vrcc.unknown_hint';
+                }
+            })();
             return (
                 <VrccOffBoardState
                     title={t('dialog.world.vrcc.unknown_title')}

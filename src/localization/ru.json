@@ -4941,7 +4941,9 @@
                 "unknown_hint": "Your submission status could not be read. Try again later.",
                 "unknown_reauth": "Your sign-in has expired. Reconnect VRCC.",
                 "unknown_scope": "Permission to read maps is missing. Reconnect and accept it.",
-                "unknown_network": "The network request failed. Check your connection."
+                "unknown_network": "The network request failed. Check your connection.",
+                "unknown_throttled": "Too many requests — try again later. The daily quota resets at midnight Beijing time.",
+                "unknown_notready": "This round is still being generated. Check back shortly."
             }
         },
         "avatar": {
