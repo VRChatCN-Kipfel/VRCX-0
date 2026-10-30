@@ -23,6 +23,11 @@ use std::time::{Duration, Instant};
 pub const WINDOW_LIMIT: usize = 120;
 /// 限流窗口长度。
 pub const WINDOW: Duration = Duration::from_secs(60);
+/// 一个限流键多久没出现就可以忘掉。
+///
+/// 取 [`WINDOW`] 的十倍：最长的 `min_gap` 是 60 秒，超过这个时间没再出现的键
+/// 已经不可能约束任何一次请求，留着只会让 `last_at` 随逛过的世界一直长。
+const KEY_TTL: Duration = Duration::from_secs(600);
 /// 「第一份读」每个授权每天的上限（1.8.4 起从每颗星 300 次改成每个授权 1000 次）。
 ///
 /// 只是服务器没给 `RateLimit-Limit` 时的兜底；给了就用服务器的。
@@ -69,6 +74,16 @@ impl RateLimiter {
                 break;
             }
         }
+    }
+
+    /// 丢掉很久没再出现过的键。
+    ///
+    /// `last_at` 是 `HashMap`，键里带资源（世界 ID、排序）时会随玩家逛过的世界
+    /// 一直长。超过 [`KEY_TTL`] 没出现过的键不可能再约束任何一次请求：
+    /// 最长的 `min_gap` 是 60 秒，远小于这个值。留着它们只是让内存慢慢涨。
+    fn drop_stale_keys(&mut self, now: Instant) {
+        self.last_at
+            .retain(|_, at| now.saturating_duration_since(*at) < KEY_TTL);
     }
 
     /// 最早能在哪个时刻发一个 `key` 请求。只读，不改状态。
@@ -135,6 +150,7 @@ impl RateLimiter {
         budget: Duration,
     ) -> Result<Instant, Duration> {
         self.drop_expired(now);
+        self.drop_stale_keys(now);
         let at = self.earliest(key, min_gap, now);
         let wait = at.saturating_duration_since(now);
         if wait > budget {

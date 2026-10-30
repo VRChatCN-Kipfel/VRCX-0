@@ -591,7 +591,12 @@ impl VrccClient {
     async fn send_request(&self, call: &Call<'_>) -> Result<reqwest::Response, VrccError> {
         // 优先级请求（吊销）不排队：被退避挡住就永远吊销不了了。
         if !call.bypass_gate {
-            self.acquire(call.key, call.min_gap).await?;
+            // 限流键带上路径。只按接口标识分组不够：`me/maps/{world}/page`
+            // 对不同世界、不同排序是四个不同的资源，共用一个键等于「刚看过 A
+            // 就看不到 B」——用户看到的是「请求太频繁」，而不是两次请求之间
+            // 隔着 3 秒的间隔。
+            self.acquire(&limiter_key(call.key, call.path), call.min_gap)
+                .await?;
         }
 
         let mut builder = self
@@ -832,8 +837,10 @@ impl VrccClient {
     /// 不需要令牌。不在榜上或没过审时 `404 not_found`——这是正常状态
     /// （这张图还没上榜），调用方应当把它当成「没有这一页」，而不是报故障。
     ///
-    /// 独立一个限流键：它和单张查询问的是不同接口，但同样 5 分钟才更新一次，
-    /// 间隔可以放宽。
+    /// 限流器按路径分组，所以世界与排序自然分开。早先它和所有别的世界共用同一个
+    /// 键，连续打开第三个世界详情时那张图直接没有分数——「按资源查询的接口用了
+    /// 全局键」的典型症状，和接口本身的频率无关。服务器最多 5 分钟才更新一次，
+    /// 5 秒足够挡手抖。
     pub async fn map_page(&self, world: &str) -> Result<VrccMapPage, VrccError> {
         self.request(Call {
             method: "GET",
@@ -841,7 +848,7 @@ impl VrccClient {
             body: None,
             authed: false,
             key: "map_page",
-            min_gap: Duration::from_secs(60),
+            min_gap: Duration::from_secs(5),
             bucket: None,
             bypass_gate: false,
         })
@@ -856,26 +863,33 @@ impl VrccClient {
     ///
     /// `sort` 只认 `hot` / `new`，别的值由服务器按默认处理。
     ///
-    /// 它算个人每天的读取次数（`Reads` 那一份），和公开版 `bucket: None`
-    /// 不同——这条带令牌，服务器会记在玩家账上。
+    /// 算个人每天的次数，记在**第二份读**（`MoreReads`）上：官方《频率限制》把
+    /// 「地图榜和地图页」和「全部介绍」都划进第二份，和提醒、连线、所在地图那一份
+    /// （第一份）分开算。
+    ///
+    /// 限流器按**路径**分组（见 [`limiter_key`]），所以世界和排序自然分开：这条
+    /// 按世界查，早先所有世界共用一个 30 秒的槽，20 秒内打开第二个世界的页签、
+    /// 或者切一次 `hot` / `new`，就直接「请求太频繁」。而前端本来就有 5 分钟
+    /// `staleTime`，Rust 侧再压一个全局间隔只会误伤。
     pub async fn my_map_page(
         &self,
         world: &str,
         sort: Option<&str>,
     ) -> Result<VrccMyMapPage, VrccError> {
+        let sort = sort.map(str::trim).filter(|sort| !sort.is_empty());
         let path = match sort {
-            Some(sort) if !sort.is_empty() => {
-                format!("me/maps/{world}/page?sort={sort}")
-            }
-            _ => format!("me/maps/{world}/page"),
+            Some(sort) => format!("me/maps/{world}/page?sort={sort}"),
+            None => format!("me/maps/{world}/page"),
         };
+        // `hot` / `new` 是两份不同的列表，不同世界更是不同的资源：限流器按
+        // 「接口 + 路径」分组（见 [`limiter_key`]），所以这里不用担心串味。
         self.request(Call {
             method: "GET",
             path: &path,
             body: None,
             authed: true,
             key: "my_map_page",
-            min_gap: Duration::from_secs(30),
+            min_gap: Duration::from_secs(3),
             // 第二份读。官方《频率限制》把「地图榜和地图页」划进第二份，
             // 和提醒、连线、所在地图那一份（第一份）分开算。
             bucket: Some(QuotaBucket::MoreReads),
@@ -1189,6 +1203,9 @@ impl VrccClient {
     /// 的数据来源：能看分、看人数、看自己打了几分。
     ///
     /// `world` 只能是 `wrld_…`，不要带房间实例号。
+    ///
+    /// 限流器按路径分组，所以不同世界互不相干。早先它们共用一个键，玩家在 10 秒
+    /// 内打开第二个世界详情就会被自己的限流器挡住。
     pub async fn my_map(&self, world: &str) -> Result<VrccMyMap, VrccError> {
         self.request(Call {
             method: "GET",
@@ -1196,7 +1213,7 @@ impl VrccClient {
             body: None,
             authed: true,
             key: "my_map",
-            min_gap: Duration::from_secs(10),
+            min_gap: Duration::from_secs(3),
             bucket: Some(QuotaBucket::Reads),
             bypass_gate: false,
         })
@@ -1208,6 +1225,8 @@ impl VrccClient {
     /// 比公开榜多出「我的视角」：去过几次、热评、名次、介绍首行。
     /// `sort` 走 `top` / `week` / `new` / `went`——比公开榜多一个 `went`。
     pub async fn my_board(&self, sort: VrccMyBoardSort) -> Result<VrccMyBoard, VrccError> {
+        // `top` / `week` / `new` / `went` 是四份不同的列表；限流器按「接口 +
+        // 路径」分组，切排序不会撞上上一份的间隔。
         self.request(Call {
             method: "GET",
             path: &format!("me/board?sort={}", sort.as_query()),
@@ -1316,6 +1335,18 @@ fn recent_path(mark: bool) -> &'static str {
     }
 }
 
+/// 本地限流器的键：接口标识 + 路径。
+///
+/// 光用接口标识不够。`me/maps/{world}/page` 对不同的世界、不同的排序是四个不同
+/// 的资源，共用一个键意味着「刚看过 A 就看不到 B」——玩家看到的是「请求太频繁」，
+/// 而真实原因只是两次请求之间要隔三秒。带上路径之后，同一个 URL 才互相排队。
+///
+/// `op`（进错误详情的那份）仍然用不带路径的 `key`：那是**接口**的身份，消费方
+/// 靠它区分「同一个错误码在不同接口下的不同含义」，路径里的世界 ID 不属于那里。
+fn limiter_key(key: &str, path: &str) -> String {
+    format!("{key} {path}")
+}
+
 /// 离北京时间下一个零点还有几秒。服务器每天的次数都在这时重置。
 fn secs_until_beijing_midnight() -> u64 {
     let now = std::time::SystemTime::now()
@@ -1383,18 +1414,22 @@ mod tests {
         VrccClient::new("dev-test", Arc::new(|| Some("tok".to_string())), None)
     }
 
-    /// 起一个只回答一次的本地服务器，返回它的基址。
+    /// 起一个本地服务器，按顺序回答 `connections` 次相同的响应，返回它的基址。
     ///
-    /// 用真实 socket 而不是桩：这几条测的是「**哪一份**额度被扣了」，而那是
-    /// `request()` 根据状态码和响应头做的决定，只测纯函数碰不到。
-    async fn serve_once(status_line: &'static str, body: &'static str) -> String {
+    /// 用真实 socket 而不是桩：这几条测的是「**哪一份**额度被扣了」「哪个键被
+    /// 限流了」，而那是 `request()` 根据状态码、响应头和限流键做的决定，只测
+    /// 纯函数碰不到。
+    async fn serve(status_line: &'static str, body: &'static str, connections: usize) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
         let addr = listener.local_addr().expect("local addr");
         tokio::spawn(async move {
-            if let Ok((mut socket, _)) = listener.accept().await {
+            for _ in 0..connections {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
                 let mut buf = [0u8; 4096];
                 let _ = socket.read(&mut buf).await;
                 let response = format!(
@@ -1423,9 +1458,10 @@ mod tests {
     /// 收不到。
     #[tokio::test]
     async fn burning_the_map_boards_daily_reads_does_not_stop_the_first_read_bucket() {
-        let base = serve_once(
+        let base = serve(
             "429 Too Many Requests\r\nRetry-After: 7200\r\nRateLimit-Limit: 1000\r\nRateLimit-Remaining: 0\r\nRateLimit-Reset: 7200",
             r#"{"error":"too_many"}"#,
+            1,
         )
         .await;
         let client = client_at(base);
@@ -1446,15 +1482,45 @@ mod tests {
         assert!(client.spend(QuotaBucket::MoreReads).is_err());
     }
 
+    /// 不同的世界、不同的排序，不该被同一个限流键互相挡住。
+    ///
+    /// 键原来是一个固定的 `"my_map_page"`、间隔 30 秒，而 `MAX_ACQUIRE_WAIT`
+    /// 只有 10 秒：10 秒内打开第二个世界的页签就直接得到 `ThrottledLocally`，
+    /// 界面显示成「请求太频繁」。前端本来就有 5 分钟 `staleTime`，这个全局间隔
+    /// 只会误伤。键带上世界和排序之后，这三者互不相干。
+    #[tokio::test]
+    async fn a_second_world_and_a_second_sort_are_not_throttled_by_the_first() {
+        let base = serve("200 OK", "{}", 3).await;
+        let client = client_at(base);
+        let first = "wrld_11111111-1111-4111-8111-111111111111";
+        let second = "wrld_22222222-2222-4222-8222-222222222222";
+
+        client
+            .my_map_page(first, Some("hot"))
+            .await
+            .expect("第一个世界");
+        // 同一个世界、另一份排序
+        client
+            .my_map_page(first, Some("new"))
+            .await
+            .expect("同一世界的另一份排序");
+        // 另一个世界、同一个排序
+        client
+            .my_map_page(second, Some("hot"))
+            .await
+            .expect("第二个世界");
+    }
+
     /// 写接口吃到当天的 429，不该动任何一份读额度，也不该让所有接口一起退避。
     ///
     /// 赞踩是「地图赞踩 200」、打分是「每天的打分与添图次数」、删除是「各种删除
     /// 合计 50」——都是写，和读的 1000 次毫无关系。
     #[tokio::test]
     async fn a_vote_hitting_its_daily_limit_leaves_both_read_buckets_alone() {
-        let base = serve_once(
+        let base = serve(
             "429 Too Many Requests\r\nRetry-After: 7200\r\nRateLimit-Limit: 200\r\nRateLimit-Remaining: 0\r\nRateLimit-Reset: 7200",
             r#"{"error":"too_many"}"#,
+            1,
         )
         .await;
         let client = client_at(base);
