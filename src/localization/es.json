@@ -873,7 +873,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them"
         },
@@ -904,7 +903,6 @@
             "linked": "Ya la conectaste",
             "mutual": "Conectados en ambos sentidos",
             "not_linked": "Aún sin conectar",
-            "open_profile": "Abrir perfil del jugador",
             "open_page": "Ver en vrcc.cc",
             "why": {
                 "verify": "Verifica tu cuenta de VRChat para usar los cruces.",
@@ -2187,7 +2185,6 @@
                     "go_to_friend": "Ir al amigo",
                     "cancelling": "Cancelando",
                     "find_friend": "Buscar un amigo",
-                    "open_profile": "Abrir perfil",
                     "hide_from_graph": "Ocultar del grafo",
                     "clear_filters": "Borrar filtros"
                 },

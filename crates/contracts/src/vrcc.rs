@@ -230,10 +230,15 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 /// - 开 Issue 登记的客户端又会默认带上本功能用不到的 `crossings` 和
 ///   `maps.rate`，违反官方《使用要求》第 10 条「只申请用得到的权限」。
 ///
-/// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）。
-/// `mutuals` 是敏感权限，只有正式标识能要，`dev-` 用
-/// [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用 [`device_auth_scope`] 选。
-pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals";
+/// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）、
+/// 「星轨相交」页（`crossings`）。后两个是敏感权限，只有正式标识能要，
+/// `dev-` 用 [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用
+/// [`device_auth_scope`] 选。
+///
+/// **`crossings` 必须在这里**：令牌的权限是签发时定下的，事后要再拿到它
+/// 只能重新授权。不列进来，界面上的「星轨相交」页签对每一个玩家都永远
+/// 是「缺权限」——功能等于没做。
+pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals crossings";
 
 /// `dev-` 标识申请的权限：只能要普通权限，要了敏感的 `device/code`
 /// 会直接回答 `403 scope_unreviewed`，连码都拿不到。
@@ -867,10 +872,16 @@ pub struct VrccCrossings {
     pub n: Option<i64>,
     /// 星轨相交不可用或为空的原因，见 [`VrccCrossingWhy`]。
     ///
-    /// **必须处理**：`hide` 表示玩家不该看到这个模块（16–17 岁星池，或
-    /// 在隐私设置里关了星轨相交），此时客户端**不应显示**该模块。
+    /// 保留服务器的原始字符串（界面用它挑文案），判定统一走 [`Self::hidden`]。
     #[serde(default)]
     pub why: Option<String>,
+    /// 是否必须**整个模块都不显示**（由应用层按 [`VrccCrossingWhy`] 算好）。
+    ///
+    /// 给成字段而不是让每个消费方各判一次 `why == "hide"`：这条判定的两边
+    /// 后果不对称——把 `hide` 当普通空列表，等于向不该看到的人确认「这里有
+    /// 星轨相交」这个事实。只在一处算，才不会有一处漏。
+    #[serde(default)]
+    pub hidden: bool,
     /// 当前玩家自己的星位摘要。
     #[serde(default)]
     pub me: Option<VrccCrossingMe>,
@@ -975,28 +986,28 @@ impl VrccCrossingWhy {
         }
     }
 
-    /// 是否应当显示「星轨相交」模块。
+    /// 是否应当**整个模块都不显示**。
     ///
     /// `Hidden` 是唯一要整个隐藏的情况——官方文档明确说「客户端不应显示
     /// 此模块」。其余原因都是「功能在但暂时不可用」，应当显示原因而不是
     /// 让页面空着。
-    pub fn should_show(self) -> bool {
-        !matches!(self, Self::Hidden)
+    pub fn is_hidden(self) -> bool {
+        matches!(self, Self::Hidden)
+    }
+}
+
+impl VrccCrossings {
+    /// 分类后的 `why`。
+    pub fn reason(&self) -> VrccCrossingWhy {
+        VrccCrossingWhy::parse(self.why.as_deref())
     }
 
-    /// 是否需要玩家先完成 VRChat 验证/机器人好友，而不是缺权限。
+    /// 按 `why` 定下 `hidden`。
     ///
-    /// 用来决定提示文案走「去验证/去加机器人」还是走「去开权限」。
-    pub fn needs_vrchat_setup(self) -> bool {
-        matches!(
-            self,
-            Self::Unverified
-                | Self::WaitingVerify
-                | Self::Queued
-                | Self::Sent
-                | Self::Gone
-                | Self::NotFriend
-        )
+    /// 由应用层在拿到响应后调用一次，之后所有消费方只看 `hidden` 字段，
+    /// 不再各自去比 `why == "hide"` 字符串。
+    pub fn settle_visibility(&mut self) {
+        self.hidden = self.reason().is_hidden();
     }
 }
 

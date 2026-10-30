@@ -881,7 +881,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them"
         },
@@ -912,7 +911,6 @@
             "linked": "Už jste se propojili",
             "mutual": "Propojeno obousměrně",
             "not_linked": "Zatím nepřipojeno",
-            "open_profile": "Otevřít profil hráče",
             "open_page": "Zobrazit na vrcc.cc",
             "why": {
                 "verify": "Ověřte svůj účet VRChat, abyste mohli používat křížení.",
@@ -2201,7 +2199,6 @@
                     "go_to_friend": "Přejít na přítele",
                     "cancelling": "Ruší se",
                     "find_friend": "Najít přítele",
-                    "open_profile": "Otevřít profil",
                     "hide_from_graph": "Skrýt z grafu",
                     "clear_filters": "Zrušit filtry"
                 },

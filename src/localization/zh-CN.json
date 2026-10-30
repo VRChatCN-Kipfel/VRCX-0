@@ -876,7 +876,6 @@
             "empty": "还没有互相连上的星友",
             "needs_scope": "「互相连上」需要 mutuals 权限，重新连接一次即可（开发版标识拿不到这项）。",
             "unnamed": "未命名",
-            "open_profile": "在 VRChat 玩家详情里打开",
             "unavailable": "这一项需要额外权限，当前客户端还没开通",
             "rate_mine": "我给 TA 的分"
         },
@@ -907,7 +906,6 @@
             "linked": "你已连向 TA",
             "mutual": "已双向连上",
             "not_linked": "还没连上",
-            "open_profile": "打开玩家详情",
             "open_page": "在 vrcc.cc 上查看",
             "why": {
                 "verify": "先验证 VRChat 账号才能使用星轨相交。",
@@ -2184,7 +2182,6 @@
                     "go_to_friend": "选择好友",
                     "cancelling": "正在取消操作",
                     "find_friend": "查找好友",
-                    "open_profile": "查看资料",
                     "hide_from_graph": "从关系图中隐藏",
                     "clear_filters": "清除筛选"
                 },

@@ -255,10 +255,12 @@ impl DesktopVrccRuntime {
     }
 
     /// 星轨相交的完整星卡（1.13.0 起）。算第二份读的额度，不进后台轮询。
+    ///
+    /// 旧服务器上没有这个接口，返回 `None`。
     pub async fn crossing_cards(
         &self,
         mark: bool,
-    ) -> Result<vrcx_0_contracts::vrcc::VrccCrossingCards, VrccFailure> {
+    ) -> Result<Option<vrcx_0_contracts::vrcc::VrccCrossingCards>, VrccFailure> {
         self.service
             .crossing_cards(mark)
             .await

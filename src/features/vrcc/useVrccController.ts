@@ -110,15 +110,11 @@ type State = {
      *
      * 与 mutualsError 同理单独放：`dev-` 标识必然拿不到 `crossings`
      * 敏感权限，那是**某个功能没开通**，不是整个页面坏了。
+     *
+     * 不可用的**原因分类**不在这里：它在 `crossings.why` / `crossings.hidden`
+     * 里跟着响应一起存下来，只有一份，不会和它各说各话。
      */
     crossingsError: string | null;
-    /**
-     * 服务端说的「星轨相交」不可用原因（`why`）。
-     *
-     * `hide` 必须让整个模块消失（16-17 岁星池，或玩家关了星轨相交），
-     * 不能当成普通空列表。
-     */
-    crossingsWhy: string | null;
     service: VrccStatus | null;
     loading: boolean;
     error: VrccError | null;
@@ -154,7 +150,6 @@ const initialState: State = {
     crossings: null,
     crossingCards: null,
     crossingsError: null,
-    crossingsWhy: null,
     service: null,
     loading: true,
     error: null,
@@ -388,10 +383,13 @@ export function useVrccController() {
      * `mark` 只在玩家真的打开这一页时为 true：它会把已读同步到账号，
      * 网页和手机上的红点跟着消。别的场景一律 false。
      *
-     * 返回的 `why` 必须原样存下来：`hide` 时整个模块都不该显示。
+     * 星卡的额度（`left` / `max`）是**按天**算的，读一次算第二份读的
+     * 一次，所以这里把它和列表绑在同一个 `mark` 上：后台为了算数字时
+     * 两个都问、两个都花额度，是最贵的用法，也没有任何界面需要它。
      */
     const refreshCrossings = useCallback(
         async (mark = false) => {
+            const epoch = personalEpoch.current;
             try {
                 // 星卡是 1.13.0 才有的接口；旧服务器会给 404。那只影响
                 // 「今天还能连几颗」这一小块，不该让整个列表失败。
@@ -399,14 +397,17 @@ export function useVrccController() {
                     vrccApi.crossings(mark),
                     vrccApi.crossingCards(mark).catch(() => null)
                 ]);
+                // 断开连接会推进代次：断开前发出、断开后才回来的响应
+                // 不能再把状态写回去，否则界面会显示上一个账号的擦肩记录。
+                if (epoch !== personalEpoch.current) return null;
                 patch({
                     crossings,
                     crossingCards: cards,
-                    crossingsError: null,
-                    crossingsWhy: crossings?.why ?? null
+                    crossingsError: null
                 });
                 return crossings;
             } catch (error) {
+                if (epoch !== personalEpoch.current) return null;
                 if (
                     error instanceof VrccError &&
                     error.kind === 'missingScope'
@@ -506,7 +507,6 @@ export function useVrccController() {
         refreshConnection,
         refreshCrossings,
         refreshMutuals,
-        refreshCrossings,
         refreshMyMap,
         refreshRecent,
         refreshService,
@@ -667,6 +667,10 @@ export function useVrccController() {
      * 切到「提醒」时用 `mark=true` 重拉一次：这是玩家真正在看这个列表的时刻，
      * 服务器据此把已读同步到账号，网页和手机 App 上的红点会跟着消。
      * 官方的做法也是「打开最近的提醒」时才 mark。
+     *
+     * 「星轨相交」同理，而且这里**只有**这一条路会传 `mark=true`：
+     * `load()` 与刷新按钮都传 false。漏掉这一条，玩家永远消不掉红点；
+     * 反过来在别处误传 true，等于替玩家把没看过的记录标成看过。
      */
     const setTab = useCallback(
         (tab: VrccTab) => {
@@ -683,9 +687,17 @@ export function useVrccController() {
                     reportError(error, 'refreshMutuals');
                 });
             }
+            if (tab === 'crossings') {
+                // 打开这一页 = 看过了。权限没开通时 `refreshCrossings`
+                // 自己把原因记进 `crossingsError`，不会抛出来。
+                refreshCrossings(true).catch((error) => {
+                    reportError(error, 'refreshCrossings');
+                });
+            }
         },
         [
             patch,
+            refreshCrossings,
             refreshMutuals,
             refreshRecent,
             reportError,
@@ -863,12 +875,15 @@ export function useVrccController() {
                 recent: null,
                 unread: null,
                 notes: null,
-                // 「所在地图」和「互相连上」都是**上一个账号**的个人数据。
-                // 不清的话，`VrccPage` 只看 `myMap` 是否存在就渲染卡片，
-                // 断开后还会继续显示别人的评分。
+                // 「所在地图」「互相连上」「星轨相交」都是**上一个账号**的
+                // 个人数据。不清的话，`VrccPage` 只看 `myMap` 是否存在就渲染
+                // 卡片，断开后还会继续显示别人的评分和擦肩记录。
                 myMap: null,
                 mutuals: null,
-                mutualsError: null
+                mutualsError: null,
+                crossings: null,
+                crossingCards: null,
+                crossingsError: null
             });
         } catch (error) {
             // 可重试的失败（网络不通、正在退避）**后端会刻意保留令牌**，
@@ -917,6 +932,7 @@ export function useVrccController() {
         setNotificationsView,
         refreshMyMap,
         refreshMutuals,
+        refreshCrossings,
         beginDeviceAuth,
         disconnect,
         openWorld,

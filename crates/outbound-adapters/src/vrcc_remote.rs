@@ -12,10 +12,9 @@
 
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
-    VrccCrossingCards, VrccCrossings,
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMutuals, VrccMyMap, VrccNotes,
-    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
-    VrccUnread,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccCrossingCards, VrccCrossings, VrccDeviceCode,
+    VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus,
+    VrccToday, VrccTokenResponse, VrccUnread,
 };
 use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
 
