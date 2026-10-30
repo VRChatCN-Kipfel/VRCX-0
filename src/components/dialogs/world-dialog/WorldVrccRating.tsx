@@ -168,20 +168,23 @@ function WorldVrccRatingShell({
 }) {
     const { t } = useTranslation();
 
+    // 独立成块：`mt-3` 与上面的概览卡片拉开间隔，`rounded-lg border bg-card`
+    // 让它自成一个圆角容器。塞在概览卡片内部时它会和上面的世界 ID、
+    // 分享链接挤成一片，既看不清是两块，也读不出「这是别人家的评分」。
     return (
-        <div className="col-span-2 min-w-0 border-t pt-1.5">
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-                <span className="text-muted-foreground truncate">
+        <div className="bg-card mt-3 min-w-0 rounded-lg border p-2.5">
+            <div className="flex min-w-0 items-baseline gap-1.5">
+                <span className="text-muted-foreground truncate text-xs">
                     {t('dialog.world.vrcc.rating')}
                 </span>
-                <span className="ml-auto shrink-0">{value}</span>
+                <span className="ml-auto shrink-0 text-sm">{value}</span>
             </div>
             {note ? (
-                <div className="text-muted-foreground mt-0.5 text-[11px] leading-tight">
+                <div className="text-muted-foreground mt-1 text-[11px] leading-tight">
                     {note}
                 </div>
             ) : null}
-            <div className="text-muted-foreground/70 mt-0.5 text-[10px] leading-tight">
+            <div className="text-muted-foreground/70 mt-1 text-[10px] leading-tight">
                 {t('dialog.world.vrcc.source')}
             </div>
         </div>

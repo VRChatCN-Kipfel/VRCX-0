@@ -58,6 +58,7 @@ import {
     resolveLaunchLocation,
     worldInstanceEntries
 } from './WorldDialogViewParts';
+import { WorldVrccRating } from './WorldVrccRating';
 
 export type { WorldWorldScreenshots } from './useWorldDialogScreenshots';
 
@@ -579,10 +580,18 @@ export function WorldDialogTabbedView({
             <EntityDialogTwoColumnLayout
                 railMaxHeight="50vh"
                 rail={
-                    <WorldDialogOverviewSection
-                        headerModel={headerModel}
-                        headerCommands={headerCommands}
-                    />
+                    <>
+                        <WorldDialogOverviewSection
+                            headerModel={headerModel}
+                            headerCommands={headerCommands}
+                        />
+                        {/* 星遇同频评分单独成块，与概览卡片平级、留出间隔。
+                            塞进概览卡片内部的话，它会和世界 ID、分享链接挤成
+                            一片，读不出「这是另一家平台的数据」。 */}
+                        {headerModel.world.id ? (
+                            <WorldVrccRating worldId={headerModel.world.id} />
+                        ) : null}
+                    </>
                 }
             >
                 <WorldDialogTabPanels
