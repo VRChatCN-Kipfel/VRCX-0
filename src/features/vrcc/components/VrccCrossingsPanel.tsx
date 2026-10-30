@@ -8,6 +8,31 @@ import type { VrccCrossingCards, VrccCrossings } from '../vrccApi';
 const SITE = 'https://vrcc.cc';
 
 /**
+ * `why` 的白名单。
+ *
+ * 不做 `t(`vrcc.crossings.why.${why}`)` 拼键名：`why` 是服务器给的字符串，
+ * 拼出来可以是 `constructor`、`__proto__` 这种本来就存在的对象属性，
+ * 拿到的不是文案而是对象/`undefined`，界面直接崩。白名单里没有的一律
+ * 走 `unknown`。
+ */
+const WHY_KEYS = [
+    'verify',
+    'wait',
+    'queued',
+    'sent',
+    'gone',
+    'friend'
+] as const;
+
+type WhyKey = (typeof WHY_KEYS)[number];
+
+function whyKey(why: string): WhyKey | null {
+    return (WHY_KEYS as readonly string[]).includes(why)
+        ? (why as WhyKey)
+        : null;
+}
+
+/**
  * 星轨相交：在同一个 VRChat 房间偶遇过的星遇同频玩家。
  *
  * 与「互相连上」的区别（两者是同一层的两个页签）：
@@ -69,13 +94,14 @@ export function VrccCrossingsPanel({
 
     // 有 why：功能在，但暂时用不了，要说明下一步做什么。
     if (why && stars.length === 0) {
+        const key = whyKey(why);
         return (
             <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-2 px-6 text-center text-sm">
                 <Radar className="size-6" />
                 <div className="leading-relaxed">
-                    {t(`vrcc.crossings.why.${why}`, {
-                        defaultValue: t('vrcc.crossings.why.unknown')
-                    })}
+                    {key
+                        ? t(`vrcc.crossings.why.${key}`)
+                        : t('vrcc.crossings.why.unknown')}
                 </div>
             </div>
         );
