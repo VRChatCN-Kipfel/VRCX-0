@@ -4843,8 +4843,8 @@
             },
             "vrcc": {
                 "rating": "星遇同频评分",
-                "raters_one": "{{count}} 人打分",
-                "raters_other": "{{count}} 人打分",
+                "raters_one": "{count} 人打分",
+                "raters_other": "{count} 人打分",
                 "no_rating": "还没有人打分",
                 "not_listed": "不在榜上",
                 "source": "数据来源于 VRC 中文社区所属平台「星遇同频」，并非 VRChat 官方"

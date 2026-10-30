@@ -15,10 +15,15 @@ vi.mock('@/platform/tauri/bindings', () => ({
 
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
+        // 这里刻意模仿真实语言包的两个特征，而不是随便返回字符串：
+        // 1. 复数键带 `_one` / `_other` 后缀；
+        // 2. 插值是**单**花括号（`{count}`），配置见
+        //    `src/services/i18nService.ts` 的 `interpolation.prefix`。
+        //    写成 `{{count}}` 会原样显示出来，那是真出过的 bug。
         t: (key: string, options?: { count?: number }) => {
-            // 把插值也拼出来，好断言人数文案确实带上了数字
+            const count = options?.count ?? 0;
             if (key === 'dialog.world.vrcc.raters') {
-                return `${options?.count ?? 0} 人打分`;
+                return count === 1 ? '1 人打分' : `${count} 人打分`;
             }
             return key;
         }
@@ -117,5 +122,58 @@ describe('WorldVrccRating', () => {
         expect(
             await screen.findByText('dialog.world.vrcc.source')
         ).toBeTruthy();
+    });
+
+    it('只有一个人打分时走单数文案', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage({ raters: 1 }));
+        renderWithClient(<WorldVrccRating worldId="wrld_test" />);
+
+        expect(await screen.findByText('1 人打分')).toBeTruthy();
+    });
+});
+
+/**
+ * 语言包层面的守卫。
+ *
+ * 这个项目的 i18next 把插值定成了**单**花括号
+ * （`src/services/i18nService.ts` 里 `interpolation: { prefix: '{', suffix: '}' }`），
+ * 所以写成 `{{count}}` 不会被替换，会原样渲染成 `{{count}} 人打分`。
+ * 这个 bug 真出过一次，而且**单元测试测不到**——那个文件里 mock 了 `t`。
+ * 所以在这里直接读语言包原文断言。
+ *
+ * 只查 `dialog.world.vrcc` 这一块。语言包里还有别处的 `{{…}}`（那是另一批
+ * 早就存在的键，不在本任务范围内），全文件扫描会把它们算进来，变成误报。
+ */
+describe('语言包里的插值语法', () => {
+    const locales = [
+        'zh-CN',
+        'zh-TW',
+        'en',
+        'ja',
+        'ko',
+        'de',
+        'es',
+        'fr',
+        'pt',
+        'ru',
+        'cs'
+    ];
+
+    it.each(locales)('%s 的 raters 用单花括号', async (code) => {
+        const mod = await import(`@/localization/${code}.json`);
+        const json = (mod.default ?? mod) as {
+            dialog?: { world?: { vrcc?: Record<string, string> } };
+        };
+        const vrcc = json.dialog?.world?.vrcc;
+        expect(vrcc).toBeTruthy();
+
+        const raters = [vrcc?.raters_one, vrcc?.raters_other]
+            .filter((text): text is string => typeof text === 'string')
+            .join('\n');
+
+        expect(raters.length).toBeGreaterThan(0);
+        // 双花括号会原样显示，是 bug
+        expect(raters).not.toContain('{{count}}');
+        expect(raters).toContain('{count}');
     });
 });

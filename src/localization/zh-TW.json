@@ -4843,8 +4843,8 @@
             },
             "vrcc": {
                 "rating": "星遇同頻評分",
-                "raters_one": "{{count}} 人評分",
-                "raters_other": "{{count}} 人評分",
+                "raters_one": "{count} 人評分",
+                "raters_other": "{count} 人評分",
                 "no_rating": "還沒有人評分",
                 "not_listed": "不在榜上",
                 "source": "資料來源於 VRC 中文社群所屬平台「星遇同頻」，並非 VRChat 官方"

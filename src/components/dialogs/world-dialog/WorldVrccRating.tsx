@@ -171,16 +171,20 @@ function WorldVrccRatingShell({
     // 独立成块：`mt-3` 与上面的概览卡片拉开间隔，`rounded-lg border bg-card`
     // 让它自成一个圆角容器。塞在概览卡片内部时它会和上面的世界 ID、
     // 分享链接挤成一片，既看不清是两块，也读不出「这是别人家的评分」。
+    //
+    // **标题与人数用 `text-foreground`**，不用 `text-muted-foreground`：
+    // 这一块的核心信息就是「这是谁家的评分、有多少人打过分」，压成灰字之后
+    // 整块像附注，和它独立成卡片的意图自相矛盾。来源声明仍然留在弱化层。
     return (
         <div className="bg-card mt-3 min-w-0 rounded-lg border p-2.5">
             <div className="flex min-w-0 items-baseline gap-1.5">
-                <span className="text-muted-foreground truncate text-xs">
+                <span className="text-foreground truncate text-xs font-medium">
                     {t('dialog.world.vrcc.rating')}
                 </span>
                 <span className="ml-auto shrink-0 text-sm">{value}</span>
             </div>
             {note ? (
-                <div className="text-muted-foreground mt-1 text-[11px] leading-tight">
+                <div className="text-foreground mt-1 text-[11px] leading-tight">
                     {note}
                 </div>
             ) : null}
