@@ -4,14 +4,17 @@ import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { formatRelativeTime } from '@/lib/dateTime';
+import { queryKeys } from '@/lib/entityQueryCache';
 import { cn } from '@/lib/utils';
 import type { VrccMyMapPage } from '@/platform/tauri/bindings';
 import {
+    fetchVrccScopeGrants,
     vrccMyMapPageQueryOptions,
     vrccPublicMapQueryOptions
 } from '@/repositories/vrccMapRepository';
 import { Button } from '@/ui/shadcn/button';
 
+import { VrccRatingEditor } from './VrccRatingEditor';
 import {
     VrccCollapse,
     VrccMetricRow,
@@ -91,6 +94,16 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     const signedIn = useQuery({
         ...vrccMyMapPageQueryOptions(worldId, sort),
         enabled: Boolean(worldId)
+    });
+
+    // 令牌里有没有 `maps.rate`。**必须在任何提前 return 之前调用**：
+    // 这个 Hook 写在下面（数据就绪之后）会让 Hook 顺序随渲染路径变化。
+    const scopeQuery = useQuery({
+        queryKey: queryKeys.vrccScope('maps.rate'),
+        queryFn: () => fetchVrccScopeGrants('maps.rate'),
+        staleTime: 60 * 1000,
+        retry: 0,
+        refetchOnWindowFocus: false
     });
 
     if (publicQuery.isPending) {
@@ -206,6 +219,11 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     const rates = (signedIn.data?.rates ?? []).filter(
         (rate) => rate && !rate.folded
     );
+    // 能不能打分，取决于**令牌里有没有 `maps.rate`**，而不是能不能连上。
+    // 已经连上、但令牌是加权限之前发的玩家，正是这里的分水岭：他们有 `maps`
+    // 却没有 `maps.rate`，服务器会回 `403 scope`。给这类玩家看一个点不动的
+    // 打分器，不如直接告诉他「重新连接一次即可」。
+    const canRate = scopeQuery.data === true;
 
     return (
         // `h-full` + 内部 flex：让这一页永远不超过标签页容器的高度。
@@ -273,12 +291,32 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                         ) : null}
                     </div>
 
-                    {/* 我自己的分：只读展示。写入要 maps.rate，属于下一批 */}
-                    {mine ? (
+                    {/* 我自己的分：现在可以改。
+                        写操作需要 maps.rate，所以只有连上之后才给控件；
+                        未连接时连输入框都不出现——摆一个点不动的打分器
+                        比没有更糟。 */}
+                    {canRate ? (
+                        <VrccRatingEditor
+                            worldId={worldId}
+                            currentScore={
+                                mine && typeof mine.score === 'number'
+                                    ? mine.score
+                                    : null
+                            }
+                            currentText={mine?.text ?? null}
+                            check={mine?.check ?? null}
+                            onDone={() => {
+                                void signedIn.refetch();
+                            }}
+                        />
+                    ) : mine ? (
                         <MineRating rate={mine} />
-                    ) : signedIn.data ? (
+                    ) : signedIn.data && scopeQuery.data === false ? (
+                        // 连上了，但令牌里没有 maps.rate。这种情况几乎都是
+                        // 「令牌是加权限之前签发的」，重连一次就好——直接说清楚，
+                        // 比给一个点了必然 403 的控件有用。
                         <span className="text-muted-foreground text-xs">
-                            {t('dialog.world.vrcc.not_rated_by_me')}
+                            {t('dialog.world.vrcc.rate_needs_scope')}
                         </span>
                     ) : null}
                 </div>

@@ -7,11 +7,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const appVrccMapPage = vi.fn();
 const appVrccMyMapPage = vi.fn();
+const appVrccConnection = vi.fn();
+const appVrccRateMap = vi.fn();
+const appVrccDeleteMapRating = vi.fn();
 
 vi.mock('@/platform/tauri/bindings', () => ({
     commands: {
         appVrccMapPage: (...args: unknown[]) => appVrccMapPage(...args),
-        appVrccMyMapPage: (...args: unknown[]) => appVrccMyMapPage(...args)
+        appVrccMyMapPage: (...args: unknown[]) => appVrccMyMapPage(...args),
+        appVrccConnection: (...args: unknown[]) => appVrccConnection(...args),
+        appVrccRateMap: (...args: unknown[]) => appVrccRateMap(...args),
+        appVrccDeleteMapRating: (...args: unknown[]) =>
+            appVrccDeleteMapRating(...args)
     }
 }));
 
@@ -110,9 +117,17 @@ describe('WorldVrccPanel', () => {
     beforeEach(() => {
         appVrccMapPage.mockReset();
         appVrccMyMapPage.mockReset();
+        appVrccConnection.mockReset();
+        appVrccRateMap.mockReset();
+        appVrccDeleteMapRating.mockReset();
         // 默认「未连接」：绝大多数测试关心的是公开那一半，不该被额外的
         // 登录查询干扰。需要登录数据的用例自己覆盖这个默认值。
         appVrccMyMapPage.mockRejectedValue(new Error('not connected'));
+        // 默认令牌里有 maps.rate（能打分），需要「缺权限」的用例自己覆盖。
+        appVrccConnection.mockResolvedValue({
+            connected: true,
+            scope: 'profile notifications maps mutuals maps.rate'
+        });
     });
 
     afterEach(() => {
@@ -359,16 +374,38 @@ describe('WorldVrccPanel', () => {
         expect(screen.queryByText('这条被折叠了')).toBeNull();
     });
 
-    it('没打过分时说还没打，不显示 0 分', async () => {
+    it('没打过分时给打分器，不显示 0 分', async () => {
         appVrccMapPage.mockResolvedValue(mapPage());
         appVrccMyMapPage.mockResolvedValue(
             myMapPage({ mine: null, rates: [] })
         );
         renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
 
+        // 有 maps.rate 时，没打过分应该是「可以打」而不是一句静态说明：
+        // 打分器出现，内部显示「未选」。
         expect(
-            await screen.findByText('dialog.world.vrcc.not_rated_by_me')
+            await screen.findByText('dialog.world.vrcc.rate_none')
         ).toBeTruthy();
+        expect(screen.queryByText('0.0')).toBeNull();
         expect(screen.getByText('dialog.world.vrcc.no_words_yet')).toBeTruthy();
+    });
+
+    it('连上了但令牌缺 maps.rate 时，提示重连而不是给个点不动的打分器', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({ mine: null, rates: [] })
+        );
+        // 加权限之前签发的令牌：有 maps，没有 maps.rate
+        appVrccConnection.mockResolvedValue({
+            connected: true,
+            scope: 'profile notifications maps mutuals'
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.rate_needs_scope')
+        ).toBeTruthy();
+        // 不该出现打分控件（只有排序切换那一个 radiogroup 也没有）
+        expect(screen.queryAllByRole('radio').length).toBe(0);
     });
 });

@@ -69,3 +69,73 @@ export function vrccMyMapPageQueryOptions(
         refetchOnWindowFocus: false
     });
 }
+
+/**
+ * 给地图打分 / 写短评。**需要 `maps.rate` 敏感权限。**
+ *
+ * ## 这是写操作，和这个文件里其它函数都不一样
+ *
+ * 其它函数只造查询；这两个**会改服务器上的数据**。因此：
+ *
+ * - **不走 `queryOptions`、不缓存、不重试**。写操作重试一次可能造成两次提交，
+ *   而读操作重试一次只是多发一个请求。
+ * - **不做乐观更新**。积分榜/均分由服务端算，本地猜一个数只会显示错的。
+ *   调用方成功后用返回的地图状态或重新查询来刷新。
+ * - 失败原样抛出。界面需要拿到 `why`（短评被审核拒绝时会说明原因），
+ *   包一层只会把它丢掉。
+ *
+ * ## `textMode` 的三态
+ *
+ * 官方对 `text` 的语义很微妙，这里显式表达，避免把「只改分数」误做成
+ * 「删掉短评」：
+ *
+ * - `keep`  —— 不传 `text`，保留原短评
+ * - `clear` —— 传空串，删掉短评
+ * - `write` —— 传新内容，提交或更新短评
+ */
+export async function rateVrccMap(
+    worldId: string,
+    score: number,
+    textMode: 'keep' | 'clear' | 'write',
+    text: string | null
+) {
+    return await commands.appVrccRateMap(worldId, score, textMode, text);
+}
+
+/** 删掉自己给这张图的评分。写操作，语义同上。 */
+export async function deleteVrccMapRating(worldId: string) {
+    return await commands.appVrccDeleteMapRating(worldId);
+}
+
+/**
+ * 当前令牌有没有某项权限。
+ *
+ * ## 为什么要问后端
+ *
+ * 「有没有 `maps.rate`」取决于**玩家当初授权时拿到的 scope 字符串**，那是
+ * 令牌的属性，不在前端状态里。已经连上、但令牌是加权限之前签发的玩家，
+ * 正是这里的分水岭：他们有 `maps` 却没有 `maps.rate`，服务器会回
+ * `403 scope`。前端猜不出来，只能读。
+ *
+ * ## 判定是宽松的
+ *
+ * 拿不到 scope（未连接、或旧版本没记）时按**没有**处理——宁可让玩家多走
+ * 一次重新连接，也不要摆一个点了必然 403 的按钮。
+ *
+ * 官方的 scope 分隔符兼容空格、逗号与 `+`，这里三种都认。
+ */
+export async function fetchVrccScopeGrants(scope: string): Promise<boolean> {
+    try {
+        const connection = await commands.appVrccConnection();
+        const raw = connection.scope;
+        if (!raw) {
+            return false;
+        }
+        return raw
+            .split(/[\s,+]+/)
+            .map((part) => part.trim())
+            .includes(scope);
+    } catch {
+        return false;
+    }
+}

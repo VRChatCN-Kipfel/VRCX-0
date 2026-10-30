@@ -220,6 +220,8 @@ export const queryKeys = Object.freeze({
         sort: 'hot' | 'new' = 'hot',
         endpoint: string = ''
     ) => withEndpoint(['world', worldId, 'vrcc', 'signedIn', sort], endpoint),
+    // 当前令牌是否有某项权限。全局一份，按 scope 名分键。
+    vrccScope: (scope: string) => ['vrcc', 'scope', scope] as const,
     groupMembers: (params: VrchatGroupMembersInput, endpoint: string = '') =>
         withEndpoint(
             ['group', params.groupId, 'members', stableParams(params)],

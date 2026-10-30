@@ -26,8 +26,9 @@ use vrcx_0_contracts::vrcc::{
     ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMapPage,
     VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
-    VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
-    VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    VrccNotifications, VrccRatedMaps, VrccRatingInput, VrccRatingText, VrccRecentNotifications,
+    VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE,
+    VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -873,6 +874,68 @@ impl VrccClient {
             bypass_gate: false,
         })
         .await
+    }
+
+    /// 给地图打分 / 写短评（`POST /me/maps/{world}/rating`）。需要 `maps.rate`。
+    ///
+    /// ## `text` 的三种语义必须分清
+    ///
+    /// 见 [`VrccRatingText`]：不传 = 保留原短评，传空串 = 删短评，传文字 = 更新。
+    /// 这里**只在需要时才把 `text` 放进 JSON**，放一个 `null` 进去与官方语义不同。
+    ///
+    /// ## 这是写操作
+    ///
+    /// 官方要求这类写操作「由玩家本人**每次**主动点击触发」，所以：
+    /// - 不做本地限流的「合并请求」——两次点击就是两次意图；
+    /// - `min_gap` 仍然设一个小的值，只为挡住连点造成的重复提交。
+    ///
+    /// 返回更新后的地图状态（形状同 `GET /me/maps/{world}`），调用方可以直接
+    /// 用它刷新界面，不必再发一次读请求。
+    pub async fn rate_map(
+        &self,
+        world: &str,
+        score: i64,
+        text: &VrccRatingText,
+    ) -> Result<VrccMyMap, VrccError> {
+        let score = score.clamp(VrccRatingInput::MIN_SCORE, VrccRatingInput::MAX_SCORE);
+        let mut body = json!({ "score": score });
+        if let Some(text) = text.as_body_text() {
+            body["text"] = json!(text);
+        }
+        self.request(Call {
+            method: "POST",
+            path: &format!("me/maps/{world}/rating"),
+            body: Some(body),
+            authed: true,
+            key: "rate_map",
+            // 连点防重：服务器自己的额度才是权威，这里只挡手抖。
+            min_gap: Duration::from_secs(2),
+            bucket: Some(QuotaBucket::Reads),
+            bypass_gate: false,
+        })
+        .await
+    }
+
+    /// 删掉自己给这张图的评分（`POST /me/maps/{world}/rating/delete`）。
+    ///
+    /// 需要 `maps.rate`。官方没说返回什么，所以这里只判断成功与否，
+    /// 调用方刷新页面即可。
+    pub async fn delete_map_rating(&self, world: &str) -> Result<(), VrccError> {
+        let response = self
+            .request::<serde_json::Value>(Call {
+                method: "POST",
+                path: &format!("me/maps/{world}/rating/delete"),
+                body: None,
+                authed: true,
+                key: "delete_map_rating",
+                min_gap: Duration::from_secs(2),
+                bucket: Some(QuotaBucket::Reads),
+                bypass_gate: false,
+            })
+            .await?;
+        // 只要拿到了 2xx 就算成功；正文可能是什么都没有，或者是一份地图状态。
+        drop(response);
+        Ok(())
     }
 
     /// 公告和停站（1.12.0 起）。不用令牌，停站时也能问，服务器缓存 1 分钟。

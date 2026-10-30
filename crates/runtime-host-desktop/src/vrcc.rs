@@ -7,8 +7,9 @@ use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
     scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage,
-    VrccMyBoard, VrccMyBoardSort, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRecentNotifications,
-    VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps,
+    VrccRatingText, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread,
+    VrccUsageSnapshot, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -321,6 +322,29 @@ impl DesktopVrccRuntime {
     ) -> Result<Option<VrccMyMapPage>, VrccFailure> {
         self.service
             .my_map_page(world, sort)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+    ///
+    /// 写操作不做任何重试：失败原样交给界面，由玩家决定要不要再点一次。
+    pub async fn rate_map(
+        &self,
+        world: &str,
+        score: i64,
+        text: &VrccRatingText,
+    ) -> Result<VrccMyMap, VrccFailure> {
+        self.service
+            .rate_map(world, score, text)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 删掉自己给这张图的评分。需要 `maps.rate`。
+    pub async fn delete_map_rating(&self, world: &str) -> Result<(), VrccFailure> {
+        self.service
+            .delete_map_rating(world)
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

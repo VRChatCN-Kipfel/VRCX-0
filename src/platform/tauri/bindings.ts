@@ -455,6 +455,39 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_my_map_page', { world, sort });
     },
     /**
+     * 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+     *
+     * `text` 用三态字符串表达官方那三种语义，**不能用 `Option<String>` 糊过去**：
+     *
+     * | 参数 | 结果 |
+     * |---|---|
+     * | `textMode = "keep"` | 只改分数，保留原短评 |
+     * | `textMode = "clear"` | 删掉短评，保留分数 |
+     * | `textMode = "write"` + `text` | 提交或更新短评 |
+     *
+     * 用两个字段而不是一个可空字段：Rust 侧要能区分「没传」和「传了空串」，
+     * 前端传 `null` 与不传在 JSON 里看起来是一样的，这里显式给一个模式位。
+     */
+    async appVrccRateMap(
+        world: string,
+        score: number,
+        textMode: string,
+        text: string | null
+    ): Promise<VrccMyMap> {
+        return await TAURI_INVOKE('app__vrcc_rate_map', {
+            world,
+            score,
+            textMode,
+            text
+        });
+    },
+    /**
+     * 删掉自己给这张图的评分。需要 `maps.rate` 敏感权限。
+     */
+    async appVrccDeleteMapRating(world: string): Promise<null> {
+        return await TAURI_INVOKE('app__vrcc_delete_map_rating', { world });
+    },
+    /**
      * 玩家视角地图榜。需要 `maps` 普通权限。
      */
     async appVrccMyBoard(sort: VrccMyBoardSort | null): Promise<VrccMyBoard> {

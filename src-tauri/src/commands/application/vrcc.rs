@@ -9,11 +9,11 @@
 //! 中间态（`device_code`）留在前端，不落盘。
 
 use tauri::State;
-use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep};
+use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep, VrccFailure};
 use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage, VrccMyBoard,
-    VrccMyBoardSort, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRecentNotifications, VrccStatus,
-    VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRatingText,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
 };
 
 use crate::{error::AppError, state::AppState};
@@ -228,6 +228,68 @@ pub async fn app__vrcc_status(state: State<'_, AppState>) -> Result<VrccStatus, 
         .runtime_host()
         .vrcc()
         .status()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+// -- 写操作（需要 maps.rate） ------------------------------------------------
+
+/// 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+///
+/// `text` 用三态字符串表达官方那三种语义，**不能用 `Option<String>` 糊过去**：
+///
+/// | 参数 | 结果 |
+/// |---|---|
+/// | `textMode = "keep"` | 只改分数，保留原短评 |
+/// | `textMode = "clear"` | 删掉短评，保留分数 |
+/// | `textMode = "write"` + `text` | 提交或更新短评 |
+///
+/// 用两个字段而不是一个可空字段：Rust 侧要能区分「没传」和「传了空串」，
+/// 前端传 `null` 与不传在 JSON 里看起来是一样的，这里显式给一个模式位。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_rate_map(
+    state: State<'_, AppState>,
+    world: String,
+    score: i64,
+    text_mode: String,
+    text: Option<String>,
+) -> Result<VrccMyMap, AppError> {
+    let rating_text = match text_mode.as_str() {
+        "keep" => VrccRatingText::Keep,
+        "clear" => VrccRatingText::Clear,
+        "write" => VrccRatingText::Write(text.unwrap_or_default()),
+        _other => {
+            // 前端传了一个我们不认识的模式：这是调用方的 bug，不是网络问题。
+            // 造一个 `Input` 层的错误走同一套映射，界面会显示成一般失败。
+            let error = vrcx_0_contracts::vrcc::VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("textMode"),
+            );
+            return Err(AppError::Vrcc {
+                failure: VrccFailure::from_error(&error),
+            });
+        }
+    };
+    state
+        .runtime_host()
+        .vrcc()
+        .rate_map(&world, score, &rating_text)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 删掉自己给这张图的评分。需要 `maps.rate` 敏感权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_delete_map_rating(
+    state: State<'_, AppState>,
+    world: String,
+) -> Result<(), AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .delete_map_rating(&world)
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }

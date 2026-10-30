@@ -13,8 +13,8 @@ use vrcx_0_contracts::vrcc::{
     device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
     VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMapPage,
     VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
-    VrccNotifications, VrccRatedMaps, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
-    VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccNotifications, VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus,
+    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -96,6 +96,14 @@ pub trait VrccRemote: Send + Sync {
         world: &'a str,
         sort: Option<&'a str>,
     ) -> VrccFuture<'a, VrccMyMapPage>;
+    // -- 写操作（需要 maps.rate） ------------------------------------------
+    fn rate_map<'a>(
+        &'a self,
+        world: &'a str,
+        score: i64,
+        text: &'a VrccRatingText,
+    ) -> VrccFuture<'a, VrccMyMap>;
+    fn delete_map_rating<'a>(&'a self, world: &'a str) -> VrccFuture<'a, ()>;
 
     // -- 设备授权 ----------------------------------------------------------
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode>;
@@ -249,7 +257,9 @@ pub fn classify_vrcc_error(error: &VrccError) -> (VrccErrorKind, Option<String>)
         ErrorDetail::TokenMissing => VrccErrorKind::NeedsReauth,
         // 我们自己的 bug，界面上只配显示「操作失败」。它本不该发生，
         // 落在这里说明代码有问题，会由日志暴露出来。
-        ErrorDetail::AbsolutePath(_) | ErrorDetail::BodyTooLarge => VrccErrorKind::Other,
+        ErrorDetail::AbsolutePath(_)
+        | ErrorDetail::BodyTooLarge
+        | ErrorDetail::MissingArgument(_) => VrccErrorKind::Other,
         ErrorDetail::Transport { .. } | ErrorDetail::Decode(_) => VrccErrorKind::Transport,
         ErrorDetail::ThrottledLocally { .. } => VrccErrorKind::Throttled,
         ErrorDetail::Http(http) => {
@@ -938,6 +948,62 @@ impl VrccService {
         match self.remote.my_map_page(&world, sort).await {
             Ok(page) => Ok(Some(page)),
             Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(self.settle(error)),
+        }
+    }
+
+    /// 给地图打分 / 写短评（需要 `maps.rate` 敏感权限）。
+    ///
+    /// ## 这是写操作，只允许由玩家每次主动点击触发
+    ///
+    /// 官方《使用要求》把打分列为敏感写操作，明确禁止自动与批量。所以这里
+    /// **不做任何重试或自动续发**：失败就把错误原样交给界面，由玩家决定要不要
+    /// 再点一次。这与读接口的策略相反（那些失败会退回缓存），因为「重试一次
+    /// 写」和「重试一次读」的后果完全不同。
+    ///
+    /// ## 短评没通过审核要原样报出来
+    ///
+    /// `yq_words` / `yq_empty` 不是网络故障，是内容被拒。界面需要拿 `why`
+    /// 告诉玩家具体原因（例如「请不要在短评里留联系方式」）。所以这里不做
+    /// 任何降级，让错误一路带着 `why` 上到界面。
+    pub async fn rate_map(
+        &self,
+        world: &str,
+        score: i64,
+        text: &VrccRatingText,
+    ) -> std::result::Result<VrccMyMap, VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            // 读接口遇到空 ID 会安静地返回 `None`，写接口不能：一个写操作
+            // 「什么都没发生」是最坏的结局——玩家会以为提交成功了。
+            return Err(VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("world"),
+            ));
+        }
+        self.ensure_connected()?;
+        self.remote
+            .rate_map(&world, score, text)
+            .await
+            .map_err(|error| self.settle(error))
+    }
+
+    /// 删掉自己给这张图的评分（需要 `maps.rate`）。
+    ///
+    /// 同样是写操作，不做重试。`404` 表示本来就没打过分——对它而言目标已经
+    /// 达成，所以按成功处理，免得玩家看到一句莫名其妙的错误。
+    pub async fn delete_map_rating(&self, world: &str) -> std::result::Result<(), VrccError> {
+        let world = vrcx_0_core::location::world_id_from_location(world);
+        if world.is_empty() {
+            return Err(VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("world"),
+            ));
+        }
+        self.ensure_connected()?;
+        match self.remote.delete_map_rating(&world).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.is_not_found() => Ok(()),
             Err(error) => Err(self.settle(error)),
         }
     }

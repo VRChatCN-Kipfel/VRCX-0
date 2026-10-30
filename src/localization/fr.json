@@ -4630,7 +4630,16 @@
                 "cap_label": "Capacity",
                 "went_badge": "visited",
                 "unit_sec": "s",
-                "perf_toggle": "Show or hide hardware details"
+                "perf_toggle": "Show or hide hardware details",
+                "rate_input_label": "Choose a score",
+                "rate_value": "{score} out of {max}",
+                "rate_none": "Not chosen",
+                "rate_submit": "Submit",
+                "rate_submitting": "Submitting…",
+                "rate_delete": "Delete rating",
+                "rate_failed": "Could not submit. Try again later.",
+                "rate_needs_scope": "Rating needs reconnecting your VRCC account once.",
+                "words_placeholder": "Write a short comment (optional, 30 characters)"
             }
         },
         "avatar": {

@@ -275,6 +275,37 @@ export const vrccApi = {
         call(() => commands.appVrccMyMapPage(world, sort)),
 
     /**
+     * 给地图打分 / 写短评。**需要 `maps.rate` 敏感权限。**
+     *
+     * ## 这是写操作
+     *
+     * 官方要求「由玩家本人每次主动点击触发」，所以这个包装里**不做任何重试、
+     * 不做乐观更新、不批量合并**。失败就把错误原样抛给界面，由玩家决定要不
+     * 要再点一次。
+     *
+     * ## `textMode` 的三种取值
+     *
+     * 官方对 `text` 有微妙的三态语义，用 `textMode` 显式表达，避免把
+     * 「只改分数」误做成「删掉短评」：
+     *
+     * - `keep`  —— 只改分数，保留原短评
+     * - `clear` —— 删掉短评，保留分数
+     * - `write` —— 提交或更新短评（需同时给 `text`）
+     *
+     * 返回更新后的地图状态，可直接用来刷新界面。
+     */
+    rateMap: (
+        world: string,
+        score: number,
+        textMode: 'keep' | 'clear' | 'write' = 'keep',
+        text: string | null = null
+    ) => call(() => commands.appVrccRateMap(world, score, textMode, text)),
+
+    /** 删掉自己给这张图的评分。需要 `maps.rate` 敏感权限。 */
+    deleteMapRating: (world: string) =>
+        call(() => commands.appVrccDeleteMapRating(world)),
+
+    /**
      * 玩家视角地图榜：比公开榜多「我去过几次、热评、名次、介绍首行」。
      *
      * 需要 `maps` 普通权限。`sort` 多一个 `went`（我去过的）。

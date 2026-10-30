@@ -260,6 +260,28 @@ impl VrccRemote for FakeRemote {
             Ok(VrccMyMapPage::default())
         })
     }
+    fn rate_map<'a>(
+        &'a self,
+        _world: &'a str,
+        _score: i64,
+        _text: &'a VrccRatingText,
+    ) -> VrccFuture<'a, VrccMyMap> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            // 写操作默认成功，返回一份空的地图状态。
+            Ok(VrccMyMap::default())
+        })
+    }
+    fn delete_map_rating<'a>(&'a self, _world: &'a str) -> VrccFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Ok(())
+        })
+    }
     fn my_board<'a>(&'a self, _sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
         Box::pin(async move {
             if let Some(error) = self.take_error() {
@@ -722,7 +744,10 @@ async fn connected_guard_blocks_personal_calls_when_disconnected() {
 async fn device_auth_asks_for_the_scope_that_fits_the_client() {
     let cases = [
         ("dev-test", "profile notifications maps"),
-        ("app_0123456789abcdef", "profile notifications maps mutuals"),
+        (
+            "app_0123456789abcdef",
+            "profile notifications maps mutuals maps.rate",
+        ),
     ];
     for (client, expected) in cases {
         let remote = FakeRemote::new();
@@ -1019,6 +1044,67 @@ async fn the_signed_in_map_page_refuses_before_sending_when_disconnected() {
     assert!(error.needs_reauth());
     // 没注入过错误且没有走到网络，说明请求是被本地拦下的。
     assert!(remote.take_error().is_none());
+}
+
+/// 写操作遇到空世界 ID 必须**失败**，不能安静成功。
+///
+/// 读接口在这种情况下返回 `Ok(None)` 是合理的（「没有这一页」），但写操作
+/// 「什么都没发生」是最坏的结局——玩家会以为打分提交了。
+#[tokio::test]
+async fn rating_a_map_without_a_world_id_fails_instead_of_silently_succeeding() {
+    let (service, _remote, _store) = connected_service();
+
+    let error = service
+        .rate_map("", 8, &VrccRatingText::Keep)
+        .await
+        .unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Input);
+
+    let error = service.delete_map_rating("").await.unwrap_err();
+    assert_eq!(error.layer, ErrorLayer::Input);
+}
+
+/// 未连接时写操作先拒绝，不把必然失败的请求发出去。
+#[tokio::test]
+async fn rating_refuses_before_sending_when_disconnected() {
+    let store: Arc<dyn VrccTokenStore> = Arc::new(MemoryStore::default());
+    let remote = FakeRemote::new();
+    let service = VrccService::new(store, Arc::clone(&remote) as Arc<dyn VrccRemote>);
+
+    let error = service
+        .rate_map("wrld_x", 8, &VrccRatingText::Keep)
+        .await
+        .unwrap_err();
+    assert!(error.needs_reauth());
+    assert!(remote.take_error().is_none());
+}
+
+/// 删评分遇到 `404` 当作成功：目标本来就已达成。
+///
+/// 玩家看到「删除失败」会以为评分还在，然后反复点。
+#[tokio::test]
+async fn deleting_a_rating_that_is_already_gone_is_not_an_error() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(404, "not_found"));
+
+    assert!(service.delete_map_rating("wrld_x").await.is_ok());
+}
+
+/// 短评被审核拒绝时，错误要能一路带到界面。
+///
+/// `yq_words` 不是网络故障，服务器会在 `why` 里说明原因，那句话对玩家比
+/// 「操作失败」有用得多。
+#[tokio::test]
+async fn a_rejected_comment_keeps_its_reason() {
+    let (service, remote, _store) = connected_service();
+    remote.set_error(http(400, "yq_words"));
+
+    let error = service
+        .rate_map("wrld_x", 8, &VrccRatingText::Write("留个联系方式".into()))
+        .await
+        .unwrap_err();
+    // 这是服务器拒绝，不是传输失败；界面据此显示「提交失败」+ 原因
+    assert_eq!(error.layer, ErrorLayer::Server);
 }
 
 /// 不在榜上时服务器回 `404 not_found`——那是**这张图还没上榜**，不是故障。

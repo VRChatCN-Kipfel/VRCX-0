@@ -184,6 +184,15 @@ pub enum ErrorDetail {
     TokenMissing,
     #[error("路径必须相对 /api/v1/：{0}")]
     AbsolutePath(String),
+    /// **本地参数不成立**：请求压根不该发出去，也发不出去。
+    ///
+    /// 与 [`Self::AbsolutePath`] 的区别是：那个是路径拼错（实现缺陷），
+    /// 这个是**调用方传进来的东西本身不完整**，例如要打分却没有世界 ID。
+    ///
+    /// 之所以单列而不是复用别的变体：写操作遇到这种情况**不能安静地成功**
+    /// ——玩家会以为提交了。所以它需要一条玩家看得懂、又能指向我们代码的文案。
+    #[error("星遇同频请求缺少必要参数：{0}")]
+    MissingArgument(&'static str),
     #[error("请求正文超过 {VRCC_MAX_BODY_BYTES} 字节上限")]
     BodyTooLarge,
     /// **本机限流**：请求没有发出去。
@@ -372,10 +381,11 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 /// - 开 Issue 登记的客户端又会默认带上本功能用不到的 `crossings` 和
 ///   `maps.rate`，违反官方《使用要求》第 10 条「只申请用得到的权限」。
 ///
-/// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）。
-/// `mutuals` 是敏感权限，只有正式标识能要，`dev-` 用
+/// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）、
+/// 给地图打分（`maps.rate`）。
+/// `mutuals` 与 `maps.rate` 都是敏感权限，只有正式标识能要，`dev-` 用
 /// [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用 [`device_auth_scope`] 选。
-pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals";
+pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals maps.rate";
 
 /// `dev-` 标识申请的权限：只能要普通权限，要了敏感的 `device/code`
 /// 会直接回答 `403 scope_unreviewed`，连码都拿不到。
@@ -1523,6 +1533,69 @@ pub struct VrccMyRate {
     /// 我写的地图介绍；没有时是 `null`。
     #[serde(default)]
     pub intro: Option<VrccMapIntro>,
+}
+
+/// 短评在打分请求里的三种语义。
+///
+/// 官方文档写得很细，而这三者差别极大：
+///
+/// | 传什么 | 结果 |
+/// |---|---|
+/// | 非空字符串 | 提交或更新短评（会审核） |
+/// | 空字符串 `""` | **删掉已有短评**，分数保留 |
+/// | 完全不传这个字段 | 只改分数，**保留原短评** |
+///
+/// 所以不能用 `Option<String>`：那样 `None` 与「明确传空」在序列化上都是
+/// `null` 或缺失，无法区分，而错一个就把玩家的短评删了。
+///
+/// 这个类型只用于**请求**，不参与响应解析。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VrccRatingText {
+    /// 完全不传 `text` 字段：只改分数，原有短评原样保留。
+    Keep,
+    /// 传空字符串：删除已有短评。
+    Clear,
+    /// 传这段文字：提交或更新短评。
+    Write(String),
+}
+
+impl VrccRatingText {
+    /// 序列化成请求体里的 `text` 字段。
+    ///
+    /// `Keep` 返回 `None`，调用方据此**不把这个键放进 JSON**——放一个
+    /// `null` 进去与官方语义不符。
+    pub fn as_body_text(&self) -> Option<&str> {
+        match self {
+            Self::Keep => None,
+            Self::Clear => Some(""),
+            Self::Write(text) => Some(text.as_str()),
+        }
+    }
+}
+
+/// 打分请求。
+///
+/// 分数必须是 1–10 的整数（官方 `minimum: 1` / `maximum: 10`）。这里用
+/// `i64` 并在发送前夹取，而不是靠界面保证——越界会被服务器 `400
+/// bad_request` 打回来，那对玩家是个莫名其妙的报错。
+#[derive(Clone, Debug)]
+pub struct VrccRatingInput {
+    pub world: String,
+    pub score: i64,
+    pub text: VrccRatingText,
+}
+
+impl VrccRatingInput {
+    /// 分数的合法范围。
+    pub const MIN_SCORE: i64 = 1;
+    pub const MAX_SCORE: i64 = 10;
+    /// 短评的最长字数（官方 `maxLength: 30`）。
+    pub const MAX_TEXT_CHARS: usize = 30;
+
+    /// 夹取到合法范围。界面可以先用它做即时反馈，发送前仍会再夹一次。
+    pub fn clamped_score(&self) -> i64 {
+        self.score.clamp(Self::MIN_SCORE, Self::MAX_SCORE)
+    }
 }
 
 // ---------------------------------------------------------------------------

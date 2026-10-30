@@ -4888,7 +4888,16 @@
                 "cap_label": "房間上限",
                 "went_badge": "去過",
                 "unit_sec": "秒",
-                "perf_toggle": "展開或收合配置明細"
+                "perf_toggle": "展開或收合配置明細",
+                "rate_input_label": "選擇分數",
+                "rate_value": "{score} 分（共 {max} 分）",
+                "rate_none": "未選",
+                "rate_submit": "提交",
+                "rate_submitting": "提交中…",
+                "rate_delete": "刪除評分",
+                "rate_failed": "提交失敗，請稍後再試。",
+                "rate_needs_scope": "打分需要重新連接一次星遇同頻帳戶。",
+                "words_placeholder": "寫一句短評（可選，30 字以內）"
             }
         },
         "avatar": {
