@@ -2,16 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { tauriClient } from '@/platform/tauri/client';
 import { copyTextToClipboard } from '@/services/clipboardService';
-import { openUserDialog, openWorldDialog } from '@/services/dialogService';
+import {
+    openGroupDialog,
+    openUserDialog,
+    openWorldDialog
+} from '@/services/dialogService';
 import i18n from '@/services/i18nService';
 import { openExternalLink } from '@/services/shellIntegrationService';
 import { toast } from '@/services/toastService';
 import { useRuntimeStore } from '@/state/runtimeStore';
+import { useVrcNotificationStore } from '@/state/vrcNotificationStore';
 
 import {
     vrccApi,
     VrccError,
     type VrccAnnouncements,
+    type VrccStickers,
     type VrccBoard,
     type VrccBoardSort,
     type VrccConnection,
@@ -58,6 +64,45 @@ const BOARD_REUSE_MS = 60_000;
 const DEVICE_AUTH_COOLDOWN_SECS = 5;
 
 export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'crossings' | 'me';
+/**
+ * 把结构化错误翻译成一句玩家看得懂的话。
+ *
+ * **为什么不直接用 `error.message`**：那是后端给的原文，传输层失败时里面是
+ * `error sending request for url (…)` 这种英文技术串，玩家既看不懂，也判断
+ * 不了该查网络还是该重试。
+ *
+ * 现在按 `layer` + `transportKind` 出文案：
+ * - `input`：我们自己的 bug，只说「操作失败」，细节留给日志
+ * - `transport`：告诉玩家卡在哪一步（DNS / 连不上 / 超时 / 代理）
+ * - `session` / `server`：沿用后端的描述，那些本来就是给人看的
+ *
+ * **不假装能分辨「被封」**：RST、端口拒绝、运营商拦截在系统层面一模一样，
+ * 都是建连失败。文案写「可能被拦截」，不写「已被拦截」。
+ */
+export function describeVrccError(error: VrccError): string {
+    if (error.layer === 'input') {
+        // 不该发生。真发生了说明我们构造请求出了错，玩家帮不上忙。
+        return i18n.t('vrcc.error.unknown');
+    }
+
+    if (error.layer === 'transport') {
+        const kind = error.transportKind;
+        if (kind === 'timeout') {
+            return i18n.t('vrcc.error.network.timeout');
+        }
+        // DNS 与建连对玩家的意义不同：前者换 DNS/换网络可能好，后者多半要开代理。
+        // 注意走 SOCKS5 代理时 DNS 由代理解析，这里只会看到 `connect`。
+        if (kind === 'connect') {
+            return i18n.t('vrcc.error.network.connect');
+        }
+        if (kind === 'dns') {
+            return i18n.t('vrcc.error.network.dns');
+        }
+        return i18n.t('vrcc.error.network.generic');
+    }
+
+    return error.message || i18n.t('vrcc.error.unknown');
+}
 
 /** 「提醒」页签里看哪一个：最近的提醒，还是通知中心。 */
 export type VrccNotificationsView = 'recent' | 'notes';
@@ -84,6 +129,8 @@ type State = {
     notesSupported: boolean | null;
     /** 公告和停站；null 表示没拉到，或服务器还没有这个接口。 */
     announcements: VrccAnnouncements | null;
+    /** 贴纸和材质名；null 表示没拉到，或服务器还没有这个接口。 */
+    stickers: VrccStickers | null;
     /** 当前所在地图在榜上的状态；null 表示不显示（未连接、无地图、或被隐藏）。 */
     myMap: VrccMyMap | null;
     /** 「互相连上」的星友；null 表示还没拉过或没权限。 */
@@ -144,6 +191,7 @@ const initialState: State = {
     notes: null,
     notesSupported: null,
     announcements: null,
+    stickers: null,
     myMap: null,
     mutuals: null,
     mutualsError: null,
@@ -219,7 +267,7 @@ export function useVrccController() {
                       );
             toast.add({
                 type: 'error',
-                title: normalized.message || i18n.t('vrcc.error.unknown')
+                title: describeVrccError(normalized)
             });
             patch({ error: normalized });
             if (normalized.kind === 'needsReauth') {
@@ -292,6 +340,19 @@ export function useVrccController() {
         async (mark = false) => {
             const recent = await vrccApi.recentNotifications(mark);
             patch({ recent });
+            if (mark) {
+                // 后端借这次调用把通知中心里那几行按服务端游标标成了已读。
+                // 通知中心是另一条查询、另一份内存快照，不重读就还挂着红点。
+                useVrcNotificationStore
+                    .getState()
+                    .loadForCurrentUser()
+                    .catch((error: unknown) => {
+                        console.warn(
+                            '[vrcc] notification centre reload failed:',
+                            error
+                        );
+                    });
+            }
         },
         [patch]
     );
@@ -384,8 +445,7 @@ export function useVrccController() {
      * 网页和手机上的红点跟着消。别的场景一律 false。
      *
      * 星卡的额度（`left` / `max`）是**按天**算的，读一次算第二份读的
-     * 一次，所以这里把它和列表绑在同一个 `mark` 上：后台为了算数字时
-     * 两个都问、两个都花额度，是最贵的用法，也没有任何界面需要它。
+     * 一次，所以这里只让「玩家真的在看」那一次把两个都拉下来。
      */
     const refreshCrossings = useCallback(
         async (mark = false) => {
@@ -426,6 +486,19 @@ export function useVrccController() {
         },
         [patch]
     );
+
+    /**
+     * 贴纸和材质名。拿不到不算页面错误：那是装饰素材，缺了它不该让
+     * 「我的」页签报错。
+     */
+    const refreshStickers = useCallback(async () => {
+        try {
+            const stickers = await vrccApi.stickers();
+            patch({ stickers });
+        } catch (error) {
+            console.error('[vrcc] refreshStickers failed:', error);
+        }
+    }, [patch]);
 
     const refreshService = useCallback(async () => {
         try {
@@ -474,6 +547,7 @@ export function useVrccController() {
             reportError(error, 'refreshService');
         });
         void refreshAnnouncements();
+        void refreshStickers();
         void refreshBoards(boardSortRef.current).catch((error) => {
             reportError(error, 'refreshBoards');
         });
@@ -501,6 +575,7 @@ export function useVrccController() {
     }, [
         patch,
         refreshAnnouncements,
+        refreshStickers,
         refreshBoards,
         refreshConnection,
         refreshMutuals,
@@ -920,6 +995,17 @@ export function useVrccController() {
         openUserDialog({ userId });
     }, []);
 
+    /**
+     * 打开 VRCX-0 自己的群组详情窗。
+     *
+     * 和 `openUser` 同一条合规边界：社区群组的入口只负责把玩家带到我们
+     * 自己的群组页，**加入由玩家在那个界面里自己点**，程序不代发请求。
+     */
+    const openGroup = useCallback((groupId: string) => {
+        if (!groupId.startsWith('grp_')) return;
+        openGroupDialog({ groupId });
+    }, []);
+
     return {
         ...state,
         setTab,
@@ -933,6 +1019,7 @@ export function useVrccController() {
         beginDeviceAuth,
         disconnect,
         openWorld,
-        openUser
+        openUser,
+        openGroup
     };
 }

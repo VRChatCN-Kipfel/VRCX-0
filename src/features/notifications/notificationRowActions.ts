@@ -15,6 +15,7 @@ import {
     ReplyIcon,
     SendIcon,
     ShieldIcon,
+    StarIcon,
     TagIcon,
     UserIcon,
     UsersRoundIcon,
@@ -139,6 +140,9 @@ export function getNotificationLinkIcon(
             return GlobeIcon;
         case 'avatar':
             return PersonStandingIcon;
+        case 'vrcc':
+            // 站内跳转，不是外部地址：外链箭头会让人以为要开浏览器。
+            return StarIcon;
         default:
             return ExternalLinkIcon;
     }

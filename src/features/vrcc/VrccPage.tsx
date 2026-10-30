@@ -7,8 +7,9 @@ import {
     Unplug,
     X
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router';
 
 import {
     PageBody,
@@ -31,7 +32,7 @@ import { VrccMapsPanel } from './components/VrccMapsPanel';
 import { VrccMePanel } from './components/VrccMePanel';
 import { VrccMutualsPanel } from './components/VrccMutualsPanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
-import { useVrccController } from './useVrccController';
+import { useVrccController, type VrccTab } from './useVrccController';
 import type {
     VrccAnnouncement,
     VrccRecentNotifications,
@@ -75,6 +76,18 @@ function unreadCount(
     return (recent?.items ?? []).filter((item) => (item.id ?? 0) > read).length;
 }
 
+const VRCC_TABS: readonly VrccTab[] = [
+    'maps',
+    'notifications',
+    'mutuals',
+    'me'
+];
+
+/** 页面认的页签名。未知值一律忽略，不让它把界面切到一个不存在的页签。 */
+function isVrccTab(value: string | null): value is VrccTab {
+    return value !== null && (VRCC_TABS as readonly string[]).includes(value);
+}
+
 export function VrccPage() {
     const { t } = useTranslation();
     const {
@@ -93,6 +106,7 @@ export function VrccPage() {
         notes,
         notesSupported,
         announcements,
+        stickers,
         myMap,
         mutuals,
         mutualsError,
@@ -112,7 +126,8 @@ export function VrccPage() {
         beginDeviceAuth,
         disconnect,
         openWorld,
-        openUser
+        openUser,
+        openGroup
     } = useVrccController();
 
     const connected = connection?.connected ?? false;
@@ -121,6 +136,36 @@ export function VrccPage() {
     // 一起藏起来，并顺手把停留在这页的玩家送回地图榜——否则会出现「所有
     // 页签都不选中、内容空白」的状态。
     const crossingsHidden = crossings?.hidden === true;
+
+    // 从通知中心点进来时带的页签名。
+    const [searchParams, setSearchParams] = useSearchParams();
+    const requestedTab = searchParams.get('tab');
+    const appliedRequestedTab = useRef(false);
+    // 用 ref 读隐藏状态：`crossingsHidden` 是每次渲染新算的布尔值，直接进
+    // 依赖数组会让这个 effect 在星轨相交数据回来时白跑一遍（此时
+    // `appliedRequestedTab` 已经置位，行为其实不变）。
+    const crossingsHiddenRef = useRef(crossingsHidden);
+    crossingsHiddenRef.current = crossingsHidden;
+    useEffect(() => {
+        // 等连接就绪再应用：`setTab` 在未连接时会直接返回，那时「提醒」页
+        // 该做的已读同步也一并跳过了，页签会落过去而同步没发生。
+        if (
+            appliedRequestedTab.current ||
+            !connected ||
+            !isVrccTab(requestedTab) ||
+            // 「星轨相交」被服务端要求隐藏时不能落过去：那个页签根本不存在，
+            // 落过去就是一个谁都没选中、内容空白的页面。
+            (requestedTab === 'crossings' && crossingsHiddenRef.current)
+        ) {
+            return;
+        }
+        appliedRequestedTab.current = true;
+        setTab(requestedTab);
+        // 参数用掉就清掉，免得玩家手动切页签时又被它拽回去。
+        const remaining = new URLSearchParams(searchParams);
+        remaining.delete('tab');
+        setSearchParams(remaining, { replace: true });
+    }, [connected, requestedTab, searchParams, setSearchParams, setTab]);
     const activeTab = crossingsHidden && tab === 'crossings' ? 'maps' : tab;
     const stop = announcements?.stop ?? null;
     const [dismissedAnnouncement, setDismissedAnnouncement] = useState(
@@ -303,8 +348,11 @@ export function VrccPage() {
 
                         <TabsContent value="maps" className="min-h-0 flex-1">
                             {/* 所在地图卡片放在榜单上方：玩家最关心的是
-                                «我现在这张图怎么样»，而不是全站排行。 */}
-                            {myMap && (
+                                «我现在这张图怎么样»，而不是全站排行。
+                                `off` 是硬阻断：服务层不再把它折成 null，
+                                所以这里必须自己判断——官方要求此时隐藏
+                                这张图的卡片。 */}
+                            {myMap && myMap.off !== true && (
                                 <VrccCurrentMapCard
                                     map={myMap}
                                     onOpenWorld={openWorld}
@@ -343,6 +391,7 @@ export function VrccPage() {
                                 mutuals={mutuals}
                                 mutualsError={mutualsError}
                                 onOpenUser={openUser}
+                                onOpenGroup={openGroup}
                             />
                         </TabsContent>
                         <TabsContent
@@ -381,6 +430,7 @@ export function VrccPage() {
                             <VrccMePanel
                                 connection={connection}
                                 usage={usage}
+                                stickers={stickers}
                                 deviceAuth={deviceAuth}
                                 deviceAuthBusy={deviceAuthBusy}
                                 deviceAuthMessage={deviceAuthMessage}

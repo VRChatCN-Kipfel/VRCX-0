@@ -1,87 +1,29 @@
-import { commands } from '@/platform/tauri/bindings';
-
 /**
  * 星遇同频（vrcc.cc）前端数据层。
  *
  * 所有调用都走生成的绑定，不手写命令名。这一层只做两件事：
  * 把后端的错误收成统一的 `VrccError`，以及把「是否需要重新授权」这类
  * 判断交给后端（前端不解析错误文案）。
- */
-
-/** 后端已经分好类的错误类别。 */
-export type VrccErrorKind =
-    | 'needsReauth'
-    | 'missingScope'
-    | 'throttled'
-    | 'transport'
-    | 'other';
-
-export class VrccError extends Error {
-    readonly kind: VrccErrorKind;
-    readonly scope: string | null;
-
-    constructor(
-        message: string,
-        kind: VrccErrorKind,
-        scope: string | null = null
-    ) {
-        super(message);
-        this.name = 'VrccError';
-        this.kind = kind;
-        this.scope = scope;
-    }
-}
-
-/**
- * 把命令抛出的错误归一化。
  *
- * 分类结论**随错误一起从后端过来**（`AppErrorPayload.vrcc`），前端不再解析
- * 文案。早先这里要再走一次 IPC 对中文错误串做子串匹配，结果 `401 token`
- * 落进 `other`、缺权限的 `need` 在转字符串时丢失、`missingScope` 提示
- * 永远不显示——都源于「让消费方去猜分类」。
+ * 错误类型与归一化本身住在 `@/lib/vrccError`——`repositories/` 和
+ * `components/` 也要用，而它们（按架构约束）不能引用 `@/features/**`。
+ * 这里原样再导出一次，旧引用路径继续可用。
  */
-async function normalizeError(error: unknown): Promise<VrccError> {
-    const message = error instanceof Error ? error.message : String(error);
-    const detail = readVrccDetail(error);
-    return new VrccError(
-        message,
-        normalizeKind(detail?.kind),
-        detail?.need ?? null
-    );
-}
+export { VrccError, normalizeVrccError, isVrccError } from '@/lib/vrccError';
+export type {
+    VrccErrorKind,
+    VrccErrorLayer,
+    VrccTransportKind
+} from '@/lib/vrccError';
 
-/** 后端给出的结构化细节；老后端或非 vrcc 错误时没有这一项。 */
-function readVrccDetail(
-    error: unknown
-): { kind?: string; need?: string | null } | null {
-    if (!error || typeof error !== 'object') {
-        return null;
-    }
-    const detail = (error as { vrcc?: unknown }).vrcc;
-    if (!detail || typeof detail !== 'object') {
-        return null;
-    }
-    return detail as { kind?: string; need?: string | null };
-}
-
-/** 只接受已知的五个类别，别的一律当 `other`，免得后端加了新类别前端崩。 */
-function normalizeKind(kind: string | undefined): VrccErrorKind {
-    switch (kind) {
-        case 'needsReauth':
-        case 'missingScope':
-        case 'throttled':
-        case 'transport':
-            return kind;
-        default:
-            return 'other';
-    }
-}
+import { normalizeVrccError } from '@/lib/vrccError';
+import { commands } from '@/platform/tauri/bindings';
 
 async function call<T>(run: () => Promise<T>): Promise<T> {
     try {
         return await run();
     } catch (error) {
-        throw await normalizeError(error);
+        throw await normalizeVrccError(error);
     }
 }
 
@@ -98,10 +40,88 @@ export const vrccApi = {
     boards: (limit = 20, sort: VrccBoardSort = 'top') =>
         call(() => commands.appVrccBoards(limit, sort)),
 
+    /**
+     * 按世界 ID 批量查地图（`GET /maps?ids=`）。不需要连接。
+     *
+     * 一次最多 20 张，**只返回在榜上的**——结果条数可能少于传入的数量，
+     * 用 `world` 去配，不要按下标对应。
+     */
+    maps: (worlds: string[]) => call(() => commands.appVrccMaps(worlds)),
+
     status: () => call(() => commands.appVrccStatus()),
 
     /** 公告和停站。不需要连接。服务器还没有这个接口时为 null。 */
     announcements: () => call(() => commands.appVrccAnnouncements()),
+
+    /** 所有贴纸和材质名。不需要连接也不需要令牌。服务器还没有这个接口时为 null。 */
+    stickers: () => call(() => commands.appVrccStickers()),
+
+    /**
+     * 我打过分的地图和短评。需要 `maps` 普通权限，最近的在前。
+     *
+     * 这是「我给它打了多少分」，不是那张图在榜上的均分——两者形状不同，
+     * 不要混用同一条渲染路径。
+     */
+    myMaps: () => call(() => commands.appVrccMyMaps()),
+
+    /**
+     * 公开地图页：分数分布、去过的人数、房间上限、多小咕实测。
+     *
+     * 不需要连接。这张图不在榜上时服务器回 `404`，那**是正常状态**，
+     * 后端把它转成 null，不是错误。
+     */
+    mapPage: (world: string) => call(() => commands.appVrccMapPage(world)),
+
+    /**
+     * 带令牌的地图页：**完整短评列表** + 我的评分 + 地图介绍。
+     *
+     * 需要 `maps` 普通权限（已有，不需要重新授权）。公开版按官方说明「短评和
+     * 介绍不给」，想看别人的评价只能走这一条；未连接时会失败。
+     *
+     * `sort` 只认 `hot` / `new`，传 null 用服务器默认。
+     * 不在榜上时（`404`）后端转成 null，不是错误。
+     */
+    myMapPage: (world: string, sort: 'hot' | 'new' | null = null) =>
+        call(() => commands.appVrccMyMapPage(world, sort)),
+
+    /**
+     * 给地图打分 / 写短评。**需要 `maps.rate` 敏感权限。**
+     *
+     * ## 这是写操作
+     *
+     * 官方要求「由玩家本人每次主动点击触发」，所以这个包装里**不做任何重试、
+     * 不做乐观更新、不批量合并**。失败就把错误原样抛给界面，由玩家决定要不
+     * 要再点一次。
+     *
+     * ## `textMode` 的三种取值
+     *
+     * 官方对 `text` 有微妙的三态语义，用 `textMode` 显式表达，避免把
+     * 「只改分数」误做成「删掉短评」：
+     *
+     * - `keep`  —— 只改分数，保留原短评
+     * - `clear` —— 删掉短评，保留分数
+     * - `write` —— 提交或更新短评（需同时给 `text`）
+     *
+     * 返回更新后的地图状态，可直接用来刷新界面。
+     */
+    rateMap: (
+        world: string,
+        score: number,
+        textMode: 'keep' | 'clear' | 'write' = 'keep',
+        text: string | null = null
+    ) => call(() => commands.appVrccRateMap(world, score, textMode, text)),
+
+    /** 删掉自己给这张图的评分。需要 `maps.rate` 敏感权限。 */
+    deleteMapRating: (world: string) =>
+        call(() => commands.appVrccDeleteMapRating(world)),
+
+    /**
+     * 玩家视角地图榜：比公开榜多「我去过几次、热评、名次、介绍首行」。
+     *
+     * 需要 `maps` 普通权限。`sort` 多一个 `went`（我去过的）。
+     */
+    myBoard: (sort: VrccMyBoardSort = 'top') =>
+        call(() => commands.appVrccMyBoard(sort)),
 
     /**
      * 第一步设备授权：拿码。
@@ -144,11 +164,18 @@ export const vrccApi = {
     pollNotifications: () => call(() => commands.appVrccPollNotifications()),
 
     /**
-     * 当前所在地图在榜上的状态与自己的评分。
+     * 地图在榜上的状态与自己的评分。
      *
-     * 地图被下架或不对当前玩家开放时返回 null，此时**不要**显示打分入口。
+     * - 不传 `world`：问「我现在在的地图」，位置由后端从游戏日志取。
+     * - 传 `world`：问那张具体的图。世界详情对话框走这条。
+     *
+     * 返回 `null` 的情况包括「这张图被下架或不对当前玩家开放」——官方要求
+     * 此时隐藏整块，所以**不要**在 null 时再显示打分入口。
+     *
+     * 这是唯一能区分「未收录」和「待审核」的接口：公开的 `/maps/{world}/page`
+     * 对这两种都回 `404`。
      */
-    myMap: () => call(() => commands.appVrccMyMap()),
+    myMap: (world?: string) => call(() => commands.appVrccMyMap(world ?? null)),
 
     /** 今天这一轮。需要 today 敏感权限（审核后才可用）。 */
     today: () => call(() => commands.appVrccToday()),
@@ -229,3 +256,22 @@ export type VrccAnnouncements = NonNullable<
     Awaited<ReturnType<typeof commands.appVrccAnnouncements>>
 >;
 export type VrccAnnouncement = NonNullable<VrccAnnouncements['posts']>[number];
+export type VrccStickers = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccStickers>>
+>;
+export type VrccSticker = NonNullable<VrccStickers['stickers']>[string];
+export type VrccRatedMaps = Awaited<ReturnType<typeof commands.appVrccMyMaps>>;
+export type VrccRatedMap = NonNullable<VrccRatedMaps['maps']>[number];
+export type VrccMapPage = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccMapPage>>
+>;
+export type VrccMyMapPage = NonNullable<
+    Awaited<ReturnType<typeof commands.appVrccMyMapPage>>
+>;
+export type VrccMapRate = NonNullable<VrccMyMapPage['rates']>[number];
+export type VrccMapRateWho = NonNullable<VrccMapRate['who']>;
+export type VrccMyBoard = Awaited<ReturnType<typeof commands.appVrccMyBoard>>;
+export type VrccMyBoardSort = NonNullable<
+    Parameters<typeof commands.appVrccMyBoard>[0]
+>;
+export type VrccMyBoardMap = NonNullable<VrccMyBoard['maps']>[number];

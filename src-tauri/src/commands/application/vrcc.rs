@@ -9,10 +9,12 @@
 //! 中间态（`device_code`）留在前端，不落盘。
 
 use tauri::State;
-use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep};
+use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep, VrccFailure};
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
-    VrccRecentNotifications, VrccStatus, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage, VrccMyBoard,
+    VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRatingText,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccVote, VrccVoteKind, VrccVoteResult,
 };
 
 use crate::{error::AppError, state::AppState};
@@ -112,6 +114,24 @@ pub async fn app__vrcc_boards(
         .map_err(|failure| AppError::Vrcc { failure })
 }
 
+/// 按世界 ID 批量查地图。不需要连接。
+///
+/// 一次最多 20 张，**只返回在榜上的**——结果条数可能少于传入的数量，前端要
+/// 按 `world` 去配，不能按下标对应。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_maps(
+    state: State<'_, AppState>,
+    worlds: Vec<String>,
+) -> Result<VrccBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .maps(&worlds)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
 /// 公告和停站。不需要连接。服务器还没有这个接口时返回 `null`。
 #[tauri::command]
 #[specta::specta]
@@ -126,6 +146,81 @@ pub async fn app__vrcc_announcements(
         .map_err(|failure| AppError::Vrcc { failure })
 }
 
+/// 所有贴纸和材质名。不需要连接。服务器还没有这个接口时返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_stickers(
+    state: State<'_, AppState>,
+) -> Result<Option<VrccStickers>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .stickers()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 公开地图页。不需要令牌。不在榜上时（`404`）返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_map_page(
+    state: State<'_, AppState>,
+    world: String,
+) -> Result<Option<VrccMapPage>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .map_page(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+///
+/// 不在榜上时（`404`）返回 `null`；未连接时返回需要连接的失败，不会被当成
+/// 「这张图不在榜」。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_map_page(
+    state: State<'_, AppState>,
+    world: String,
+    sort: Option<String>,
+) -> Result<Option<VrccMyMapPage>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_map_page(&world, sort.as_deref())
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 玩家视角地图榜。需要 `maps` 普通权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_board(
+    state: State<'_, AppState>,
+    sort: Option<VrccMyBoardSort>,
+) -> Result<VrccMyBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_board(sort.unwrap_or_default())
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 我打过分的地图。需要 `maps` 普通权限。最近的在前。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_maps(state: State<'_, AppState>) -> Result<VrccRatedMaps, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_maps()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
 /// 服务探活。用来在页面上显示「星遇同频现在可用吗」。
 #[tauri::command]
 #[specta::specta]
@@ -134,6 +229,91 @@ pub async fn app__vrcc_status(state: State<'_, AppState>) -> Result<VrccStatus, 
         .runtime_host()
         .vrcc()
         .status()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+// -- 写操作（需要 maps.rate） ------------------------------------------------
+
+/// 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+///
+/// `text` 用三态字符串表达官方那三种语义，**不能用 `Option<String>` 糊过去**：
+///
+/// | 参数 | 结果 |
+/// |---|---|
+/// | `textMode = "keep"` | 只改分数，保留原短评 |
+/// | `textMode = "clear"` | 删掉短评，保留分数 |
+/// | `textMode = "write"` + `text` | 提交或更新短评 |
+///
+/// 用两个字段而不是一个可空字段：Rust 侧要能区分「没传」和「传了空串」，
+/// 前端传 `null` 与不传在 JSON 里看起来是一样的，这里显式给一个模式位。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_rate_map(
+    state: State<'_, AppState>,
+    world: String,
+    score: i64,
+    text_mode: String,
+    text: Option<String>,
+) -> Result<VrccMyMap, AppError> {
+    let rating_text = match text_mode.as_str() {
+        "keep" => VrccRatingText::Keep,
+        "clear" => VrccRatingText::Clear,
+        "write" => VrccRatingText::Write(text.unwrap_or_default()),
+        _other => {
+            // 前端传了一个我们不认识的模式：这是调用方的 bug，不是网络问题。
+            // 造一个 `Input` 层的错误走同一套映射，界面会显示成一般失败。
+            let error = vrcx_0_contracts::vrcc::VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("textMode"),
+            );
+            return Err(AppError::Vrcc {
+                failure: VrccFailure::from_error(&error),
+            });
+        }
+    };
+    state
+        .runtime_host()
+        .vrcc()
+        .rate_map(&world, score, &rating_text)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 删掉自己给这张图的评分。需要 `maps.rate` 敏感权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_delete_map_rating(
+    state: State<'_, AppState>,
+    world: String,
+) -> Result<(), AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .delete_map_rating(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 给短评或地图介绍投票。需要 `maps.write` 敏感权限。
+///
+/// `vote` 用 `"up"` / `"down"` / `"none"`：`none` 表示取消。
+/// 用字符串而不是整数，是因为界面会在「当前票值」与「点一下之后发什么」之间
+/// 来回换算，枚举化的字面量比 `1` / `-1` / `0` 更难写错。
+///
+/// **不能给自己的内容投票**——这条由界面提前禁用按钮，服务端也会拒。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_vote_map_content(
+    state: State<'_, AppState>,
+    kind: VrccVoteKind,
+    id: i64,
+    vote: VrccVote,
+) -> Result<VrccVoteResult, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .vote_map_content(kind, id, vote)
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }
@@ -245,18 +425,36 @@ pub async fn app__vrcc_notes(state: State<'_, AppState>) -> Result<Option<VrccNo
 
 /// 当前所在地图在地图榜上的状态与我自己的评分。
 ///
-/// 地图 ID 由后端自己从游戏日志取，前端不用传：位置本来就只有后端知道，
-/// 让每个调用点自己算一遍只会多出一处可能算错的地方。
+/// 一张地图在榜上的状态与我自己的评分。需要 `maps` 普通权限。
 ///
-/// 返回 `null` 的三种情况：不在任何地图里、地图被下架或不对当前玩家开放
-/// （官方要求此时不显示打分面板）、以及未连接。
+/// ## `world` 传 `null` 时问「我现在在的地图」
+///
+/// 这是「所在地图」卡片用的路径：位置只有后端知道，不该让每个调用点自己算。
+///
+/// ## `world` 传具体 ID 时问那张图
+///
+/// 世界详情对话框要问**玩家正在看的那张图**，而不是他站在哪里。这两件事在
+/// 对话框里完全不同（可以从收藏里点开一张自己没去的图）。
+///
+/// ## 这是唯一能区分四种状态的接口
+///
+/// 公开的 `/maps/{world}/page` 对「未收录」和「待审核」都回 `404`，分不开；
+/// 只有带令牌的这一条会用 `board` / `pending` 两个布尔把它们分开。所以
+/// 界面要正确显示「已投稿、等审核」就只能走这里。
+///
+/// 返回 `null` 的情况：`world` 为空、**这张图被下架或不对当前玩家开放**
+/// （`off: true`，官方要求此时隐藏），以及未连接。
 #[tauri::command]
 #[specta::specta]
 pub async fn app__vrcc_my_map(
     state: State<'_, AppState>,
+    world: Option<String>,
 ) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, AppError> {
     let runtime = state.runtime_host();
-    let world = runtime.current_world_id();
+    let world = match world {
+        Some(world) => world,
+        None => runtime.current_world_id(),
+    };
     if world.is_empty() {
         return Ok(None);
     }

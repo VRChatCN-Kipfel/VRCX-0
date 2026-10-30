@@ -4,12 +4,17 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from '@/ui/shadcn/badge';
 
 import type { VrccMyMap } from '../vrccApi';
+import { vrccCoverUrl } from '../vrccCover';
+import { VrccCover } from './VrccCover';
 
 /**
  * 当前所在地图在榜上的状态。
  *
  * 数据来自 `GET /me/maps/{world}`（`maps` 普通权限，`dev-` 可用）。
- * 后端已经把 `off` 的地图转成 null，所以这里拿到的一定是可显示的地图。
+ *
+ * **调用方必须自己判断 `off`**：服务层不再把 `off` 的地图折成 null（那样会
+ * 和「没连接」「查不到」混在一起，界面说不出真正原因）。`off: true` 表示
+ * 星遇不对当前账号下发这张图，此时整张卡片都不该渲染。
  *
  * 显示取向：一行地图名 + 几个数字。均分、评分人数、我打的分三样并排，
  * 因为玩家最常看的就是这三个；「还没上榜」用文字说明而不是空白。
@@ -44,8 +49,14 @@ export function VrccCurrentMapCard({
                 )}
             </div>
 
-            <div className="mb-2 truncate text-sm font-medium">
-                {map.name ?? world}
+            <div className="mb-2 flex items-center gap-2">
+                <VrccCover
+                    src={vrccCoverUrl(map.imgUrl, map.img)}
+                    className="size-10 shrink-0 rounded object-cover"
+                />
+                <div className="min-w-0 truncate text-sm font-medium">
+                    {map.name ?? world}
+                </div>
             </div>
 
             {notRanked ? (

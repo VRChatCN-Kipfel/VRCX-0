@@ -984,4 +984,56 @@ describe('vrcNotificationStore', () => {
             'failed'
         );
     });
+
+    /**
+     * 站外提醒（星遇同频）算通知中心里的未读，但不算「托盘上在等你处理的事」。
+     *
+     * 两个口径必须分开：`unseenCount` 含站外提醒（应用内该有角标），而喂给
+     * 外壳的 `vrcUnseenNotificationCount` 只数需要动作的行。混在一起会让
+     * 系统托盘图标常亮成一盏状态灯。
+     */
+    it('counts out-of-app notices as unread without lighting the tray', async () => {
+        notificationRepositoryMock.queryNotifications.mockResolvedValue([
+            {
+                id: 'vrcc_42',
+                type: 'vrcc.notice',
+                version: 2,
+                seen: false,
+                created_at: new Date().toISOString()
+            },
+            {
+                id: 'notif_friend_request',
+                type: 'friendRequest',
+                version: 1,
+                seen: false,
+                created_at: new Date().toISOString()
+            }
+        ]);
+
+        await useVrcNotificationStore.getState().loadForCurrentUser();
+
+        const state = useVrcNotificationStore.getState();
+        // 应用内角标：两条都算。
+        expect(state.unseenCount).toBe(2);
+        // 系统托盘：只算好友请求那一条。
+        expect(useShellStore.getState().vrcUnseenNotificationCount).toBe(1);
+    });
+
+    /** 只有站外提醒时，托盘一个红点都不该有。 */
+    it('leaves the tray clean when only out-of-app notices are unread', async () => {
+        notificationRepositoryMock.queryNotifications.mockResolvedValue([
+            {
+                id: 'vrcc_7',
+                type: 'vrcc.notice',
+                version: 2,
+                seen: false,
+                created_at: new Date().toISOString()
+            }
+        ]);
+
+        await useVrcNotificationStore.getState().loadForCurrentUser();
+
+        expect(useVrcNotificationStore.getState().unseenCount).toBe(1);
+        expect(useShellStore.getState().vrcUnseenNotificationCount).toBe(0);
+    });
 });

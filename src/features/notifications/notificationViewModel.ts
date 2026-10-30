@@ -101,7 +101,9 @@ const INTERNAL_LINK_SCHEMES = new Set<string>([
     'group',
     'event',
     'world',
-    'avatar'
+    'avatar',
+    // 站外提醒的落点：跳到本应用的另一页，不是外部地址。
+    'vrcc'
 ]);
 
 export function getNotificationLinkScheme(

@@ -62,9 +62,17 @@ fn client() -> VrccClient {
 
 /// 网络不通时把测试当作跳过，而不是让 CI 红。
 ///
-/// 区分方式：抓取失败（`Transport`）算没网；解析失败（`Decode`）算契约问题。
+/// 区分方式：传输层失败算没网；其余（尤其是 `Decode`，说明拿到了响应但
+/// 结构不对）算契约问题，必须让测试失败——那才是这个文件要抓的东西。
 fn is_offline(error: &vrcx_0_integrations::vrcc::VrccError) -> bool {
-    matches!(error, vrcx_0_integrations::vrcc::VrccError::Transport(_))
+    // 按层级判断，不按具体变体：`Decode` 现在也归 `Transport` 层，
+    // 但它意味着「拿到了 2xx 却不是 JSON」，属于必须暴露的问题，
+    // 所以这里额外排除掉。
+    error.layer == vrcx_0_integrations::vrcc::ErrorLayer::Transport
+        && !matches!(
+            error.detail,
+            vrcx_0_integrations::vrcc::ErrorDetail::Decode(_)
+        )
 }
 
 macro_rules! skip_if_offline {

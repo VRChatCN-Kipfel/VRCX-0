@@ -1,7 +1,8 @@
 import { ExternalLink, RefreshCw } from 'lucide-react';
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { VrccStars } from '@/components/vrcc/VrccStars';
 import { openExternalLink } from '@/services/shellIntegrationService';
 import { Button } from '@/ui/shadcn/button';
 import { Spinner } from '@/ui/shadcn/spinner';
@@ -11,7 +12,11 @@ import {
     ToggleGroupSeparator
 } from '@/ui/shadcn/toggle-group';
 
+import { useVrccRowVisibility } from '../useVrccRowVisibility';
+import { useVrccWorldCovers } from '../useVrccWorldCovers';
 import type { VrccBoard, VrccBoardSort } from '../vrccApi';
+import { vrccCoverUrl } from '../vrccCover';
+import { VrccCover } from './VrccCover';
 
 const SORTS: readonly VrccBoardSort[] = ['top', 'week', 'new'];
 
@@ -49,6 +54,17 @@ export function VrccMapsPanel({
     const { t } = useTranslation();
     const maps = boards?.maps ?? [];
     const min = boards?.min;
+
+    // 封面：VRChat 的记录（清楚）优先，没有就退到星遇的小图；
+    // 不可视的行连星遇的图也不挂，省下那次请求。
+    // 依赖 `boards` 而不是上面那个 `?? []` 出来的 `maps`：后者为空时每次
+    // 渲染都是新数组，会让 useMemo 形同虚设。
+    const worldIds = useMemo(
+        () => (boards?.maps ?? []).map((map) => map.world),
+        [boards]
+    );
+    const { visible, observe } = useVrccRowVisibility();
+    const covers = useVrccWorldCovers(worldIds, visible);
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -110,6 +126,11 @@ export function VrccMapsPanel({
                             return (
                                 <li
                                     key={map.world}
+                                    // 用整个 `<li>` 观察，而不是那个 32px 的图：
+                                    // 判断的是「这一行有没有露在视口里」。
+                                    ref={(element) =>
+                                        observe(element, map.world)
+                                    }
                                     className="hover:bg-muted/40 group flex items-center gap-3 px-3 py-2"
                                 >
                                     {/* 点整行打开 VRCX-0 自己的世界详情窗：这是
@@ -128,6 +149,25 @@ export function VrccMapsPanel({
                                         >
                                             {place ?? '—'}
                                         </span>
+                                        {/* 封面。两级来源：
+                                        1. VRChat 的世界图（清楚，来自本地缓存）；
+                                        2. 缓存没命中且**这一行可见**时，用星遇
+                                           的小图顶上，保证不空窗。
+                                        不可视的行两者都不挂——星遇那次请求省下来，
+                                        VRChat 的记录交给后台预载，滚下去时就有了。
+                                        加载失败时组件整体返回 null，行退回纯文字。 */}
+                                        <VrccCover
+                                            src={
+                                                covers[map.world] ??
+                                                (visible.has(map.world)
+                                                    ? vrccCoverUrl(
+                                                          map.imgUrl,
+                                                          map.img
+                                                      )
+                                                    : null)
+                                            }
+                                            className="size-8 shrink-0 rounded object-cover"
+                                        />
                                         <div className="min-w-0 flex-1">
                                             <div className="truncate text-sm font-medium">
                                                 {map.name ?? map.world}
@@ -145,23 +185,35 @@ export function VrccMapsPanel({
                                                     : (map.author ?? '—')}
                                             </div>
                                         </div>
-                                        <div className="shrink-0 text-right">
-                                            <div className="text-sm font-semibold tabular-nums">
-                                                {map.avg != null
-                                                    ? map.avg.toFixed(1)
-                                                    : '—'}
-                                            </div>
-                                            <div className="text-muted-foreground text-[10px] tabular-nums">
-                                                {/* 本周榜显示本周几人打分，和网页上的「本周 N」一样。 */}
-                                                {sort === 'week' &&
-                                                map.week != null
-                                                    ? t(
-                                                          'vrcc.maps.week_count',
-                                                          {
-                                                              count: map.week
-                                                          }
-                                                      )
-                                                    : (map.raters ?? 0)}
+                                        {/* 星级在上、分数在下，右侧一列。
+                                        星负责扫视排序，数字负责精确比较——
+                                        五档星分不出 8.4 和 8.2，两者缺一不可。
+                                        星单独占一行会把行高抬高约 14px，这是
+                                        有意的：当前布局下 20 行里约 18 行都在
+                                        视口内，行高不敏感，可读性更重要。 */}
+                                        <div className="flex shrink-0 flex-col items-end gap-0.5">
+                                            <VrccStars
+                                                score={map.avg}
+                                                size="sm"
+                                            />
+                                            <div className="flex items-baseline gap-1">
+                                                <span className="text-sm font-semibold tabular-nums">
+                                                    {map.avg != null
+                                                        ? map.avg.toFixed(1)
+                                                        : '—'}
+                                                </span>
+                                                <span className="text-muted-foreground text-[10px] tabular-nums">
+                                                    {/* 本周榜显示本周几人打分，和网页上的「本周 N」一样。 */}
+                                                    {sort === 'week' &&
+                                                    map.week != null
+                                                        ? t(
+                                                              'vrcc.maps.week_count',
+                                                              {
+                                                                  count: map.week
+                                                              }
+                                                          )
+                                                        : (map.raters ?? 0)}
+                                                </span>
                                             </div>
                                         </div>
                                     </button>

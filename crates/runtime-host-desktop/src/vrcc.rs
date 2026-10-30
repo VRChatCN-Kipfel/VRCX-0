@@ -6,12 +6,14 @@ use std::time::Duration;
 use serde_json::json;
 use vrcx_0_application::vrcc::{StoredCredential, VrccFailure, VrccService, VrccTokenStore};
 use vrcx_0_contracts::vrcc::{
-    scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccNotes,
-    VrccRecentNotifications, VrccStatus, VrccToday, VrccUnread, VrccUsageSnapshot,
-    VrccWristSummary,
+    scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage,
+    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps,
+    VrccRatingText, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread,
+    VrccUsageSnapshot, VrccVote, VrccVoteKind, VrccVoteResult, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
+use vrcx_0_persistence::DatabaseService;
 
 /// 把本地加密仓库适配成应用层端口。
 ///
@@ -61,6 +63,10 @@ pub const VRCC_CONNECTION_CHANGED_EVENT: &str = "vrccConnectionChanged";
 /// 桌面侧的星遇同频运行时。
 pub struct DesktopVrccRuntime {
     service: Arc<VrccService>,
+    /// 通知中心那一行要落到当前账号的库表里，句柄与令牌存储共用同一个。
+    db: Arc<DatabaseService>,
+    /// 读当前登录账号。装配发生在登录之前，所以取闭包而不是固定 id。
+    owner: Arc<dyn Fn() -> Option<vrcx_0_core::OwnerId> + Send + Sync>,
 }
 
 impl DesktopVrccRuntime {
@@ -81,6 +87,21 @@ impl DesktopVrccRuntime {
     /// 图标缓存文件名，落在应用数据目录。
     const NOTICE_ICON_FILE: &str = "vrcc-notice-icon.png";
 
+    /// 通知中心里那一行的 id 前缀。
+    ///
+    /// 行 id 的形态是 `<前缀><提醒编号>`，写库和回标已读都用同一个形态。
+    /// 前缀让这些行和 VRChat 自己的提醒（`not_…`）在同一个 id 空间里不撞车。
+    const NOTICE_ROW_ID_PREFIX: &str = "vrcc_";
+    /// 通知中心里那一行的类型。
+    ///
+    /// 前端按 `view.notification.filters.<type>` 取标签，所以这个名字同时
+    /// 是本地化键的一部分，改这里要一起改文案。
+    const NOTICE_ROW_TYPE: &str = "vrcc.notice";
+    /// 点击这一行时跳到的位置。前端按 scheme 分派，见 `openNotificationLink`。
+    const NOTICE_ROW_LINK: &str = "vrcc:notifications";
+    /// 行的发送者与标题。两者都取这个名字是有意的，见 `notice_row`。
+    const NOTICE_ROW_SENDER: &str = "星遇同频";
+
     /// 构造运行时。
     ///
     /// `X-Client` 由 [`resolve_client_id`] 在**构建期**定死，这里不接受任何
@@ -88,7 +109,15 @@ impl DesktopVrccRuntime {
     ///
     /// `proxy_url` 必须传宿主应用的统一代理（`runtime_host().proxy_url()`）：
     /// 本机实测 `vrcc.cc` 直连 DNS 超时，不接代理时所有接口都会「暂时不可用」。
-    pub fn new(store: LocalVrccTokenStore, proxy_url: Option<&str>) -> Self {
+    ///
+    /// `owner` 与令牌存储用的是同一个来源：通知中心那一行要写进当前账号的表，
+    /// 标记已读也要按同一个账号找行。
+    pub fn new(
+        store: LocalVrccTokenStore,
+        proxy_url: Option<&str>,
+        owner: Arc<dyn Fn() -> Option<vrcx_0_core::OwnerId> + Send + Sync>,
+    ) -> Self {
+        let db = Arc::clone(store.db());
         let port = Arc::new(TokenStoreAdapter { inner: store });
         let client_id = resolve_client_id();
         // 网络端口的实现放在 outbound-adapters：应用层不认识 `VrccSession`，
@@ -100,6 +129,8 @@ impl DesktopVrccRuntime {
             ));
         Self {
             service: Arc::new(VrccService::new(port, remote)),
+            db,
+            owner,
         }
     }
 
@@ -128,6 +159,14 @@ impl DesktopVrccRuntime {
             .map_err(|error| VrccFailure::from_error(&error))
     }
 
+    /// 批量查地图：开放数据，不需要连接。只返回在榜上的。
+    pub async fn maps(&self, worlds: &[String]) -> Result<VrccBoard, VrccFailure> {
+        self.service
+            .maps(worlds)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
     pub async fn status(&self) -> Result<VrccStatus, VrccFailure> {
         self.service
             .status()
@@ -139,6 +178,14 @@ impl DesktopVrccRuntime {
     pub async fn announcements(&self) -> Result<Option<VrccAnnouncements>, VrccFailure> {
         self.service
             .announcements()
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 所有贴纸和材质名。服务器还没有这个接口时为 `None`。
+    pub async fn stickers(&self) -> Result<Option<VrccStickers>, VrccFailure> {
+        self.service
+            .stickers()
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }
@@ -171,14 +218,47 @@ impl DesktopVrccRuntime {
     }
 
     /// 最近的提醒。`mark` 为 `true` 时同时把已读状态同步到账号（跨设备）。
+    ///
+    /// 拿到结果后顺手让通知中心里那几行跟上服务端的已读游标，见
+    /// [`Self::settle_notice_rows`]。
     pub async fn recent_notifications(
         &self,
         mark: bool,
     ) -> Result<VrccRecentNotifications, VrccFailure> {
-        self.service
+        let recent = self
+            .service
             .recent_notifications(mark)
             .await
-            .map_err(|error| VrccFailure::from_error(&error))
+            .map_err(|error| VrccFailure::from_error(&error))?;
+        self.settle_notice_rows(mark, recent.read);
+        Ok(recent)
+    }
+
+    /// 让通知中心里那几行跟上服务端的已读游标。
+    ///
+    /// 服务端的 `read` 是唯一的已读权威：`id > read` 才算未读。玩家打开
+    /// 「提醒」页时前端传 `mark=true`，服务器把 `read` 推到最新；本地那些行
+    /// 到这里就该跟着变已读，否则角标只增不减。
+    ///
+    /// `read` 缺失（账号上还没记过已读）时只在 `viewed` 为真这一种情况下
+    /// 全部标已读——那表示玩家确实看过了整张列表，而不是「不知道」。
+    fn settle_notice_rows(&self, viewed: bool, read: Option<i64>) {
+        let Some(owner) = (self.owner)() else {
+            return;
+        };
+        let cutoff = match read {
+            Some(read) => read,
+            None if viewed => i64::MAX,
+            None => return,
+        };
+        if let Err(error) = vrcx_0_persistence::notifications::notification_mark_seen_up_to(
+            &self.db,
+            owner.as_str().to_string(),
+            Self::NOTICE_ROW_ID_PREFIX,
+            cutoff,
+        ) {
+            tracing::warn!(%error, "vrcc: could not settle notification-centre rows");
+        }
     }
 
     pub async fn poll_notifications(
@@ -221,6 +301,79 @@ impl DesktopVrccRuntime {
     ) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, VrccFailure> {
         self.service
             .my_map(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 公开地图页。不在榜上时（`404`）返回 `None`。
+    pub async fn map_page(&self, world: &str) -> Result<Option<VrccMapPage>, VrccFailure> {
+        self.service
+            .map_page(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+    /// 不在榜上时（`404`）返回 `None`。
+    pub async fn my_map_page(
+        &self,
+        world: &str,
+        sort: Option<&str>,
+    ) -> Result<Option<VrccMyMapPage>, VrccFailure> {
+        self.service
+            .my_map_page(world, sort)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+    ///
+    /// 写操作不做任何重试：失败原样交给界面，由玩家决定要不要再点一次。
+    pub async fn rate_map(
+        &self,
+        world: &str,
+        score: i64,
+        text: &VrccRatingText,
+    ) -> Result<VrccMyMap, VrccFailure> {
+        self.service
+            .rate_map(world, score, text)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 删掉自己给这张图的评分。需要 `maps.rate`。
+    pub async fn delete_map_rating(&self, world: &str) -> Result<(), VrccFailure> {
+        self.service
+            .delete_map_rating(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 给短评投票。需要 `maps.write` 敏感权限。写操作，不重试。
+    pub async fn vote_map_content(
+        &self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> Result<VrccVoteResult, VrccFailure> {
+        self.service
+            .vote_map_content(kind, id, vote)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 玩家视角地图榜。需要 `maps` 普通权限。
+    pub async fn my_board(&self, sort: VrccMyBoardSort) -> Result<VrccMyBoard, VrccFailure> {
+        self.service
+            .my_board(sort)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 我打过分的地图。需要 `maps` 普通权限。
+    pub async fn my_maps(&self) -> Result<VrccRatedMaps, VrccFailure> {
+        self.service
+            .my_maps()
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }
@@ -292,11 +445,13 @@ impl DesktopVrccRuntime {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> vrcx_0_application_core::TaskSpawnOutcome {
         let service = Arc::clone(&self.service);
+        let db = Arc::clone(&self.db);
         let base = Self::BACKGROUND_POLL_BASE;
         let jitter = Self::BACKGROUND_POLL_JITTER;
 
         supervisor.spawn_cancellable(move |stop_token| {
             let service = Arc::clone(&service);
+            let db = Arc::clone(&db);
             let dispatcher = Arc::clone(&dispatcher);
             let event_sink = Arc::clone(&event_sink);
             let owner = owner.clone();
@@ -344,6 +499,7 @@ impl DesktopVrccRuntime {
                         match poll_once(
                             &service,
                             dispatcher.as_ref(),
+                            &db,
                             &notified,
                             &mut notice_icon,
                             &owner,
@@ -356,6 +512,7 @@ impl DesktopVrccRuntime {
                                 tracing::debug!(
                                     round,
                                     fresh = outcome.fresh,
+                                    persisted = outcome.persisted,
                                     unread = ?outcome.unread,
                                     toast_attempted = outcome.toast_attempted,
                                     changed = outcome.changed,
@@ -415,6 +572,8 @@ struct PollOutcome {
     toast_attempted: usize,
     /// `me/unread` 的合计；服务器还没有这个接口时为 `None`。
     unread: Option<i64>,
+    /// 写进通知中心的条数。和 `fresh` 不同：这里包含超出弹窗上限的那几条。
+    persisted: usize,
     /// 是否需要让前端刷新。
     changed: bool,
 }
@@ -449,6 +608,7 @@ impl PollOutcome {
 async fn poll_once(
     service: &VrccService,
     dispatcher: &crate::notification::NotificationDispatcher,
+    db: &DatabaseService,
     notified: &NotifiedIds,
     icon: &mut NoticeIcon,
     owner: &vrcx_0_core::OwnerId,
@@ -457,9 +617,23 @@ async fn poll_once(
     let fresh = match service.poll_notifications().await {
         Ok(result) => result.items,
         // 离上一次不到 25 秒（比如刚重新连上）：这一轮没有新的，下一轮补上。
-        Err(VrccError::TooSoon { .. }) => Vec::new(),
+        //
+        // 认 `Throttled` 这一类而不是某个具体变体：本机最小间隔（`Gap`）和
+        // 上一轮 429 的退避（`Backoff`）都算「现在不该问」，两种都静默跳过。
+        Err(error) if error.is_throttled() => Vec::new(),
         Err(error) => return Err(error),
     };
+
+    // 落库要放在选通知之前：系统通知每轮最多弹 `MAX_NOTIFIED_PER_POLL` 条，
+    // 但**这一轮拉到的每一条**都该进通知中心，否则超出的那几条就凭空消失了
+    // ——游标已经过去，下一轮不会再给。
+    let persisted = persist_notices(db, owner, &fresh);
+    if persisted > 0 {
+        tracing::debug!(
+            persisted,
+            "vrcc: notices written to the notification centre"
+        );
+    }
 
     // 只有真有新提醒时才去解析图标：没新提醒就不该产生任何额外流量。
     let icon_path = if fresh.is_empty() {
@@ -472,6 +646,7 @@ async fn poll_once(
     // 于是「拿到什么样的数据 → 弹哪些通知」可以脱离服务端直接测。
     let mut outcome =
         handle_recent_notices(&fresh, dispatcher, notified, icon_path, Some(owner.clone()));
+    outcome.persisted = persisted;
 
     match service.refresh_unread().await {
         Ok(Some((counts, changed))) => {
@@ -529,6 +704,97 @@ impl NotifiedIds {
         }
         fresh
     }
+}
+
+/// 把一条提醒写成通知中心的一行。
+///
+/// 纯函数：不碰库、不读时钟（时间由调用方给）。行的形状在这里收口，
+/// 于是「写进去会长什么样」可以脱离数据库单独验。
+///
+/// `fallback_created_at` 用于提醒没带 `at` 的场合。`at` 是毫秒时间戳，
+/// 而列里要的是 RFC3339：`created_at` 既参与 SQL 排序，也被前端 `Date.parse`
+/// 读，写成裸数字两边都不认。
+fn notice_row(
+    notice: &vrcx_0_contracts::vrcc::VrccNotificationItem,
+    fallback_created_at: &str,
+) -> serde_json::Value {
+    let created_at = notice
+        .at
+        .and_then(chrono::DateTime::from_timestamp_millis)
+        .map(vrcx_0_core::time::iso_millis)
+        .unwrap_or_else(|| fallback_created_at.to_string());
+    let title = notice.title.as_deref().unwrap_or_default().trim();
+    let body = notice.body.as_deref().unwrap_or_default().trim();
+    // 正文一栏只放正文，不拼接标题。
+    //
+    // 抽屉行经 `getNotificationMessage` 会把 `title` 与 `message` 两列**再拼
+    // 一次**；先前把标题拼进正文，又让 `title` 与发送者同名，于是同一条提醒
+    // 在抽屉里会显示成「星遇同频 星遇同频 …」。两者只留一处：标题走 `title`，
+    // 正文走 `message`。正文缺失时退回标题，免得留下空白行。
+    let message = if body.is_empty() { title } else { body };
+    let sender = DesktopVrccRuntime::NOTICE_ROW_SENDER;
+    json!({
+        "id": format!("{}{}", DesktopVrccRuntime::NOTICE_ROW_ID_PREFIX, notice.id),
+        "createdAt": created_at,
+        "updatedAt": created_at.clone(),
+        // 空串表示不过期：这些行是给玩家回查的历史，不该自己消失。
+        "expiresAt": "",
+        "type": DesktopVrccRuntime::NOTICE_ROW_TYPE,
+        // 提醒没有 VRChat 的用户或世界可跳，落点只能写在 link 上。
+        "link": DesktopVrccRuntime::NOTICE_ROW_LINK,
+        "linkText": String::new(),
+        // 发送者同时写进 `title` 与 `senderUsername`：抽屉行经 `getSenderName`
+        // 读后者，表格页经 `view.actor.name`（= `firstText(title)`）读前者，
+        // 两处各取一路。
+        "title": sender,
+        "message": message,
+        // 未读：抽屉的红点、侧边栏角标都认这个字段。
+        "seen": false,
+        // 留空，`openSender` 据此落到 `link` 分支，而不是去开一个不存在的玩家资料。
+        "senderUserId": String::new(),
+        "senderUsername": sender,
+        "data": {},
+        "responses": [],
+        "details": {},
+    })
+}
+
+/// 把这一轮的提醒写进通知中心。
+///
+/// 逐条写、单条失败只记日志：一条写不进去不该让整批作废，更不该影响本轮
+/// 已经发出去的系统通知。返回写成功的条数，只用于日志。
+///
+/// 重复写同一条是无害的：`notification_add_v2` 按 id 冲突合并，而
+/// `seen` 取两边较大的那个，所以不会把玩家已经读过的行又变回未读。
+fn persist_notices(
+    db: &DatabaseService,
+    owner: &vrcx_0_core::OwnerId,
+    items: &[vrcx_0_contracts::vrcc::VrccNotificationItem],
+) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+    let now = vrcx_0_core::time::now_iso();
+    let mut written = 0usize;
+    for item in items {
+        let row = notice_row(item, &now);
+        match vrcx_0_persistence::notifications::notification_add_v2(
+            db,
+            owner.as_str().to_string(),
+            row,
+        ) {
+            Ok(()) => written += 1,
+            Err(error) => {
+                // 只记编号，不记正文：提醒内容属于玩家数据。
+                tracing::warn!(
+                    notice_id = item.id,
+                    %error,
+                    "vrcc: notice could not be written to the notification centre"
+                );
+            }
+        }
+    }
+    written
 }
 
 /// 处理一批刚拉到的新提醒：挑出要弹的、交给通知分发器。
@@ -614,6 +880,7 @@ fn handle_recent_notices(
         fresh: items.len(),
         toast_attempted,
         unread: None,
+        persisted: 0,
         changed: !items.is_empty(),
     }
 }
@@ -1056,6 +1323,7 @@ mod tests {
             toast_attempted: 1,
             unread: Some(3),
             changed: true,
+            ..PollOutcome::default()
         };
         assert_eq!(outcome.event_to_emit(), Some(VRCC_NOTICES_CHANGED_EVENT));
     }
@@ -1075,5 +1343,118 @@ mod tests {
     fn event_names_match_the_frontend_contract() {
         assert_eq!(VRCC_NOTICES_CHANGED_EVENT, "vrccNoticesChanged");
         assert_eq!(VRCC_CONNECTION_CHANGED_EVENT, "vrccConnectionChanged");
+    }
+
+    // -- 通知中心那一行 ---------------------------------------------------
+
+    fn notice_at(
+        id: i64,
+        title: Option<&str>,
+        body: Option<&str>,
+        at: Option<i64>,
+    ) -> VrccNotificationItem {
+        VrccNotificationItem {
+            id,
+            title: title.map(str::to_string),
+            body: body.map(str::to_string),
+            at,
+        }
+    }
+
+    /// 行 id 必须能解析回提醒编号：点通知时要靠它定位到具体一条。
+    #[test]
+    fn a_row_is_addressed_by_the_notice_number() {
+        let row = notice_row(
+            &notice_at(42, Some("t"), None, None),
+            "2026-01-01T00:00:00.000Z",
+        );
+        let id = row["id"].as_str().unwrap();
+        assert_eq!(id, "vrcc_42");
+        assert_eq!(
+            id.strip_prefix(DesktopVrccRuntime::NOTICE_ROW_ID_PREFIX)
+                .unwrap()
+                .parse::<i64>()
+                .unwrap(),
+            42
+        );
+    }
+
+    /// 落库时必须还是未读，否则红点永远不会出现。
+    #[test]
+    fn a_row_stays_unread_and_never_expires() {
+        let row = notice_row(
+            &notice_at(1, Some("t"), Some("b"), None),
+            "2026-01-01T00:00:00.000Z",
+        );
+        assert_eq!(row["seen"], json!(false));
+        // 空串 = 不过期。写成日期会让历史行在几天后从列表里消失。
+        assert_eq!(row["expiresAt"], json!(""));
+    }
+
+    /// 点击落点写在 `link` 上：提醒没有 VRChat 用户可跳，`senderUserId` 留空。
+    #[test]
+    fn a_row_carries_the_link_the_frontend_dispatches_on() {
+        let row = notice_row(&notice_at(7, None, None, None), "2026-01-01T00:00:00.000Z");
+        assert_eq!(row["link"], json!("vrcc:notifications"));
+        assert_eq!(row["type"], json!("vrcc.notice"));
+        assert_eq!(row["senderUserId"], json!(""));
+    }
+
+    /// `at` 是毫秒时间戳，列里要的是 RFC3339。
+    #[test]
+    fn a_row_renders_the_timestamp_as_rfc3339() {
+        let row = notice_row(
+            &notice_at(1, None, Some("b"), Some(1_700_000_000_000)),
+            "2026-01-01T00:00:00.000Z",
+        );
+        assert_eq!(row["createdAt"], json!("2023-11-14T22:13:20.000Z"));
+        assert_eq!(row["updatedAt"], row["createdAt"]);
+    }
+
+    /// 提醒没带 `at` 时退回调用方给的时间，而不是写一个空 `created_at`
+    /// ——空值会让这一行在排序里垫底。
+    #[test]
+    fn a_row_without_a_timestamp_falls_back() {
+        let row = notice_row(&notice_at(1, None, None, None), "2026-01-01T00:00:00.000Z");
+        assert_eq!(row["createdAt"], json!("2026-01-01T00:00:00.000Z"));
+    }
+
+    /// 正文一栏只放正文，标题单独走 `title` 列。
+    ///
+    /// 抽屉行会把 `title` 与 `message` 再拼一次；早先把标题拼进正文、又让
+    /// `title` 与发送者同名，于是同一条提醒在抽屉里显示成「星遇同频 星遇同频
+    /// …」。这条测试钉住「两者不重复」。
+    #[test]
+    fn a_row_keeps_the_title_and_the_body_apart() {
+        let both = notice_row(&notice_at(1, Some("标题"), Some("正文"), None), "");
+        // 正文只有正文，不含标题。
+        assert_eq!(both["message"], json!("正文"));
+        assert_eq!(both["title"], json!(DesktopVrccRuntime::NOTICE_ROW_SENDER));
+
+        let title_only = notice_row(&notice_at(1, Some("标题"), None, None), "");
+        assert_eq!(title_only["message"], json!("标题"));
+
+        let body_only = notice_row(&notice_at(1, None, Some("正文"), None), "");
+        assert_eq!(body_only["message"], json!("正文"));
+
+        // 都为空时至少不要留下 " " 这种只有空白的一栏。
+        let neither = notice_row(&notice_at(1, Some("  "), None, None), "");
+        assert_eq!(neither["message"], json!(""));
+    }
+
+    /// 标题与正文不会在抽屉里重复：`getNotificationMessage` 拼的是
+    /// `title + message`，所以两者不能有相同内容。
+    #[test]
+    fn a_row_does_not_repeat_the_sender_in_the_body() {
+        let row = notice_row(
+            &notice_at(1, Some("星遇同频"), Some("有人连向了你"), None),
+            "",
+        );
+        let title = row["title"].as_str().unwrap_or_default();
+        let message = row["message"].as_str().unwrap_or_default();
+        assert_eq!(title, DesktopVrccRuntime::NOTICE_ROW_SENDER);
+        assert_eq!(message, "有人连向了你");
+        // 抽屉拼起来是「星遇同频 有人连向了你」，服务名只出现一次。
+        assert!(!message.contains(title));
     }
 }

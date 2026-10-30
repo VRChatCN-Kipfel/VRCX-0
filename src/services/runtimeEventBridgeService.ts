@@ -89,6 +89,7 @@ import {
     handleAppUpdateDownloadStatusSnapshot,
     handleAppUpdateInstalledEvent
 } from './updateInstallService';
+import { bindVrccNotificationCenterEvents } from './vrccNotificationService';
 import { applyVrcStatusSnapshot } from './vrcStatusService';
 
 function reconcilePendingBackendRealtimeProjectionEvents(): void {
@@ -549,6 +550,10 @@ export async function bindRuntimeEvents(): Promise<() => void> {
         if (failure) {
             throw failure.reason;
         }
+        // 站外提醒的订阅必须和这批 runtime 事件一起，在**水合之前**挂上。
+        // 否则水合期间到达的提醒会没有监听者，玩家得等下一次事件才看得到；
+        // 放到水合之后还会让「所有订阅先于水合」这条顺序不变量失效。
+        unsubscribers.push(await bindVrccNotificationCenterEvents());
     } catch (error) {
         resetBackendRealtimeProjectionState();
         resetAuthenticatedRuntimeMirror();

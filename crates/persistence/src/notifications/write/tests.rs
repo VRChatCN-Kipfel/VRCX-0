@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
-use crate::common::ParamsBuilder;
+use crate::common::{strict_row_i64, ParamsBuilder};
 use crate::database::DatabaseService;
 
 use super::*;
@@ -618,5 +618,89 @@ fn notification_v2_upsert_does_not_make_seen_rows_unseen() -> Result<(), Error> 
         "notif_seen",
     )?;
     assert_eq!(rows[0][0], json!(1));
+    Ok(())
+}
+
+/// 往 v2 表塞一行，只关心 id / type / seen。
+fn add_unseen_v2(db: &DatabaseService, id: &str, kind: &str) -> Result<(), Error> {
+    notification_add_v2(
+        db,
+        "usr_self".into(),
+        json!({
+            "id": id,
+            "createdAt": "2026-07-22T00:00:00Z",
+            "type": kind,
+            "seen": false
+        }),
+    )
+}
+
+fn seen_flag(db: &DatabaseService, id: &str) -> Result<i64, Error> {
+    let rows = rows_by_id(
+        db,
+        "SELECT seen FROM usrself_notifications_v2 WHERE id = @id",
+        id,
+    )?;
+    Ok(rows
+        .first()
+        .map(|row| strict_row_i64(row, 0))
+        .transpose()?
+        .unwrap_or(-1))
+}
+
+#[test]
+fn mark_seen_up_to_compares_the_number_not_the_text() -> Result<(), Error> {
+    let (_dir, db) = test_db("mark-seen-up-to-numeric")?;
+    for id in ["vrcc_9", "vrcc_10", "other_10"] {
+        add_unseen_v2(&db, id, "vrcc.notice")?;
+    }
+
+    notification_mark_seen_up_to(&db, "usr_self".into(), "vrcc_", 9)?;
+
+    // 字符串序里 "vrcc_9" 大于 "vrcc_10"；按数字比才只有 9 该被标已读。
+    assert_eq!(seen_flag(&db, "vrcc_9")?, 1);
+    assert_eq!(seen_flag(&db, "vrcc_10")?, 0);
+    // 前缀不匹配的行不受影响。
+    assert_eq!(seen_flag(&db, "other_10")?, 0);
+    Ok(())
+}
+
+#[test]
+fn mark_seen_up_to_covers_every_row_at_or_below_the_cursor() -> Result<(), Error> {
+    let (_dir, db) = test_db("mark-seen-up-to-range")?;
+    for id in ["vrcc_1", "vrcc_2", "vrcc_3"] {
+        add_unseen_v2(&db, id, "vrcc.notice")?;
+    }
+
+    notification_mark_seen_up_to(&db, "usr_self".into(), "vrcc_", 2)?;
+
+    assert_eq!(seen_flag(&db, "vrcc_1")?, 1);
+    assert_eq!(seen_flag(&db, "vrcc_2")?, 1);
+    assert_eq!(seen_flag(&db, "vrcc_3")?, 0);
+    Ok(())
+}
+
+#[test]
+fn mark_seen_up_to_never_reverts_a_read_row() -> Result<(), Error> {
+    let (_dir, db) = test_db("mark-seen-up-to-monotonic")?;
+    // 游标退回去（换设备、服务端回退）也不该把已读变回未读。
+    add_unseen_v2(&db, "vrcc_5", "vrcc.notice")?;
+    notification_mark_seen_up_to(&db, "usr_self".into(), "vrcc_", 5)?;
+
+    notification_mark_seen_up_to(&db, "usr_self".into(), "vrcc_", 1)?;
+
+    assert_eq!(seen_flag(&db, "vrcc_5")?, 1);
+    Ok(())
+}
+
+#[test]
+fn mark_seen_up_to_treats_a_blank_prefix_as_no_match() -> Result<(), Error> {
+    let (_dir, db) = test_db("mark-seen-up-to-blank")?;
+    add_unseen_v2(&db, "vrcc_1", "vrcc.notice")?;
+
+    // 空前缀会让每一条都「不超过」游标，所以必须当作不做任何事。
+    notification_mark_seen_up_to(&db, "usr_self".into(), "   ", 99)?;
+
+    assert_eq!(seen_flag(&db, "vrcc_1")?, 0);
     Ok(())
 }

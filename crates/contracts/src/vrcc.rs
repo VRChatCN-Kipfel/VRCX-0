@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// 官方限制 POST 正文最大 2 KB。
 ///
-/// 放在契约层是因为 [`VrccError::BodyTooLarge`] 的错误文案要引用它。
+/// 放在契约层是因为 [`ErrorDetail::BodyTooLarge`] 的错误文案要引用它。
 pub const VRCC_MAX_BODY_BYTES: usize = 2048;
 
 /// 星遇同频的错误。
@@ -28,48 +28,224 @@ pub const VRCC_MAX_BODY_BYTES: usize = 2048;
 ///
 /// `Clone` 是给「先判断能不能重试、再把原错误交出去」这类调用点用的
 /// （见 `VrccService::disconnect`）。
+///
+/// # 为什么是 struct 而不是 enum
+///
+/// 早先这里是一个 12 个变体的 enum，把**四种不同层级**的失败平铺在一起：
+/// 我们自己的编码 bug、传输层失败、服务器拒绝、会话状态。结果是玩家会看到
+/// 「请求正文超过 2048 字节上限」这种本不该外露的内部错误，而「网络不通」
+/// 和「服务器拒绝」也分不开。
+///
+/// 现在只回答两件事：[`ErrorLayer`] 说**发生在哪一层**，[`ErrorDetail`]
+/// 说**具体是什么**。层级判断只做一次，消费方不必再逐个变体去猜。
+///
+/// # 为什么 HTTP 语义收敛成一个变体
+///
+/// 早年按错误码加了 `RateLimited` / `TooSoon` / `QuotaExhausted` / `Paused`
+/// / `NotReady` / `ConnectPaused` 六个变体，每来一个新错误码就要加一个。
+/// 但官方错误码有三十多个，这条路走不完。
+///
+/// 现在统一记成 `Http { status, error, … }`，**错误只忠实记录 HTTP 事实，
+/// 业务判断交给消费方**。同一个码在不同调用点反应本来就可能不同——
+/// 比如 `409 busy` 表示「星卡还在生成」，而 `429 busy` 表示「连接功能暂停
+/// 到次日」，官方文档明说这两种只能按状态码区分（README「网页上的动作和
+/// 打分的错误码」）。把这种判断焊死在产生错误的地方是错的。
 #[derive(Clone, Debug, thiserror::Error)]
-pub enum VrccError {
+#[error("{}", .detail)]
+pub struct VrccError {
+    /// 失败发生在哪一层。**先看这个，再看 `detail`。**
+    pub layer: ErrorLayer,
+    pub detail: ErrorDetail,
+}
+
+impl VrccError {
+    pub fn new(layer: ErrorLayer, detail: ErrorDetail) -> Self {
+        Self { layer, detail }
+    }
+
+    /// 拿到 HTTP 语义细节；不是服务器拒绝时为 `None`。
+    pub fn http(&self) -> Option<&HttpDetail> {
+        match &self.detail {
+            ErrorDetail::Http(http) => Some(http),
+            _ => None,
+        }
+    }
+
+    /// 会话丢失：没有令牌，或令牌已失效。
+    ///
+    /// 和 [`Self::is_gone`] 的区别：那个特指官方 `404 gone`；这个是更宽的
+    /// 「会话这一层出了问题」，包含从没连过的情况。
+    pub fn is_session_lost(&self) -> bool {
+        matches!(self.detail, ErrorDetail::TokenMissing) || self.is_gone()
+    }
+
+    /// 是不是被本机限流拦下的（请求没有发出去）。
+    ///
+    /// 本机最小间隔（`Gap`）和上一轮 429 的全局退避（`Backoff`）都算。
+    /// 这种时候服务可能是好的，只是现在不该问——后台轮询应当静默跳过这一轮。
+    pub fn is_throttled(&self) -> bool {
+        matches!(self.detail, ErrorDetail::ThrottledLocally { .. })
+    }
+
+    /// 是不是「同一接口的最小间隔还没到」。
+    ///
+    /// 和 [`Self::is_our_bug`] 不同，这个是正常情况：调用方可以改用缓存，
+    /// 而不是把它当成错误弹给玩家。`boards` 的 60 秒间隔就靠它接住。
+    pub fn is_local_gap(&self) -> bool {
+        matches!(
+            self.detail,
+            ErrorDetail::ThrottledLocally {
+                reason: LocalThrottle::Gap,
+                ..
+            }
+        )
+    }
+
+    /// 这个错误是不是「我们自己的 bug」，**不该显示给玩家**。
+    ///
+    /// 拼错路径、正文超限都是我们自己构造请求时出的错。以前它们和
+    /// 「额度用尽」挤在同一个 toast 队列里，玩家看到的是
+    /// 「请求正文超过 2048 字节上限」——和自己毫无关系的信息。
+    pub fn is_our_bug(&self) -> bool {
+        self.layer == ErrorLayer::Input
+    }
+}
+
+/// 失败发生在哪一层。
+///
+/// 这就是「网络层还是应用层」这个问题的答案，一个字段即可，不必从变体去猜。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorLayer {
+    /// **我们自己的 bug**：路径拼错、正文超限。玩家不该看到这类错误。
+    Input,
+    /// **本机限流**：请求根本没发出去，被本地限流器或退避拦下了。
+    ///
+    /// 和 [`Self::Server`] 分开是因为两者含义相反：本机限流时服务可能是好的，
+    /// 只是我们问得太勤；把它标成「服务不可用」是在冤枉服务器。
+    Client,
+    /// **传输层**：请求送出去了，但没拿到任何响应。
+    Transport,
+    /// **服务器拒绝**：拿到了响应，但状态码不是 2xx。
+    Server,
+    /// **会话状态**：令牌缺失或失效，和网络无关。
+    Session,
+}
+
+/// 传输层失败卡在哪个环节。
+///
+/// 判据全部来自 `reqwest::Error` 的类型判断（`is_dns` / `is_connect` /
+/// `is_timeout` / `is_body`），不是对错误文案做字符串匹配。
+///
+/// **注意 `is_dns` 的盲区**：走 SOCKS5 代理时代理串会被改写成 `socks5h://`
+/// （见 `vrcx_0_core::proxy::with_remote_dns`），域名由代理那边解析。
+/// 那种情况下本机根本不做 DNS 查询，解析失败会表现为 `Connect` 而不是 `Dns`。
+/// 所以看到 `Connect` 时不能断言「不是 DNS 问题」。
+///
+/// 另外：RST、端口拒绝、运营商封锁在操作系统层面表现一致，都是建连失败，
+/// 这里无法进一步区分，也不会假装能区分。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransportKind {
+    /// 本机域名解析失败。
+    Dns,
+    /// 建立连接失败（端口不通、RST、代理未启动、SOCKS5 握手失败等）。
+    Connect,
+    /// 连接或读取超时。
+    Timeout,
+    /// 响应体读到一半中断。
+    Body,
+    /// 其它传输错误。
+    Other,
+}
+
+/// 服务器拒绝时，官方在正文里给的细节。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HttpDetail {
+    pub status: u16,
+    /// 官方的错误码，如 `too_soon` / `quota` / `busy` / `map_wait`。
+    /// **这个串是稳定的**，业务分支应当按它（配合 `status`）判断。
+    pub error: String,
+    /// 缺哪一项权限或前置条件。
+    pub need: Option<String>,
+    /// 补充原因（哪些错误码会给：`yq_words`、`msg_words` 等）。
+    pub why: Option<String>,
+    /// `Retry-After` 响应头的秒数。1.9.0 起所有 429 都带。
+    pub retry_after: Option<u64>,
+    /// 发起这次调用的是哪个接口（`device_code` / `today` …）。
+    ///
+    /// 同一个错误码在不同接口下含义可能不同，消费方需要它才能给出准确提示。
+    /// 典型例子：`429 too_many` 在 `device_code` 上是「按网络出口 IP 算的
+    /// 每天 30 个，换网络可立刻再用」，在别的接口上才是「你自己的次数用完了」。
+    pub op: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum ErrorDetail {
     #[error("星遇同频 token 缺失，请先连接")]
     TokenMissing,
     #[error("路径必须相对 /api/v1/：{0}")]
     AbsolutePath(String),
+    /// **本地参数不成立**：请求压根不该发出去，也发不出去。
+    ///
+    /// 与 [`Self::AbsolutePath`] 的区别是：那个是路径拼错（实现缺陷），
+    /// 这个是**调用方传进来的东西本身不完整**，例如要打分却没有世界 ID。
+    ///
+    /// 之所以单列而不是复用别的变体：写操作遇到这种情况**不能安静地成功**
+    /// ——玩家会以为提交了。所以它需要一条玩家看得懂、又能指向我们代码的文案。
+    #[error("星遇同频请求缺少必要参数：{0}")]
+    MissingArgument(&'static str),
+    /// **参数格式不合法**：值给了，但不是这个接口认的形状。
+    ///
+    /// 和 [`Self::MissingArgument`] 分开：那个是「没给」，这个是「给了但不能用」
+    /// ——例如世界 ID 不是官方规定的 `wrld_` 加 36 位十六进制。两者都必须让请求
+    /// 在本地停下：世界 ID 要拼进 URL 路径，形状不对就没有发出去的理由。
+    #[error("星遇同频请求参数格式不对：{0}")]
+    InvalidArgument(&'static str),
     #[error("请求正文超过 {VRCC_MAX_BODY_BYTES} 字节上限")]
     BodyTooLarge,
-    #[error("星遇同频限流：{0}")]
-    RateLimited(String),
-    /// 429 `too_soon`：两次轮询间隔太短。等 `retry_after_secs` 再问，
-    /// 不触发长时间退避——这不是配额问题，只是问勤了。
-    #[error("星遇同频轮询太快，{retry_after_secs} 秒后再问")]
-    TooSoon { retry_after_secs: u64 },
-    #[error("星遇同频额度已用尽：{0}")]
-    QuotaExhausted(String),
-    /// `503 stop`：停站维护。令牌没事，等到 `until` 以后再试。
+    /// **本机限流**：请求没有发出去。
     ///
-    /// 只有「网页上的动作」那一批（今天的星等）会这样回答；提醒、星卡、
-    /// 地图榜停站时照常。
-    #[error("星遇同频停站维护中{}", stop_suffix(.say))]
-    Paused {
-        say: Option<String>,
-        until: Option<i64>,
+    /// 两种来源：发出前的全局退避还没结束，或者本地最小间隔还没到。
+    /// 后者通常意味着「刚问过，没必要再问」，调用方可以改用缓存。
+    #[error("星遇同频请求被本机限流拦下，{retry_after_secs} 秒后再问")]
+    ThrottledLocally {
+        retry_after_secs: u64,
+        /// `backoff`：上一轮 429 的全局退避中；`gap`：同一接口的最小间隔未到。
+        reason: LocalThrottle,
     },
-    #[error("星遇同频接口返回 HTTP {status}（{error}）")]
-    Api {
-        status: u16,
-        error: String,
-        need: Option<String>,
-        why: Option<String>,
+    #[error("星遇同频接口暂时不可用：{message}")]
+    Transport {
+        kind: TransportKind,
+        /// 原始错误文案，**只用于日志与排查**。玩家看到的文案应当按 `kind` 出。
+        message: String,
     },
-    #[error("星遇同频接口暂时不可用：{0}")]
-    Transport(String),
     #[error("星遇同频返回无法解析：{0}")]
     Decode(String),
+    #[error("{}", http_display(.0))]
+    Http(HttpDetail),
 }
 
-fn stop_suffix(say: &Option<String>) -> String {
-    match say.as_deref().map(str::trim).filter(|say| !say.is_empty()) {
-        Some(say) => format!("：{say}"),
-        None => String::new(),
+/// 本机拦截的原因。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalThrottle {
+    /// 上一轮 429 之后的全局退避还没结束。
+    Backoff,
+    /// 同一个接口两次请求的最小间隔还没到（例如地图榜 60 秒）。
+    Gap,
+}
+
+/// `Http` 的显示文案。
+///
+/// 只保留「服务器说不行」这个事实和官方错误码，不再拼中文解释——那些
+/// 交给前端按 `(status, error, op)` 出 i18n。早先这里拼出了
+/// 「今天的次数用完了，约 3 小时 后恢复」这种高度定制的句子，一旦文案要改
+/// 就得改后端，而且没法本地化。
+fn http_display(http: &HttpDetail) -> String {
+    match http.retry_after {
+        Some(secs) => format!(
+            "星遇同频接口返回 HTTP {}（{}），{} 秒后可重试",
+            http.status, http.error, secs
+        ),
+        None => format!("星遇同频接口返回 HTTP {}（{}）", http.status, http.error),
     }
 }
 
@@ -82,14 +258,8 @@ impl VrccError {
     /// （1.9.0 起签名图片失效用这个码，原来也叫 `gone`）和 `not_found`
     /// （查的地图不在榜上、或旧服务器还没有这个接口），这些都**不该**触发重新授权。
     pub fn is_gone(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 404,
-                error,
-                ..
-            } if error == "gone"
-        )
+        self.http()
+            .is_some_and(|http| http.status == 404 && http.error == "gone")
     }
 
     /// `404 not_found`：没有这个接口，或查的东西不在。
@@ -97,14 +267,20 @@ impl VrccError {
     /// 新接口（`me/unread`、`me/notes`、`announcements`）在还没更新的服务器上
     /// 就是这样回答的，调用方据此安静地不显示，而不是报错。
     pub fn is_not_found(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 404,
-                error,
-                ..
-            } if error == "not_found"
-        )
+        self.http()
+            .is_some_and(|http| http.status == 404 && http.error == "not_found")
+    }
+
+    /// 「等一下再试」这一类：不是故障，也不是玩家做错了什么。
+    ///
+    /// `409 busy`（这一轮的星卡还在生成）。界面应显示「稍后再试」，
+    /// **不要**引导玩家重新授权，也不要渲染成错误横幅。
+    ///
+    /// 必须**连带状态码**判断：`429 busy` 用的是同一个 `error` 串，含义却是
+    /// 「全站连接功能暂停到次日」，两者只能按状态码区分（官方文档原话）。
+    pub fn is_not_ready(&self) -> bool {
+        self.http()
+            .is_some_and(|http| http.status == 409 && http.error == "busy")
     }
 
     /// 需要重新授权的情况。照官方错误码表逐条来：
@@ -114,59 +290,41 @@ impl VrccError {
     /// - `401 token`：没带令牌或格式不对
     /// - `403 scope`：缺权限，要玩家重新授权时勾上 `need` 那一项
     pub fn needs_reauth(&self) -> bool {
-        if self.is_gone() {
+        if self.is_gone() || matches!(self.detail, ErrorDetail::TokenMissing) {
             return true;
         }
-        matches!(self, VrccError::Api { status: 401, .. })
-            || matches!(
-                self,
-                VrccError::Api {
-                    status: 403,
-                    error,
-                    ..
-                } if matches!(
-                    error.as_str(),
+        let Some(http) = self.http() else {
+            return false;
+        };
+        http.status == 401
+            || (http.status == 403
+                && matches!(
+                    http.error.as_str(),
                     "client_mismatch"
                         | "client_unknown"
                         | "client_off"
                         | "client_missing"
                         | "scope"
                         | "scope_unreviewed"
-                )
-            )
-            || matches!(self, VrccError::TokenMissing)
+                ))
     }
 
     /// 缺哪个权限。前端据此提示「需要重新授权并勾上 X」。
     pub fn needed_scope(&self) -> Option<&str> {
-        match self {
-            VrccError::Api { need, .. } => need.as_deref(),
-            _ => None,
-        }
+        self.http().and_then(|http| http.need.as_deref())
     }
 
     /// 设备授权期间「玩家还没点同意」，调用方应等 `interval` 秒再来问。
     pub fn is_authorization_pending(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 400,
-                error,
-                ..
-            } if error == "authorization_pending"
-        )
+        self.http()
+            .is_some_and(|http| http.status == 400 && http.error == "authorization_pending")
     }
 
     /// 设备授权走到终态：玩家取消，或码过期/已用过。
     pub fn is_device_auth_terminal(&self) -> bool {
-        matches!(
-            self,
-            VrccError::Api {
-                status: 400,
-                error,
-                ..
-            } if error == "access_denied" || error == "expired_token"
-        )
+        self.http().is_some_and(|http| {
+            http.status == 400 && (http.error == "access_denied" || http.error == "expired_token")
+        })
     }
 }
 
@@ -231,14 +389,18 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 ///   `maps.rate`，违反官方《使用要求》第 10 条「只申请用得到的权限」。
 ///
 /// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）、
-/// 「星轨相交」页（`crossings`）。后两个是敏感权限，只有正式标识能要，
-/// `dev-` 用 [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用
+/// 「星轨相交」页（`crossings`）、给地图打分（`maps.rate`）、给短评投票
+/// （`maps.write`）。
+///
+/// `mutuals`、`crossings`、`maps.rate`、`maps.write` 都是敏感权限，只有正式
+/// 标识能要，`dev-` 用 [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用
 /// [`device_auth_scope`] 选。
 ///
 /// **`crossings` 必须在这里**：令牌的权限是签发时定下的，事后要再拿到它
 /// 只能重新授权。不列进来，界面上的「星轨相交」页签对每一个玩家都永远
 /// 是「缺权限」——功能等于没做。
-pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals crossings";
+pub const VRCC_DEVICE_AUTH_SCOPE: &str =
+    "profile notifications maps mutuals crossings maps.rate maps.write";
 
 /// `dev-` 标识申请的权限：只能要普通权限，要了敏感的 `device/code`
 /// 会直接回答 `403 scope_unreviewed`，连码都拿不到。
@@ -341,6 +503,13 @@ pub struct VrccBoardMap {
     /// 封面图地址。
     #[serde(default)]
     pub img: Option<String>,
+    /// 同一张封面的完整网址。
+    ///
+    /// **官方 `boards/maps` 至今不返回这个字段**（只有 `me/board`、地图页、
+    /// `me/maps/{world}` 才有），所以这里读到的通常是 `None`。仍然留着它，
+    /// 是因为哪天官方统一了就直接能接上，不用再改一轮契约。
+    #[serde(default)]
+    pub img_url: Option<String>,
     /// 热评：最热的一条短评（1.10.1 起写进文档），没有时是 `null`。
     #[serde(default)]
     pub hot: Option<VrccMapHot>,
@@ -435,6 +604,36 @@ impl VrccBoardSort {
             VrccBoardSort::Top => "top",
             VrccBoardSort::Week => "week",
             VrccBoardSort::New => "new",
+        }
+    }
+}
+
+/// `GET /me/board` 的排序。比公开榜多一个 `went`（我去过的）。
+///
+/// 单独一个枚举而不是复用 [`VrccBoardSort`]：多出来的那一个值在公开榜上
+/// 不存在，塞进同一个枚举会让公开榜的调用点也「支持」一个它其实发不出去的
+/// 值。
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize, specta::Type,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum VrccMyBoardSort {
+    #[default]
+    Top,
+    Week,
+    New,
+    /// 我去过的。
+    Went,
+}
+
+impl VrccMyBoardSort {
+    /// 查询串里的写法。
+    pub fn as_query(self) -> &'static str {
+        match self {
+            VrccMyBoardSort::Top => "top",
+            VrccMyBoardSort::Week => "week",
+            VrccMyBoardSort::New => "new",
+            VrccMyBoardSort::Went => "went",
         }
     }
 }
@@ -1179,6 +1378,527 @@ pub struct VrccAnnouncements {
     /// 正在显示的公告，新的在前。
     #[serde(default)]
     pub posts: Vec<VrccAnnouncement>,
+}
+
+/// 一张贴纸：`GET /stickers` 里 `stickers` 的一项。
+///
+/// 官方没保证这三个字段一定存在，所以都按「可能没有」处理——少一段装饰
+/// 素材不该让整页解析失败。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccSticker {
+    /// 贴纸名，展示用。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 这张贴纸支持的材质代号（`paper` / `glitter` / …）。
+    #[serde(default)]
+    pub finishes: Vec<String>,
+    /// 贴纸图的地址；`GET /stickers/{id}?fin=…` 会按材质和磨损画。
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// `GET /stickers`：所有贴纸和材质名（**不需要令牌，也不需要 `client`**）。
+///
+/// 两个字段都是「代号 → 值」的字典而不是数组：键是贴纸 ID 或材质代号，
+/// 顺序没有意义，用 `BTreeMap` 让迭代顺序稳定。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccStickers {
+    /// 贴纸 ID → 贴纸。
+    #[serde(default)]
+    pub stickers: std::collections::BTreeMap<String, VrccSticker>,
+    /// 材质代号 → 材质名（`paper` → 纸质）。
+    #[serde(default)]
+    pub finishes: std::collections::BTreeMap<String, String>,
+}
+
+/// 我打过分的某张地图：`GET /me/maps` 里的一条。
+///
+/// **和 [`VrccBoardMap`] 不是同一个形状**：这里说的是「我给它打了多少分、
+/// 写了什么」，所以有 `score` / `words` / `at`，没有 `avg` / `rank`。
+/// 把两者塞进同一个结构体会让一半字段永远是空的，调用方也分不清「没有」
+/// 和「不适用」。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRatedMap {
+    /// 世界 ID，形如 `wrld_…`。
+    pub world: String,
+    /// 地图名；官方不知道时是 `null`。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 我打的分数（1–10）。
+    #[serde(default)]
+    pub score: Option<i64>,
+    /// 我写的短评；没写是 `null`。
+    #[serde(default)]
+    pub words: Option<String>,
+    /// 短评的审核状态：`wait` / `ok` / `hidden`。
+    #[serde(default)]
+    pub words_ok: Option<String>,
+    /// 打分的时间（毫秒）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// vrcc.cc 上的地图页。
+    #[serde(default)]
+    pub page: Option<String>,
+}
+
+/// `GET /me/maps`：我打过分的地图，**最近打的在前**，最多 200 张。
+///
+/// 需要 `maps` 普通权限。计入个人每天 1000 次。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccRatedMaps {
+    #[serde(default)]
+    pub maps: Vec<VrccRatedMap>,
+}
+
+/// 玩家视角地图榜里的一行（`GET /me/board` 的 `maps` 条目）。
+///
+/// 比公开榜单多了「我自己的视角」：去过几次、我有没有打过分、热评、名次、
+/// 介绍首行。**不复用 [`VrccBoardMap`]**：那边没有这些字段，硬塞会让
+/// 调用方分不清「没有」和「不适用」。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyBoardMap {
+    /// 世界 ID（1.11.0 起也有同值的 `world`）。
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub world: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    /// 房间人数上限。
+    #[serde(default)]
+    pub cap: Option<i64>,
+    /// 封面**相对路径**。
+    #[serde(default)]
+    pub img: Option<String>,
+    /// 同一张封面的完整网址（1.11.0 起）。
+    #[serde(default)]
+    pub img_url: Option<String>,
+    /// 榜单状态。
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub avg: Option<f64>,
+    #[serde(default)]
+    pub raters: Option<i64>,
+    /// 去过的人数。
+    #[serde(default)]
+    pub went: Option<i64>,
+    /// 总榜或本周榜上的名次；有人打分的才有。筛选不改名次。
+    #[serde(default)]
+    pub rank: Option<i64>,
+    /// 赞最多的那段介绍的第一行。
+    #[serde(default)]
+    pub intro: Option<String>,
+    /// 最热的一条短评。
+    #[serde(default)]
+    pub hot: Option<VrccMapHot>,
+    /// 最多 3 条短评。
+    #[serde(default)]
+    pub hots: Vec<VrccMapHot>,
+}
+
+/// `GET /me/board`：玩家看到的地图榜。
+///
+/// 需要 `maps` 普通权限。和网页「榜单」一样，带玩家自己的评分、去过、热评。
+/// `dot` 是「有新内容」的提示，`min` 是进榜需要几人评分。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyBoard {
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub min: Option<i64>,
+    /// 有新内容的提示。
+    #[serde(default)]
+    pub dot: Option<VrccBoardDot>,
+    #[serde(default)]
+    pub maps: Vec<VrccMyBoardMap>,
+}
+
+/// `GET /me/board` 的 `dot`：哪一块有新内容。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccBoardDot {
+    #[serde(default)]
+    pub maps: bool,
+    #[serde(default)]
+    pub went: bool,
+}
+
+/// 分数分布的一段：`9–10` 分占百分之几。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccScoreBand {
+    /// 这一段的分数下限。
+    #[serde(default)]
+    pub from: i64,
+    /// 这一段的分数上限。
+    #[serde(default)]
+    pub to: i64,
+    /// 占百分之几（整数）。
+    #[serde(default)]
+    pub pct: i64,
+}
+
+/// 多小咕的实测数据（`perf`）。**整个可以没有**，里面每一项也可以是 `null`。
+///
+/// 所以除了 `from` 之外全部是 `Option`——没测过的图不该显示成一堆 0。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapPerf {
+    /// 实测方式：`test`（测地图本身）/ `hang`（挂房的平均）。
+    #[serde(default)]
+    pub from: Option<String>,
+    /// 轻重档位：`light` / `mid` / `heavy`。
+    #[serde(default)]
+    pub weight: Option<String>,
+    /// 显存（MB）。
+    #[serde(default)]
+    pub vram: Option<f64>,
+    /// 内存（MB）。
+    #[serde(default)]
+    pub mem: Option<f64>,
+    /// 加载时间（毫秒）。
+    #[serde(default)]
+    pub load: Option<f64>,
+    /// 下载大小（字节）。
+    #[serde(default)]
+    pub size: Option<f64>,
+    /// 支持的平台：`PC` / `Quest` / `iOS`。
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    /// 挂房的分钟数（实测时为 `null`）。
+    #[serde(default)]
+    pub minutes: Option<i64>,
+}
+
+/// `GET /maps/{world}/page`：公开地图页（1.13.0 起，**不需要令牌**）。
+///
+/// 和 vrcc.cc 上每张地图的页面一样：榜上那一行、分数分布、去过的人数、
+/// 房间上限、多小咕实测。短评和介绍不在这里。
+///
+/// 不在榜上或没过审时是 `404 not_found`——那是**正常状态**，不是故障。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapPage {
+    /// 榜上的那一行。
+    pub map: VrccBoardMap,
+    /// 分数分布：9–10、7–8、5–6、3–4、1–2 各占百分之几。
+    #[serde(default)]
+    pub spread: Vec<VrccScoreBand>,
+    /// 去过的人数。
+    #[serde(default)]
+    pub went: i64,
+    /// 房间人数上限。
+    #[serde(default)]
+    pub cap: Option<i64>,
+    /// 多小咕实测；没测过是 `null`。
+    #[serde(default)]
+    pub perf: Option<VrccMapPerf>,
+    /// 服务器生成这份数据的时刻（毫秒）。
+    #[serde(default)]
+    pub at: i64,
+}
+
+/// 一条打分记录（短评）：`/me/maps/{world}/page` 的 `rates[]` 与 `mine.rate`。
+///
+/// 公开的地图页**不给**这个列表，只有带令牌的 `/me/…/page` 才有。官方还会按
+/// 令牌权限调整写者身份：有 `mutuals` 且客户端审核通过时给对方的 `n`，
+/// 否则一律匿名成 `{"name": "某位<星位>", "group": "G"}`。**我们只照原样显示
+/// `who`，不自己拼匿名格式**——那是服务器的职责，我们拼就可能在权限变化时
+/// 显示错的东西。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapRate {
+    /// 这条打分的编号。
+    #[serde(default)]
+    pub id: Option<i64>,
+    /// 短评正文；没写短评时是 `null`。
+    #[serde(default)]
+    pub text: Option<String>,
+    /// 打的分（1–10）。
+    #[serde(default)]
+    pub score: Option<i64>,
+    /// 赞、踩的计数。
+    #[serde(default)]
+    pub up: Option<i64>,
+    #[serde(default)]
+    pub down: Option<i64>,
+    /// 打分时间（毫秒）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// 写者。字段形状由服务器按权限决定，这里宽松处理。
+    #[serde(default)]
+    pub who: Option<VrccMapRateWho>,
+    /// 是不是我写的。
+    #[serde(default)]
+    pub mine: Option<bool>,
+    /// 我投的票：`1` 赞 / `-1` 踩 / `0` 没投。
+    #[serde(default)]
+    pub vote: Option<i64>,
+    /// 被折叠（内容或作者被隐藏）。
+    #[serde(default)]
+    pub folded: Option<bool>,
+    /// 只有 `mine.rate` 才有：审核状态（`wait` / `ok` / `hidden`）。
+    #[serde(default)]
+    pub check: Option<String>,
+}
+
+/// 一条打分里「写者」的身份。
+///
+/// 官方按权限决定给多少：审核通过的客户端 + `mutuals` 能看到别人的 `n` 和
+/// VRChat 名字；否则只有匿名的「某位<星位>」。**这里全部是 `Option`**——
+/// 缺字段是常态，不是异常。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapRateWho {
+    #[serde(default)]
+    pub n: Option<i64>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 星群代号（`G` / `W` / `Z` / `L` / `A`）。
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub photo: Option<bool>,
+    /// 互相连上时对方的 VRChat 名字。
+    #[serde(default)]
+    pub vrc: Option<String>,
+    #[serde(default)]
+    pub mutual: Option<bool>,
+    /// 是不是我。
+    #[serde(default)]
+    pub me: Option<bool>,
+}
+
+/// `/me/maps/{world}/page`：带令牌的地图页（1.13.0 起）。
+///
+/// 比公开版多出：完整短评列表、地图介绍、正在开的房，以及**我自己的评分**。
+/// 需要 `maps` 普通权限（我们已有），因此不需要重新授权。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyMapPage {
+    /// 榜上的那一行。
+    #[serde(default)]
+    pub map: Option<VrccBoardMap>,
+    /// 地图介绍；没有时是 `null`。
+    #[serde(default)]
+    pub intro: Option<VrccMapIntro>,
+    /// 短评列表，按 `sort` 排。
+    #[serde(default)]
+    pub rates: Vec<VrccMapRate>,
+    /// 我自己的评分与短评。
+    #[serde(default)]
+    pub mine: Option<VrccMyRate>,
+    /// 当前的排序方式（`hot` / `new`）。
+    #[serde(default)]
+    pub sort: Option<String>,
+}
+
+/// 地图介绍。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMapIntro {
+    #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub up: Option<i64>,
+    #[serde(default)]
+    pub down: Option<i64>,
+    #[serde(default)]
+    pub at: Option<i64>,
+    #[serde(default)]
+    pub who: Option<VrccMapRateWho>,
+}
+
+/// 「我的」那一小块：自己打的分数与短评。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccMyRate {
+    /// 我的打分记录；没打过分时是 `null`。
+    #[serde(default)]
+    pub rate: Option<VrccMapRate>,
+    /// 我写的地图介绍；没有时是 `null`。
+    #[serde(default)]
+    pub intro: Option<VrccMapIntro>,
+}
+
+/// 短评在打分请求里的三种语义。
+///
+/// 官方文档写得很细，而这三者差别极大：
+///
+/// | 传什么 | 结果 |
+/// |---|---|
+/// | 非空字符串 | 提交或更新短评（会审核） |
+/// | 空字符串 `""` | **删掉已有短评**，分数保留 |
+/// | 完全不传这个字段 | 只改分数，**保留原短评** |
+///
+/// 所以不能用 `Option<String>`：那样 `None` 与「明确传空」在序列化上都是
+/// `null` 或缺失，无法区分，而错一个就把玩家的短评删了。
+///
+/// 这个类型只用于**请求**，不参与响应解析。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VrccRatingText {
+    /// 完全不传 `text` 字段：只改分数，原有短评原样保留。
+    Keep,
+    /// 传空字符串：删除已有短评。
+    Clear,
+    /// 传这段文字：提交或更新短评。
+    Write(String),
+}
+
+impl VrccRatingText {
+    /// 序列化成请求体里的 `text` 字段。
+    ///
+    /// `Keep` 返回 `None`，调用方据此**不把这个键放进 JSON**——放一个
+    /// `null` 进去与官方语义不符。
+    pub fn as_body_text(&self) -> Option<&str> {
+        match self {
+            Self::Keep => None,
+            Self::Clear => Some(""),
+            Self::Write(text) => Some(text.as_str()),
+        }
+    }
+}
+
+/// 打分请求。
+///
+/// 分数必须是 1–10 的整数（官方 `minimum: 1` / `maximum: 10`）。这里用
+/// `i64` 并在发送前夹取，而不是靠界面保证——越界会被服务器 `400
+/// bad_request` 打回来，那对玩家是个莫名其妙的报错。
+#[derive(Clone, Debug)]
+pub struct VrccRatingInput {
+    pub world: String,
+    pub score: i64,
+    pub text: VrccRatingText,
+}
+
+impl VrccRatingInput {
+    /// 分数的合法范围。
+    pub const MIN_SCORE: i64 = 1;
+    pub const MAX_SCORE: i64 = 10;
+    /// 短评的最长字数（官方 `maxLength: 30`）。
+    pub const MAX_TEXT_CHARS: usize = 30;
+
+    /// 夹取到合法范围。界面可以先用它做即时反馈，发送前仍会再夹一次。
+    pub fn clamped_score(&self) -> i64 {
+        self.score.clamp(Self::MIN_SCORE, Self::MAX_SCORE)
+    }
+}
+
+/// 投票的对象类型。
+///
+/// 官方接口同一套投票同时服务于短评（`rate`）和地图介绍（`intro`）。我们
+/// 目前只做短评的投票，但**把两种都建模**：请求体里的 `kind` 是必填的，
+/// 枚举化成字面量可以减少「写错字符串」这类低级错误。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum VrccVoteKind {
+    /// 给一条短评投票。
+    Rate,
+    /// 给地图介绍投票。
+    Intro,
+}
+
+impl VrccVoteKind {
+    /// 请求体里 `kind` 字段的字面量。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rate => "rate",
+            Self::Intro => "intro",
+        }
+    }
+}
+
+/// 我对一条内容的投票。
+///
+/// 三种取值对应官方 `v`：`1` 赞、`-1` 踩、`0` 取消。
+///
+/// **单独建类型而不是用 `i64`**：界面会频繁地在「当前票值」和「点一下之后
+/// 该发什么」之间换算（点已赞的赞 = 取消 = 0），用枚举能把这件事写清楚，
+/// 也挡住传 `2` 这种服务器必然拒绝的值。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum VrccVote {
+    /// 取消投票。
+    None,
+    /// 赞。
+    Up,
+    /// 踩。
+    Down,
+}
+
+impl VrccVote {
+    /// 请求体里 `v` 字段的整数值。
+    pub fn as_body_value(self) -> i64 {
+        match self {
+            Self::None => 0,
+            Self::Up => 1,
+            Self::Down => -1,
+        }
+    }
+
+    /// 从服务器返回的整数解析。认不出的值按「没投」处理——那比报错温和，
+    /// 而且界面只会少高亮一个按钮。
+    pub fn from_body_value(value: i64) -> Self {
+        match value {
+            1 => Self::Up,
+            -1 => Self::Down,
+            _ => Self::None,
+        }
+    }
+
+    /// 点一下同一个按钮之后应该变成什么（点已赞的赞 = 取消）。
+    ///
+    /// 这段逻辑放在契约层，是因为界面和服务端两处都要用到同一个判断，
+    /// 各写一遍迟早会分叉。
+    pub fn toggled_from(self, tapped: Self) -> Self {
+        if self == tapped {
+            Self::None
+        } else {
+            tapped
+        }
+    }
+}
+
+/// 投票结果（`POST /me/map-votes` 的 200）。
+///
+/// 官方返回的是**更新之后**的计数，所以调用方可以直接拿它刷新界面，
+/// 不必再查一次列表。
+///
+/// ## `my_vote` 为什么不叫 `mine`
+///
+/// 官方响应里这个字段叫 `mine`，但同名的 `VrccMapRate::mine` 表示「这条内容
+/// 是不是我写的」，语义完全不同（一个是布尔，一个是我投的票）。两个字段
+/// 放在同一个界面里用，叫同一个名字迟早会有人把「我写的」当成「我投了」，
+/// 所以这里改名，并且注明它来自官方的 `mine`。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccVoteResult {
+    /// 对象的类型（`rate` / `intro`）。
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// 对象的编号。
+    #[serde(default)]
+    pub id: Option<i64>,
+    /// 更新后的赞数。
+    #[serde(default)]
+    pub up: Option<i64>,
+    /// 更新后的踩数。
+    #[serde(default)]
+    pub down: Option<i64>,
+    /// 我现在的票；来自官方的 `mine` 字段（整数）。
+    #[serde(default, rename = "mine")]
+    pub my_vote: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------

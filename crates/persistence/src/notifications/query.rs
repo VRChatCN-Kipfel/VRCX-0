@@ -292,9 +292,34 @@ pub fn notification_rows_query(
     })
 }
 
+/// v2 表里那些**不算「需要玩家处理」**的行的 id 前缀。
+///
+/// v1 表用 `type = 'friendRequest'` 只认好友请求，v2 表却此前不设任何过滤，
+/// 于是任何写进 v2 的未读行都会点亮托盘。站外提醒（星遇同频）属于「读一眼
+/// 就好」的信息，不是待办，不该把托盘图标变成常亮的状态灯。
+pub const UNSEEN_ACTION_EXCLUDED_ID_PREFIXES: &[&str] = &["vrcc_"];
+
 pub fn notification_has_unseen_action_required(
     db: &DatabaseService,
     user_id: impl AsRef<str>,
+) -> Result<bool, Error> {
+    notification_has_unseen_action_required_excluding(
+        db,
+        user_id,
+        UNSEEN_ACTION_EXCLUDED_ID_PREFIXES,
+    )
+}
+
+/// 与 [`notification_has_unseen_action_required`] 相同，但由调用方决定排除
+/// 哪些 id 前缀。
+///
+/// 排除按 **id 前缀** 而非 type：调用方不必知道表里有哪些业务类型，只需要
+/// 说清哪些来源不算待办。空字符串会被丢弃——`NOT LIKE '%'` 会匹配所有行，
+/// 等于把托盘永久关死。
+pub fn notification_has_unseen_action_required_excluding(
+    db: &DatabaseService,
+    user_id: impl AsRef<str>,
+    excluded_id_prefixes: &[&str],
 ) -> Result<bool, Error> {
     let user_id = normalize_text(user_id.as_ref());
     if user_id.is_empty() {
@@ -303,18 +328,30 @@ pub fn notification_has_unseen_action_required(
 
     let user_prefix = normalize_user_table_prefix(&user_id)?;
     ensure_realtime_tables(db, &user_prefix)?;
-    let rows = db.execute(
-        &format!(
-            "SELECT EXISTS(\
-                SELECT 1 FROM {user_prefix}_notifications \
-                WHERE type = 'friendRequest' AND COALESCE(seen, 0) = 0 AND COALESCE(expired, 0) = 0 \
-                UNION ALL \
-                SELECT 1 FROM {user_prefix}_notifications_v2 \
-                WHERE COALESCE(seen, 0) = 0 AND (expires_at IS NULL OR expires_at = '' OR expires_at > @now)\
-            )"
-        ),
-        &ParamsBuilder::new().set("now", now_iso()).build(),
-    )?;
+
+    let mut params = ParamsBuilder::new().set("now", now_iso());
+    let mut exclusion_clause = String::new();
+    for (index, prefix) in excluded_id_prefixes
+        .iter()
+        .filter(|prefix| !prefix.is_empty())
+        .enumerate()
+    {
+        // 每个前缀各占一个绑定参数，前缀本身永远不进 SQL 文本。
+        exclusion_clause.push_str(&format!(" AND id NOT LIKE @excluded{index} || '%'"));
+        params = params.set(&format!("excluded{index}"), *prefix);
+    }
+
+    let sql = format!(
+        "SELECT EXISTS(\
+            SELECT 1 FROM {user_prefix}_notifications \
+            WHERE type = 'friendRequest' AND COALESCE(seen, 0) = 0 AND COALESCE(expired, 0) = 0 \
+            UNION ALL \
+            SELECT 1 FROM {user_prefix}_notifications_v2 \
+            WHERE COALESCE(seen, 0) = 0 AND (expires_at IS NULL OR expires_at = '' OR expires_at > @now){exclusion_clause}\
+        )"
+    );
+
+    let rows = db.execute(&sql, &params.build())?;
     rows.first()
         .map(|row| strict_row_i64(row, 0).map(|value| value != 0))
         .transpose()

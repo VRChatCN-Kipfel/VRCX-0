@@ -21,9 +21,17 @@ const mocks = vi.hoisted(() => ({
     beginDeviceAuth: vi.fn(),
     deviceAuthPoll: vi.fn(),
     disconnect: vi.fn(),
+    // A 批新增的读接口。`vi.fn()` 默认返回 `undefined`，调用方拿到的是
+    // 「没有数据」，和真实的「旧服务器回 404」等价，不会在初始化时炸掉。
+    maps: vi.fn(),
+    stickers: vi.fn(),
+    myMaps: vi.fn(),
+    mapPage: vi.fn(),
+    myBoard: vi.fn(),
     toastAdd: vi.fn(),
     openWorldDialog: vi.fn(),
     openUserDialog: vi.fn(),
+    openGroupDialog: vi.fn(),
     subscribeNotices: vi.fn()
 }));
 
@@ -33,7 +41,8 @@ vi.mock('@/services/toastService', () => ({
 
 vi.mock('@/services/dialogService', () => ({
     openWorldDialog: mocks.openWorldDialog,
-    openUserDialog: mocks.openUserDialog
+    openUserDialog: mocks.openUserDialog,
+    openGroupDialog: mocks.openGroupDialog
 }));
 
 // 提醒改由后端轮询、前端订阅事件。测试里给一个能立刻退订的假订阅：
@@ -64,7 +73,12 @@ vi.mock('@/platform/tauri/bindings', () => ({
         appVrccToday: mocks.today,
         appVrccDeviceAuthBegin: mocks.beginDeviceAuth,
         appVrccDeviceAuthPoll: mocks.deviceAuthPoll,
-        appVrccDisconnect: mocks.disconnect
+        appVrccDisconnect: mocks.disconnect,
+        appVrccMaps: mocks.maps,
+        appVrccStickers: mocks.stickers,
+        appVrccMyMaps: mocks.myMaps,
+        appVrccMapPage: mocks.mapPage,
+        appVrccMyBoard: mocks.myBoard
     }
 }));
 
