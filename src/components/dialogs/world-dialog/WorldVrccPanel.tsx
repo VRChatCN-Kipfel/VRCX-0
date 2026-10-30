@@ -150,7 +150,13 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
         );
     }
 
-    if (publicQuery.isPending) {
+    // 只在**真的在请求**时显示加载中。查询被禁用时（`worldId` 为空）
+    // `isPending` 也是 true、但 `fetchStatus` 是 `idle`——只看 `isPending`
+    // 会永远停在「加载中…」。
+    //
+    // 实际不可达：标签页只在 `world.id` 存在时挂载。但这是和 `myMapQuery`
+    // 同一类的坑，留一行防御，免得将来有人放开那个挂载条件。
+    if (publicQuery.isPending && publicQuery.fetchStatus === 'fetching') {
         return (
             <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
                 {t('common.loading', '加载中…')}
