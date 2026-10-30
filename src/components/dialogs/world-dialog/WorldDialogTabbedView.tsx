@@ -374,6 +374,12 @@ export function WorldDialogTabbedView({
         });
     const tabs = [
         { value: 'instances', label: t('dialog.world.instances.header') },
+        // 星遇同频标签页。只在有世界 ID 时出现——没有 ID 时查不了任何东西。
+        // 放在「游玩过的房间」之前：它是这张图本身的信息，而播放记录是
+        // 我自己的历史，先生后己。
+        ...(world.id
+            ? [{ value: 'vrcc', label: t('dialog.world.vrcc.tab') }]
+            : []),
         {
             value: 'visit-history',
             label: t('dialog.previous_instances.header')
@@ -389,10 +395,6 @@ export function WorldDialogTabbedView({
         { value: 'info', label: t('dialog.world.info.header') },
         ...(typeof world.storeId === 'string' && world.storeId
             ? [{ value: 'store', label: t('economy.store_header') }]
-            : []),
-        // 星遇同频标签页。只在有世界 ID 时出现——没有 ID 时查不了任何东西。
-        ...(world.id
-            ? [{ value: 'vrcc', label: t('dialog.world.vrcc.tab') }]
             : []),
         { value: 'json', label: t('dialog.world.json.header') }
     ];
