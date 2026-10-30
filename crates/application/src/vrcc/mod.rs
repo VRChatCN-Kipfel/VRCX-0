@@ -10,11 +10,10 @@ use std::time::{Duration, Instant};
 
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
-    VrccCrossingCards, VrccCrossings,
     device_auth_scope, is_dev_client, VrccAnnouncements, VrccBoard, VrccBoardSort,
-    VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMutuals, VrccMyMap, VrccNotes,
-    VrccNotifications, VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse,
-    VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccConnectionSnapshot, VrccCrossingCards, VrccCrossings, VrccDeviceCode, VrccError,
+    VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus,
+    VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -846,30 +845,35 @@ impl VrccService {
     ///
     /// 返回里的 `why` 必须由调用方处理：`hide` 时**不应显示**该模块
     /// （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
-    pub async fn crossings(
-        &self,
-        mark: bool,
-    ) -> std::result::Result<VrccCrossings, VrccError> {
+    pub async fn crossings(&self, mark: bool) -> std::result::Result<VrccCrossings, VrccError> {
         self.ensure_connected()?;
-        self.remote
+        let mut crossings = self
+            .remote
             .crossings(mark)
             .await
-            .map_err(|error| self.settle(error))
+            .map_err(|error| self.settle(error))?;
+        // `why == "hide"` 的判定只在这里做一次，消费方只看 `hidden`。
+        crossings.settle_visibility();
+        Ok(crossings)
     }
 
     /// 星轨相交的完整星卡（`/me/crossings/cards`，1.13.0 起）。
     ///
     /// 比列表重，且算**第二份读**的额度（与 `/me/today`、`/me/notes` 分开计），
     /// 所以只应在玩家打开星轨相交页时按需拉取，不要进后台轮询。
+    ///
+    /// 旧服务器没有这个接口，回 `404 not_found` 时返回 `None`：它只影响
+    /// 「今天还能连几颗」那一小块，不该让整个列表跟着失败。
     pub async fn crossing_cards(
         &self,
         mark: bool,
-    ) -> std::result::Result<VrccCrossingCards, VrccError> {
+    ) -> std::result::Result<Option<VrccCrossingCards>, VrccError> {
         self.ensure_connected()?;
-        self.remote
-            .crossing_cards(mark)
-            .await
-            .map_err(|error| self.settle(error))
+        match self.remote.crossing_cards(mark).await {
+            Ok(cards) => Ok(Some(cards)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(self.settle(error)),
+        }
     }
 
     fn ensure_connected(&self) -> std::result::Result<(), VrccError> {

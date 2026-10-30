@@ -167,12 +167,16 @@ export const vrccApi = {
      * `mark` 传 true 表示玩家正在看这一页，服务器会把已读同步到账号、
      * 清掉网页与手机上的红点。别的场景一律传 false。
      *
-     * 返回里的 `why` 必须处理：`hide` 时整个模块都不应显示
+     * 返回里的 `hidden` 必须处理：为 true 时整个模块都不应显示
      * （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
      */
     crossings: (mark = false) => call(() => commands.appVrccCrossings(mark)),
 
-    /** 星轨相交的完整星卡（1.13.0 起）。算第二份读的额度。 */
+    /**
+     * 星轨相交的完整星卡（1.13.0 起）。算第二份读的额度。
+     *
+     * 旧服务器上没有这个接口，返回 null。
+     */
     crossingCards: (mark = false) =>
         call(() => commands.appVrccCrossingCards(mark))
 };
@@ -203,7 +207,9 @@ export type VrccDeviceAuthStep = Awaited<
 export type VrccStatus = Awaited<ReturnType<typeof commands.appVrccStatus>>;
 export type VrccToday = Awaited<ReturnType<typeof commands.appVrccToday>>;
 export type VrccMutuals = Awaited<ReturnType<typeof commands.appVrccMutuals>>;
-export type VrccCrossings = Awaited<ReturnType<typeof commands.appVrccCrossings>>;
+export type VrccCrossings = Awaited<
+    ReturnType<typeof commands.appVrccCrossings>
+>;
 export type VrccCrossingStar = NonNullable<VrccCrossings['stars']>[number];
 export type VrccCrossingCards = Awaited<
     ReturnType<typeof commands.appVrccCrossingCards>

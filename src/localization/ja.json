@@ -872,7 +872,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them"
         },
@@ -903,7 +902,6 @@
             "linked": "あなたがつながりました",
             "mutual": "双方向でつながっています",
             "not_linked": "まだつながっていません",
-            "open_profile": "プレイヤー詳細を開く",
             "open_page": "vrcc.cc で見る",
             "why": {
                 "verify": "星軌交差を使うには VRChat アカウントの認証が必要です。",
@@ -2180,7 +2178,6 @@
                     "go_to_friend": "フレンドを選択",
                     "cancelling": "キャンセル中",
                     "find_friend": "フレンドを検索",
-                    "open_profile": "プロフィールを開く",
                     "hide_from_graph": "グラフから非表示",
                     "clear_filters": "フィルターを解除"
                 },

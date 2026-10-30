@@ -15,11 +15,64 @@ vi.mock('@/lib/dateTime', () => ({
     formatRelativeTime: () => 'now'
 }));
 
+import { VrccCrossingsPanel } from './VrccCrossingsPanel';
 import { VrccMapsPanel } from './VrccMapsPanel';
 import { VrccNotificationsPanel } from './VrccNotificationsPanel';
 
 afterEach(() => {
     cleanup();
+});
+
+function renderCrossings(crossings: { why?: string | null; hidden?: boolean }) {
+    const { container } = render(
+        <VrccCrossingsPanel
+            connected
+            crossings={{
+                stars: [],
+                n: 0,
+                why: null,
+                hidden: false,
+                me: null,
+                ...crossings
+            }}
+            cards={null}
+            crossingsError={null}
+            onOpenLink={() => {}}
+            onRefresh={() => {}}
+        />
+    );
+    return container;
+}
+
+describe('VrccCrossingsPanel', () => {
+    it('hidden 时整块都不渲染，连「不可用」也不说', () => {
+        // 官方要求 `hide` 时客户端不显示此模块。把 `hide` 当成普通空列表，
+        // 等于向不该看到的人确认「这里有星轨相交」这个事实本身——所以这里
+        // 断言的是**一片空白**，不是某段文案。
+        const container = renderCrossings({ why: 'hide', hidden: true });
+        expect(container.innerHTML).toBe('');
+    });
+
+    it('其余 why 要显示原因，而不是把功能藏掉', () => {
+        // `verify` / `friend` 这些是「功能在但暂时用不了」，玩家需要知道
+        // 下一步做什么。藏起来会让人以为功能消失了。
+        renderCrossings({ why: 'verify', hidden: false });
+        expect(screen.getByText('vrcc.crossings.why.verify')).toBeTruthy();
+    });
+
+    it('没连接时提示先去连接', () => {
+        render(
+            <VrccCrossingsPanel
+                connected={false}
+                crossings={null}
+                cards={null}
+                crossingsError={null}
+                onOpenLink={() => {}}
+                onRefresh={() => {}}
+            />
+        );
+        expect(screen.getByText('vrcc.crossings.need_connect')).toBeTruthy();
+    });
 });
 
 function renderNotifications(unread: {

@@ -876,7 +876,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them"
         },
@@ -907,7 +906,6 @@
             "linked": "내가 연결함",
             "mutual": "양방향 연결됨",
             "not_linked": "아직 연결되지 않음",
-            "open_profile": "플레이어 정보 열기",
             "open_page": "vrcc.cc에서 보기",
             "why": {
                 "verify": "별궤도 교차를 쓰려면 VRChat 계정 인증이 필요합니다.",
@@ -2127,7 +2125,6 @@
                     "go_to_friend": "친구에게로 이동",
                     "cancelling": "취소 중",
                     "find_friend": "친구 찾기",
-                    "open_profile": "프로필 열기",
                     "hide_from_graph": "그래프에서 숨기기",
                     "clear_filters": "필터 초기화"
                 },

@@ -25,10 +25,10 @@ import { Button } from '@/ui/shadcn/button';
 import { Spinner } from '@/ui/shadcn/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/shadcn/tabs';
 
+import { VrccCrossingsPanel } from './components/VrccCrossingsPanel';
 import { VrccCurrentMapCard } from './components/VrccCurrentMapCard';
 import { VrccMapsPanel } from './components/VrccMapsPanel';
 import { VrccMePanel } from './components/VrccMePanel';
-import { VrccCrossingsPanel } from './components/VrccCrossingsPanel';
 import { VrccMutualsPanel } from './components/VrccMutualsPanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
 import { useVrccController } from './useVrccController';
@@ -99,7 +99,6 @@ export function VrccPage() {
         crossings,
         crossingCards,
         crossingsError,
-        crossingsWhy,
         refreshCrossings,
         service,
         deviceAuth,
@@ -118,6 +117,11 @@ export function VrccPage() {
 
     const connected = connection?.connected ?? false;
     const unreadTotal = connected ? unreadCount(unread, recent) : 0;
+    // 服务端说这块不该显示时（16–17 岁星池，或玩家关了星轨相交），页签也
+    // 一起藏起来，并顺手把停留在这页的玩家送回地图榜——否则会出现「所有
+    // 页签都不选中、内容空白」的状态。
+    const crossingsHidden = crossings?.hidden === true;
+    const activeTab = crossingsHidden && tab === 'crossings' ? 'maps' : tab;
     const stop = announcements?.stop ?? null;
     const [dismissedAnnouncement, setDismissedAnnouncement] = useState(
         readDismissedAnnouncement
@@ -264,7 +268,7 @@ export function VrccPage() {
                     </div>
                 ) : (
                     <Tabs
-                        value={tab}
+                        value={activeTab}
                         onValueChange={(value) => setTab(value as typeof tab)}
                         className="flex min-h-0 flex-1 flex-col"
                     >
@@ -283,9 +287,15 @@ export function VrccPage() {
                             <TabsTrigger value="mutuals">
                                 {t('vrcc.tab.mutuals')}
                             </TabsTrigger>
-                            <TabsTrigger value="crossings">
-                                {t('vrcc.tab.crossings')}
-                            </TabsTrigger>
+                            {/* `hidden` 时**连页签都不出现**：面板自己返回
+                                null 只藏住了内容，标签还写着「星轨相交」，
+                                等于照样确认了「这个功能存在、只是没给你」。
+                                官方要求的是客户端不显示此模块。 */}
+                            {!crossingsHidden && (
+                                <TabsTrigger value="crossings">
+                                    {t('vrcc.tab.crossings')}
+                                </TabsTrigger>
+                            )}
                             <TabsTrigger value="me">
                                 {t('vrcc.tab.me')}
                             </TabsTrigger>
@@ -339,24 +349,27 @@ export function VrccPage() {
                             value="crossings"
                             className="min-h-0 flex-1"
                         >
-                            {/* mark=true：玩家真的在看这一页，服务器可以把
-                                已读同步到账号、清掉网页与手机上的红点。 */}
                             <VrccCrossingsPanel
                                 connected={connected}
                                 crossings={crossings}
                                 cards={crossingCards}
                                 crossingsError={crossingsError}
-                                crossingsWhy={crossingsWhy}
                                 onOpenLink={openLink}
                                 onRefresh={() => {
-                                    void refreshCrossings(true).catch(
+                                    // 手动刷新不算「看过」：这一下可能只是
+                                    // 想看看有没有新记录，不该顺手替玩家
+                                    // 把红点清掉。`mark=true` 只留给「切到
+                                    // 这一页」那一个动作（见 `setTab`）。
+                                    void refreshCrossings(false).catch(
                                         (error: unknown) => {
                                             toast.add({
                                                 type: 'error',
                                                 title:
                                                     error instanceof Error
                                                         ? error.message
-                                                        : t('vrcc.error.unknown')
+                                                        : t(
+                                                              'vrcc.error.unknown'
+                                                          )
                                             });
                                         }
                                     );

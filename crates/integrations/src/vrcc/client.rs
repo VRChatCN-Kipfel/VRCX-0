@@ -23,10 +23,10 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
-    VrccCrossingCards, VrccCrossings,
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail,
-    VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications, VrccRecentNotifications, VrccStatus,
-    VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccCrossingCards, VrccCrossings, VrccDeviceCode,
+    VrccErrorBody, VrccMapDetail, VrccMutuals, VrccMyMap, VrccNotes, VrccNotifications,
+    VrccRecentNotifications, VrccStatus, VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE,
+    VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -1013,7 +1013,8 @@ impl VrccClient {
             body: None,
             authed: true,
             key: "crossings/cards",
-            min_gap: Duration::from_secs(30),
+            // 列表是 30 秒，星卡**更宽**：它是第二份读，别跟列表抢窗口。
+            min_gap: Duration::from_secs(60),
             bucket: Some(QuotaBucket::MoreReads),
             bypass_gate: false,
         })
@@ -1187,6 +1188,9 @@ mod tests {
             VRCC_DEVICE_AUTH_SCOPE
         );
         assert!(!VRCC_DEV_DEVICE_AUTH_SCOPE.contains("mutuals"));
+        // 敏感权限只出现在正式标识那一串；`dev-` 要了会连码都拿不到。
+        assert!(VRCC_DEVICE_AUTH_SCOPE.contains("crossings"));
+        assert!(!VRCC_DEV_DEVICE_AUTH_SCOPE.contains("crossings"));
         for scope in [VRCC_DEVICE_AUTH_SCOPE, VRCC_DEV_DEVICE_AUTH_SCOPE] {
             assert!(scope.starts_with("profile notifications maps"));
         }
