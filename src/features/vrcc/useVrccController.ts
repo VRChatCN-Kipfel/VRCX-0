@@ -491,11 +491,9 @@ export function useVrccController() {
             void refreshMutuals().catch((error) => {
                 reportError(error, 'refreshMutuals');
             });
-            // 「星轨相交」同样要敏感权限，同样单独兜住。
-            // 这里传 mark=false：初次加载不是「玩家在看」。
-            void refreshCrossings(false).catch((error) => {
-                reportError(error, 'refreshCrossings');
-            });
+            // 「星轨相交」**不在这里拉**：首屏一定是地图榜那个页签，没人看得见
+            // 它。它又算两份每天额度（列表一份、星卡一份），提前拉等于每次开页
+            // 都白花 2 次。等玩家真切到那一页时 `setTab` 会拉，连 mark 一起做。
             void refreshUnread(true).catch((error) => {
                 reportError(error, 'refreshUnread');
             });
@@ -505,7 +503,6 @@ export function useVrccController() {
         refreshAnnouncements,
         refreshBoards,
         refreshConnection,
-        refreshCrossings,
         refreshMutuals,
         refreshMyMap,
         refreshRecent,

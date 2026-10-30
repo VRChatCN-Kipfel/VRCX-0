@@ -330,6 +330,7 @@ describe('useVrccController', () => {
         );
         const { result } = renderHook(() => useVrccController());
         await waitFor(() => expect(result.current.loading).toBe(false));
+        act(() => result.current.setTab('crossings'));
         await waitFor(() =>
             expect(result.current.crossingsError).not.toBeNull()
         );
@@ -356,6 +357,7 @@ describe('useVrccController', () => {
         });
         const { result } = renderHook(() => useVrccController());
         await waitFor(() => expect(result.current.loading).toBe(false));
+        act(() => result.current.setTab('crossings'));
         await waitFor(() =>
             expect(result.current.crossings?.hidden).toBe(true)
         );
@@ -363,10 +365,12 @@ describe('useVrccController', () => {
         expect(result.current.crossings?.stars).toHaveLength(0);
     });
 
-    it('crossings 初次加载不带 mark，切到这一页才 mark=true', async () => {
-        // `mark=1` 会把星轨相交标成已读、连带清掉网页与手机的红点。
-        // 初次加载不是「玩家在看」，必须传 false；只有玩家真的切到这一页
-        // 才算看过。这条链路错了，玩家会莫名其妙丢红点。
+    it('首屏不拉星轨相交，切到这一页才拉、并且带 mark=true', async () => {
+        // 两件事一起钉住：
+        // 1. 首屏一定停在地图榜，没人看得见星轨相交。它算两份每天额度
+        //    （列表一份、星卡一份），提前拉就是每次开页白花 2 次。
+        // 2. 玩家真切到这一页 = 看过了，要带 mark=true 把红点消掉。
+        //    这条链路错了，红点永远消不掉。
         mocks.crossings.mockResolvedValue({
             stars: [],
             n: 0,
@@ -383,18 +387,16 @@ describe('useVrccController', () => {
         const { result } = renderHook(() => useVrccController());
         await waitFor(() => expect(result.current.loading).toBe(false));
 
-        // 初次加载：mark=false。
-        expect(mocks.crossings).toHaveBeenCalledWith(false);
-        expect(mocks.crossingCards).toHaveBeenCalledWith(false);
+        // 首屏：一次都没问过。
+        expect(mocks.crossings).not.toHaveBeenCalled();
+        expect(mocks.crossingCards).not.toHaveBeenCalled();
 
-        // 玩家切到「星轨相交」：mark=true。
-        mocks.crossings.mockClear();
-        mocks.crossingCards.mockClear();
+        // 玩家切到「星轨相交」：带 mark=true 拉。
         act(() => result.current.setTab('crossings'));
         await waitFor(() => expect(mocks.crossings).toHaveBeenCalledWith(true));
         expect(mocks.crossingCards).toHaveBeenCalledWith(true);
         // 星卡的额度读数被记下来了。
-        expect(result.current.crossingCards?.left).toBe(3);
+        await waitFor(() => expect(result.current.crossingCards?.left).toBe(3));
     });
 
     it('手动刷新星轨相交不替玩家把记录标成已读', async () => {
@@ -429,6 +431,10 @@ describe('useVrccController', () => {
             me: null
         });
         const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+
+        // 首屏不拉，先切到那一页把数据填上。
+        act(() => result.current.setTab('crossings'));
         await waitFor(() =>
             expect(result.current.crossings?.stars).toHaveLength(1)
         );

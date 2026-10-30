@@ -60,6 +60,15 @@ describe('VrccCrossingsPanel', () => {
         expect(screen.getByText('vrcc.crossings.why.verify')).toBeTruthy();
     });
 
+    it('服务器给没见过的 why 时退回 unknown，不拼键名', () => {
+        // 原来的写法是 `t(`vrcc.crossings.why.${why}`)`——`why` 是服务器给的
+        // 字符串，拼出来可能是 `constructor` / `__proto__` 这种本来就存在的
+        // 对象属性，拿到的不是文案而是对象或 undefined，界面直接炸。
+        // 现在只有白名单里的才拼键名，其余一律 unknown。
+        renderCrossings({ why: 'brand-new-reason', hidden: false });
+        expect(screen.getByText('vrcc.crossings.why.unknown')).toBeTruthy();
+    });
+
     it('没连接时提示先去连接', () => {
         render(
             <VrccCrossingsPanel
