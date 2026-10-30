@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLinkIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { formatRelativeTime } from '@/lib/dateTime';
@@ -13,11 +13,13 @@ import {
 import { Button } from '@/ui/shadcn/button';
 
 import {
+    VrccCollapse,
     VrccMetricRow,
     VrccPerfGrid,
     VrccScoreSpread,
     VrccSection
 } from './WorldVrccPanelParts';
+import type { VrccMetric } from './WorldVrccPanelParts';
 
 /** 一条短评。从绑定类型里派生，免得两处各写一份形状。 */
 type VrccMapRate = NonNullable<VrccMyMapPage['rates']>[number];
@@ -57,8 +59,29 @@ const SCORE_MAX = 10;
  */
 export function WorldVrccPanel({ worldId }: { worldId: string }) {
     const { t } = useTranslation();
-    // 排序是这一页唯一的交互状态。默认「最热」，与官方一致。
+    // 排序是这一页的两个交互状态之一。默认「最热」，与官方一致。
     const [sort, setSort] = useState<'hot' | 'new'>('hot');
+    // 配置四宫格默认收起：它是「想深究再看」的信息，不该占住首屏。
+    const [perfOpen, setPerfOpen] = useState(false);
+    const perfRef = useRef<HTMLDivElement | null>(null);
+
+    // 展开后把它滚进视野。`block: 'nearest'` 在已经看得见时**不滚动**，
+    // 只在放不下时移动最小距离——这样不会出现「先展开、再突然跳下去」。
+    // 折叠时不动，避免把玩家刚点的那一项甩出视野。
+    const togglePerf = useCallback(() => {
+        setPerfOpen((previous) => {
+            const next = !previous;
+            if (next) {
+                requestAnimationFrame(() => {
+                    perfRef.current?.scrollIntoView({
+                        block: 'nearest',
+                        behavior: 'smooth'
+                    });
+                });
+            }
+            return next;
+        });
+    }, []);
 
     const publicQuery = useQuery({
         ...vrccPublicMapQueryOptions(worldId),
@@ -118,27 +141,6 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     const platformText = perf?.platforms?.length
         ? perf.platforms.join(' · ')
         : null;
-    const metrics = [
-        weightLabel
-            ? { label: t('dialog.world.vrcc.perf_weight'), value: weightLabel }
-            : null,
-        typeof went === 'number' && went > 0
-            ? {
-                  label: t('dialog.world.vrcc.went_label'),
-                  value: String(went)
-              }
-            : null,
-        platformText
-            ? {
-                  label: t('dialog.world.vrcc.perf_platforms'),
-                  value: platformText
-              }
-            : null,
-        cap && cap > 0
-            ? { label: t('dialog.world.vrcc.cap_label'), value: String(cap) }
-            : null
-    ].filter((item): item is { label: string; value: string } => item !== null);
-
     // 配置四宫格：显存 / 内存 / 加载 / 下载。
     const perfCells = [
         typeof perf?.vram === 'number' && perf.vram > 0
@@ -167,6 +169,38 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
             : null
     ].filter((item): item is { label: string; value: string } => item !== null);
 
+    // 「配置」是唯一可点的一项：它有下钻内容（四宫格）。其余三项没有
+    // 下钻，保持纯文本——都做成可点会让人去点「去过 69」然后什么都不发生。
+    const metricCandidates: Array<VrccMetric | null> = [
+        weightLabel
+            ? {
+                  label: t('dialog.world.vrcc.perf_weight'),
+                  value: weightLabel,
+                  onToggle: perfCells.length ? togglePerf : undefined,
+                  expanded: perfOpen,
+                  toggleLabel: t('dialog.world.vrcc.perf_toggle')
+              }
+            : null,
+        typeof went === 'number' && went > 0
+            ? {
+                  label: t('dialog.world.vrcc.went_label'),
+                  value: String(went)
+              }
+            : null,
+        platformText
+            ? {
+                  label: t('dialog.world.vrcc.perf_platforms'),
+                  value: platformText
+              }
+            : null,
+        cap && cap > 0
+            ? { label: t('dialog.world.vrcc.cap_label'), value: String(cap) }
+            : null
+    ];
+    const metrics = metricCandidates.filter(
+        (item): item is VrccMetric => item !== null
+    );
+
     const mine = signedIn.data?.mine?.rate ?? null;
     const intro = signedIn.data?.intro?.text ?? null;
     const rates = (signedIn.data?.rates ?? []).filter(
@@ -175,8 +209,17 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
 
     return (
         <div className="flex min-w-0 flex-col gap-5 pb-2">
-            {/* ① 指标行 */}
-            <VrccMetricRow items={metrics} />
+            {/* ① 指标行。点「配置」会在它正下方展开四宫格。 */}
+            <div className="flex min-w-0 flex-col gap-2">
+                <VrccMetricRow items={metrics} />
+                <div ref={perfRef}>
+                    <VrccCollapse open={perfOpen}>
+                        <div className="pb-1">
+                            <VrccPerfGrid items={perfCells} />
+                        </div>
+                    </VrccCollapse>
+                </div>
+            </div>
 
             {/* ② 地图介绍 */}
             <VrccSection title={t('dialog.world.vrcc.intro')}>
@@ -277,13 +320,6 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                             up: map.hot.up
                         }}
                     />
-                </VrccSection>
-            ) : null}
-
-            {/* ⑥ 配置要求 */}
-            {perfCells.length ? (
-                <VrccSection title={t('dialog.world.vrcc.perf_section')}>
-                    <VrccPerfGrid items={perfCells} />
                 </VrccSection>
             ) : null}
 

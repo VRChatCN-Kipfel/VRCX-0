@@ -4887,7 +4887,8 @@
                 "went_label": "去过",
                 "cap_label": "房间上限",
                 "went_badge": "去过",
-                "unit_sec": "秒"
+                "unit_sec": "秒",
+                "perf_toggle": "展开或收起配置明细"
             }
         },
         "avatar": {

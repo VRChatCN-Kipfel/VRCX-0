@@ -137,34 +137,151 @@ export function VrccSection({
 }
 
 /**
+ * 一项指标。
+ *
+ * `onToggle` 存在时这一项是**可展开的**：渲染成 `button`，值后面挂一个
+ * 箭头，`expanded` 控制箭头方向。其余项保持纯文本——只有嵌了一层细节的那
+ * 一项才该看起来能点，否则玩家会去点「去过 69」而什么也不发生。
+ */
+export type VrccMetric = {
+    label: string;
+    value: string;
+    /** 有值表示这一项可以点开/收起。 */
+    onToggle?: () => void;
+    /** 当前是否已展开（只在该项可点时有意义）。 */
+    expanded?: boolean;
+    /** 给读屏用：展开控件的完整描述。 */
+    toggleLabel?: string;
+};
+
+/**
  * 一排指标：值大、标签小，横向平铺。
  *
  * 用于顶部那一行（配置档位 / 去过人数 / 平台 / 房间上限）。官方是四项等宽，
  * 我们跟随同一结构；缺项的会被调用方过滤掉，不留空位。
  */
-export function VrccMetricRow({
-    items
-}: {
-    items: Array<{ label: string; value: string }>;
-}) {
+export function VrccMetricRow({ items }: { items: VrccMetric[] }) {
     if (!items.length) {
         return null;
     }
     return (
         <div className="flex min-w-0 flex-wrap items-stretch gap-x-5 gap-y-2">
-            {items.map((item) => (
-                <div
-                    key={item.label}
-                    className="flex min-w-0 flex-col items-center gap-0.5"
-                >
-                    <span className="text-foreground text-sm font-semibold tabular-nums">
+            {items.map((item) => {
+                const value = (
+                    <span className="text-foreground flex items-center gap-0.5 text-sm font-semibold tabular-nums">
                         {item.value}
+                        {item.onToggle ? (
+                            <Chevron expanded={item.expanded} />
+                        ) : null}
                     </span>
+                );
+                const label = (
                     <span className="text-muted-foreground text-[10px] leading-none">
                         {item.label}
                     </span>
-                </div>
-            ))}
+                );
+
+                if (!item.onToggle) {
+                    return (
+                        <div
+                            key={item.label}
+                            className="flex min-w-0 flex-col items-center gap-0.5"
+                        >
+                            {value}
+                            {label}
+                        </div>
+                    );
+                }
+
+                return (
+                    <button
+                        key={item.label}
+                        type="button"
+                        onClick={item.onToggle}
+                        aria-expanded={item.expanded ?? false}
+                        aria-label={item.toggleLabel}
+                        className={cn(
+                            'hover:bg-muted/50 -mx-1 flex min-w-0 flex-col items-center gap-0.5 rounded px-1 py-0.5 transition-colors'
+                        )}
+                    >
+                        {value}
+                        {label}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+/** 展开指示箭头。展开时转 180°。 */
+function Chevron({ expanded }: { expanded?: boolean }) {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className={cn(
+                'text-muted-foreground size-3 shrink-0 transition-transform duration-200',
+                expanded && 'rotate-180'
+            )}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M6 9l6 6 6-6" />
+        </svg>
+    );
+}
+
+/**
+ * 可折叠区：`grid-template-rows` 从 `0fr` 到 `1fr` 做高度动画。
+ *
+ * ## 为什么不是 `max-height`
+ *
+ * `max-height` 要猜一个足够大的值，内容少时前半段看不见东西、内容多时又会被
+ * 截断。`0fr → 1fr` 是**按内容真实高度**算的，内容变了不用重新测量。
+ *
+ * ## 为什么外面那层要 `overflow: hidden`
+ *
+ * `grid` 的行高从 0 长到 auto 的过程中，子元素已经在渲染，没有这层就会溢出
+ * 到下面的分节上，看着像内容「穿」出去。
+ *
+ * ## 与滚动容器的关系
+ *
+ * 这个区在详情对话框的左栏里，那一栏是 `overflow-y-auto`。展开会让内容变高，
+ * 可能触发滚动条出现，进而挤掉几像素宽度、横向抖一下。所以调用方在展开后
+ * 会把这一块滚进视野——`scrollIntoView({ block: 'nearest' })` 在内容已经
+ * 放得下时不滚动，放不下时才动最小距离，避免「先展开再突然跳下去」。
+ */
+export function VrccCollapse({
+    open,
+    children
+}: {
+    open: boolean;
+    children: React.ReactNode;
+}) {
+    return (
+        <div
+            className={cn(
+                'grid transition-[grid-template-rows] duration-200 ease-out',
+                open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+            )}
+        >
+            {/* 收起时用 aria-hidden + opacity 一起藏：只靠高度为 0 的话，
+                里面的按钮仍在 tab 序列里，键盘会跳到看不见的东西上。 */}
+            <div
+                className={cn(
+                    'min-h-0 overflow-hidden transition-opacity duration-200',
+                    open ? 'opacity-100' : 'opacity-0'
+                )}
+                aria-hidden={!open}
+                // 收起的区不可交互。`inert` 是标准做法；不支持时下面还有
+                // `pointer-events` 兜底。
+                {...(!open ? { inert: true } : {})}
+            >
+                {children}
+            </div>
         </div>
     );
 }

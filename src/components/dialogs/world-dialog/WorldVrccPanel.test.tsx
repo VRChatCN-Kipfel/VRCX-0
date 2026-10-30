@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -220,6 +220,44 @@ describe('WorldVrccPanel', () => {
     it('世界 ID 为空时一个请求都不发', () => {
         renderWithClient(<WorldVrccPanel worldId="" />);
         expect(appVrccMapPage).not.toHaveBeenCalled();
+    });
+
+    // -- 配置四宫格的展开 / 折叠 -------------------------------------------
+
+    it('配置默认收起，点「配置」才展开', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        await screen.findByText('8.4');
+        // 触发点存在且报告未展开
+        const trigger = screen.getByRole('button', {
+            name: 'dialog.world.vrcc.perf_toggle'
+        });
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+        fireEvent.click(trigger);
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('收起时四宫格不可交互（inert），展开后可交互', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        await screen.findByText('8.4');
+        // 收起状态：内容还在 DOM 里（这样才能做高度动画），但被标记
+        // aria-hidden，键盘不会跑到看不见的东西上。
+        const hiddenRegion = document.querySelector('[aria-hidden="true"]');
+        expect(hiddenRegion).toBeTruthy();
+
+        fireEvent.click(
+            screen.getByRole('button', {
+                name: 'dialog.world.vrcc.perf_toggle'
+            })
+        );
+        // 展开后不该再有 aria-hidden 的折叠区
+        expect(
+            document.querySelector('[aria-hidden="true"].opacity-0')
+        ).toBeNull();
     });
 
     // -- 登录之后才有的一半 ------------------------------------------------

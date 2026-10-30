@@ -4830,7 +4830,8 @@
                 "went_label": "Visited",
                 "cap_label": "Capacity",
                 "went_badge": "visited",
-                "unit_sec": "s"
+                "unit_sec": "s",
+                "perf_toggle": "Show or hide hardware details"
             }
         },
         "avatar": {
