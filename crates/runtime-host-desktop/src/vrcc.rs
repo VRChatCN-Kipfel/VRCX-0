@@ -9,7 +9,7 @@ use vrcx_0_contracts::vrcc::{
     scope_grants, VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage,
     VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps,
     VrccRatingText, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread,
-    VrccUsageSnapshot, VrccWristSummary,
+    VrccUsageSnapshot, VrccVote, VrccVoteKind, VrccVoteResult, VrccWristSummary,
 };
 use vrcx_0_integrations::vrcc::{resolve_client_id, VrccError};
 use vrcx_0_outbound_adapters::LocalVrccTokenStore;
@@ -345,6 +345,19 @@ impl DesktopVrccRuntime {
     pub async fn delete_map_rating(&self, world: &str) -> Result<(), VrccFailure> {
         self.service
             .delete_map_rating(world)
+            .await
+            .map_err(|error| VrccFailure::from_error(&error))
+    }
+
+    /// 给短评投票。需要 `maps.write` 敏感权限。写操作，不重试。
+    pub async fn vote_map_content(
+        &self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> Result<VrccVoteResult, VrccFailure> {
+        self.service
+            .vote_map_content(kind, id, vote)
             .await
             .map_err(|error| VrccFailure::from_error(&error))
     }

@@ -14,6 +14,7 @@ use vrcx_0_contracts::vrcc::{
     VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage, VrccMyBoard,
     VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRatingText,
     VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccVote, VrccVoteKind, VrccVoteResult,
 };
 
 use crate::{error::AppError, state::AppState};
@@ -290,6 +291,29 @@ pub async fn app__vrcc_delete_map_rating(
         .runtime_host()
         .vrcc()
         .delete_map_rating(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 给短评或地图介绍投票。需要 `maps.write` 敏感权限。
+///
+/// `vote` 用 `"up"` / `"down"` / `"none"`：`none` 表示取消。
+/// 用字符串而不是整数，是因为界面会在「当前票值」与「点一下之后发什么」之间
+/// 来回换算，枚举化的字面量比 `1` / `-1` / `0` 更难写错。
+///
+/// **不能给自己的内容投票**——这条由界面提前禁用按钮，服务端也会拒。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_vote_map_content(
+    state: State<'_, AppState>,
+    kind: VrccVoteKind,
+    id: i64,
+    vote: VrccVote,
+) -> Result<VrccVoteResult, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .vote_map_content(kind, id, vote)
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }

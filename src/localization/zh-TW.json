@@ -4897,7 +4897,11 @@
                 "rate_delete": "刪除評分",
                 "rate_failed": "提交失敗，請稍後再試。",
                 "rate_needs_scope": "打分需要重新連接一次星遇同頻帳戶。",
-                "words_placeholder": "寫一句短評（可選，30 字以內）"
+                "words_placeholder": "寫一句短評（可選，30 字以內）",
+                "vote_up": "這條短評有幫助",
+                "vote_down": "這條短評沒有幫助",
+                "vote_own_hint": "不能給自己的短評投票。",
+                "vote_needs_scope": "投票需要重新連接一次星遇同頻帳戶。"
             }
         },
         "avatar": {

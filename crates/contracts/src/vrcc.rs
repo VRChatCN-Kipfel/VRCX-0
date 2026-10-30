@@ -382,10 +382,11 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 ///   `maps.rate`，违反官方《使用要求》第 10 条「只申请用得到的权限」。
 ///
 /// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）、
-/// 给地图打分（`maps.rate`）。
-/// `mutuals` 与 `maps.rate` 都是敏感权限，只有正式标识能要，`dev-` 用
-/// [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用 [`device_auth_scope`] 选。
-pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals maps.rate";
+/// 给地图打分（`maps.rate`）、给短评投票（`maps.write`）。
+/// `mutuals`、`maps.rate`、`maps.write` 都是敏感权限，只有正式标识能要，
+/// `dev-` 用 [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用
+/// [`device_auth_scope`] 选。
+pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals maps.rate maps.write";
 
 /// `dev-` 标识申请的权限：只能要普通权限，要了敏感的 `device/code`
 /// 会直接回答 `403 scope_unreviewed`，连码都拿不到。
@@ -1596,6 +1597,112 @@ impl VrccRatingInput {
     pub fn clamped_score(&self) -> i64 {
         self.score.clamp(Self::MIN_SCORE, Self::MAX_SCORE)
     }
+}
+
+/// 投票的对象类型。
+///
+/// 官方接口同一套投票同时服务于短评（`rate`）和地图介绍（`intro`）。我们
+/// 目前只做短评的投票，但**把两种都建模**：请求体里的 `kind` 是必填的，
+/// 枚举化成字面量可以减少「写错字符串」这类低级错误。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum VrccVoteKind {
+    /// 给一条短评投票。
+    Rate,
+    /// 给地图介绍投票。
+    Intro,
+}
+
+impl VrccVoteKind {
+    /// 请求体里 `kind` 字段的字面量。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rate => "rate",
+            Self::Intro => "intro",
+        }
+    }
+}
+
+/// 我对一条内容的投票。
+///
+/// 三种取值对应官方 `v`：`1` 赞、`-1` 踩、`0` 取消。
+///
+/// **单独建类型而不是用 `i64`**：界面会频繁地在「当前票值」和「点一下之后
+/// 该发什么」之间换算（点已赞的赞 = 取消 = 0），用枚举能把这件事写清楚，
+/// 也挡住传 `2` 这种服务器必然拒绝的值。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum VrccVote {
+    /// 取消投票。
+    None,
+    /// 赞。
+    Up,
+    /// 踩。
+    Down,
+}
+
+impl VrccVote {
+    /// 请求体里 `v` 字段的整数值。
+    pub fn as_body_value(self) -> i64 {
+        match self {
+            Self::None => 0,
+            Self::Up => 1,
+            Self::Down => -1,
+        }
+    }
+
+    /// 从服务器返回的整数解析。认不出的值按「没投」处理——那比报错温和，
+    /// 而且界面只会少高亮一个按钮。
+    pub fn from_body_value(value: i64) -> Self {
+        match value {
+            1 => Self::Up,
+            -1 => Self::Down,
+            _ => Self::None,
+        }
+    }
+
+    /// 点一下同一个按钮之后应该变成什么（点已赞的赞 = 取消）。
+    ///
+    /// 这段逻辑放在契约层，是因为界面和服务端两处都要用到同一个判断，
+    /// 各写一遍迟早会分叉。
+    pub fn toggled_from(self, tapped: Self) -> Self {
+        if self == tapped {
+            Self::None
+        } else {
+            tapped
+        }
+    }
+}
+
+/// 投票结果（`POST /me/map-votes` 的 200）。
+///
+/// 官方返回的是**更新之后**的计数，所以调用方可以直接拿它刷新界面，
+/// 不必再查一次列表。
+///
+/// ## `my_vote` 为什么不叫 `mine`
+///
+/// 官方响应里这个字段叫 `mine`，但同名的 `VrccMapRate::mine` 表示「这条内容
+/// 是不是我写的」，语义完全不同（一个是布尔，一个是我投的票）。两个字段
+/// 放在同一个界面里用，叫同一个名字迟早会有人把「我写的」当成「我投了」，
+/// 所以这里改名，并且注明它来自官方的 `mine`。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccVoteResult {
+    /// 对象的类型（`rate` / `intro`）。
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// 对象的编号。
+    #[serde(default)]
+    pub id: Option<i64>,
+    /// 更新后的赞数。
+    #[serde(default)]
+    pub up: Option<i64>,
+    /// 更新后的踩数。
+    #[serde(default)]
+    pub down: Option<i64>,
+    /// 我现在的票；来自官方的 `mine` 字段（整数）。
+    #[serde(default, rename = "mine")]
+    pub my_vote: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------

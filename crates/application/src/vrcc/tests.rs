@@ -282,6 +282,19 @@ impl VrccRemote for FakeRemote {
             Ok(())
         })
     }
+    fn vote_map_content<'a>(
+        &'a self,
+        _kind: VrccVoteKind,
+        _id: i64,
+        _vote: VrccVote,
+    ) -> VrccFuture<'a, VrccVoteResult> {
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            Ok(VrccVoteResult::default())
+        })
+    }
     fn my_board<'a>(&'a self, _sort: VrccMyBoardSort) -> VrccFuture<'a, VrccMyBoard> {
         Box::pin(async move {
             if let Some(error) = self.take_error() {
@@ -746,7 +759,7 @@ async fn device_auth_asks_for_the_scope_that_fits_the_client() {
         ("dev-test", "profile notifications maps"),
         (
             "app_0123456789abcdef",
-            "profile notifications maps mutuals maps.rate",
+            "profile notifications maps mutuals maps.rate maps.write",
         ),
     ];
     for (client, expected) in cases {

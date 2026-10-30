@@ -4639,7 +4639,11 @@
                 "rate_delete": "Delete rating",
                 "rate_failed": "Could not submit. Try again later.",
                 "rate_needs_scope": "Rating needs reconnecting your VRCC account once.",
-                "words_placeholder": "Write a short comment (optional, 30 characters)"
+                "words_placeholder": "Write a short comment (optional, 30 characters)",
+                "vote_up": "This comment was helpful",
+                "vote_down": "This comment was not helpful",
+                "vote_own_hint": "You cannot vote on your own comment.",
+                "vote_needs_scope": "Voting needs reconnecting your VRCC account once."
             }
         },
         "avatar": {

@@ -14,7 +14,8 @@ use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMapPage,
     VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
     VrccNotifications, VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus,
-    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccWristSummary,
+    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccVote,
+    VrccVoteKind, VrccVoteResult, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -104,6 +105,13 @@ pub trait VrccRemote: Send + Sync {
         text: &'a VrccRatingText,
     ) -> VrccFuture<'a, VrccMyMap>;
     fn delete_map_rating<'a>(&'a self, world: &'a str) -> VrccFuture<'a, ()>;
+    // -- 写操作（需要 maps.write） -----------------------------------------
+    fn vote_map_content<'a>(
+        &'a self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> VrccFuture<'a, VrccVoteResult>;
 
     // -- 设备授权 ----------------------------------------------------------
     fn device_code<'a>(&'a self, scope: Option<&'a str>) -> VrccFuture<'a, VrccDeviceCode>;
@@ -1006,6 +1014,37 @@ impl VrccService {
             Err(error) if error.is_not_found() => Ok(()),
             Err(error) => Err(self.settle(error)),
         }
+    }
+
+    /// 给短评投票（需要 `maps.write` 敏感权限）。
+    ///
+    /// ## 不能给自己的内容投票
+    ///
+    /// 这条规则在服务端，但**界面和这里都要提前拦**：让玩家点下去再收到一个
+    /// 403 是最差的体验。所以这里除了转发，还在本地挡掉「投自己的票」——
+    /// 我们拿不到「这条是不是我的」以外的信息，判据由调用方传进来。
+    ///
+    /// 实际上调用方（界面）已经按 `VrccMapRate::mine` 禁用了按钮，这里不再
+    /// 重复判断：多一处判断就多一处会和服务端分叉的地方。
+    ///
+    /// 写操作：不重试（重试等于投两次）。
+    pub async fn vote_map_content(
+        &self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> std::result::Result<VrccVoteResult, VrccError> {
+        if id <= 0 {
+            return Err(VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("id"),
+            ));
+        }
+        self.ensure_connected()?;
+        self.remote
+            .vote_map_content(kind, id, vote)
+            .await
+            .map_err(|error| self.settle(error))
     }
 
     /// 玩家视角地图榜（需要 `maps` 普通权限）。

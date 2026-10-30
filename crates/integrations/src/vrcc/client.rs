@@ -27,8 +27,8 @@ use vrcx_0_contracts::vrcc::{
     VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMapPage,
     VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
     VrccNotifications, VrccRatedMaps, VrccRatingInput, VrccRatingText, VrccRecentNotifications,
-    VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VRCC_API_BASE,
-    VRCC_SITE_ORIGIN,
+    VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccVote, VrccVoteKind,
+    VrccVoteResult, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -936,6 +936,42 @@ impl VrccClient {
         // 只要拿到了 2xx 就算成功；正文可能是什么都没有，或者是一份地图状态。
         drop(response);
         Ok(())
+    }
+
+    /// 给短评或地图介绍投票（`POST /me/map-votes`）。需要 `maps.write`。
+    ///
+    /// ## 三条规则都在服务端
+    ///
+    /// - `v` 为 `0` 表示取消（用 [`VrccVote::None`]）；
+    /// - **不能给自己的内容投票**，服务端会拒。界面应提前禁用，别让玩家
+    ///   点了才发现不行；
+    /// - `id` 是 `VrccMapRate::id`，不是世界 ID，也不是星号。
+    ///
+    /// 返回更新后的 `up` / `down` 与我当前的票，调用方直接拿来刷新那一行即可。
+    ///
+    /// 写操作：不做重试（重试等于投两次）。
+    pub async fn vote_map_content(
+        &self,
+        kind: VrccVoteKind,
+        id: i64,
+        vote: VrccVote,
+    ) -> Result<VrccVoteResult, VrccError> {
+        self.request(Call {
+            method: "POST",
+            path: "me/map-votes",
+            body: Some(json!({
+                "kind": kind.as_str(),
+                "id": id,
+                "v": vote.as_body_value(),
+            })),
+            authed: true,
+            key: "vote_map_content",
+            // 连点防重。服务端自己也有额度，这里只挡手抖。
+            min_gap: Duration::from_secs(1),
+            bucket: Some(QuotaBucket::Reads),
+            bypass_gate: false,
+        })
+        .await
     }
 
     /// 公告和停站（1.12.0 起）。不用令牌，停站时也能问，服务器缓存 1 分钟。

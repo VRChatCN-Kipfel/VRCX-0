@@ -108,6 +108,22 @@ export async function deleteVrccMapRating(worldId: string) {
 }
 
 /**
+ * 给一条短评投票。**需要 `maps.write` 敏感权限。**
+ *
+ * `vote` 传 `'none'` 表示取消（官方 `v: 0`）。写操作，不做重试——
+ * 重试一次就等于投两次。
+ *
+ * 官方的三条规则：`none` 取消、**不能投自己的内容**、`id` 是短评编号
+ * （不是世界 ID）。第二条由界面提前禁用按钮，服务端也会拒。
+ */
+export async function voteVrccMapContent(
+    id: number,
+    vote: 'none' | 'up' | 'down'
+) {
+    return await commands.appVrccVoteMapContent('rate', id, vote);
+}
+
+/**
  * 当前令牌有没有某项权限。
  *
  * ## 为什么要问后端

@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor
+} from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +16,7 @@ const appVrccMyMapPage = vi.fn();
 const appVrccConnection = vi.fn();
 const appVrccRateMap = vi.fn();
 const appVrccDeleteMapRating = vi.fn();
+const appVrccVoteMapContent = vi.fn();
 
 vi.mock('@/platform/tauri/bindings', () => ({
     commands: {
@@ -18,7 +25,9 @@ vi.mock('@/platform/tauri/bindings', () => ({
         appVrccConnection: (...args: unknown[]) => appVrccConnection(...args),
         appVrccRateMap: (...args: unknown[]) => appVrccRateMap(...args),
         appVrccDeleteMapRating: (...args: unknown[]) =>
-            appVrccDeleteMapRating(...args)
+            appVrccDeleteMapRating(...args),
+        appVrccVoteMapContent: (...args: unknown[]) =>
+            appVrccVoteMapContent(...args)
     }
 }));
 
@@ -120,13 +129,14 @@ describe('WorldVrccPanel', () => {
         appVrccConnection.mockReset();
         appVrccRateMap.mockReset();
         appVrccDeleteMapRating.mockReset();
+        appVrccVoteMapContent.mockReset();
         // 默认「未连接」：绝大多数测试关心的是公开那一半，不该被额外的
         // 登录查询干扰。需要登录数据的用例自己覆盖这个默认值。
         appVrccMyMapPage.mockRejectedValue(new Error('not connected'));
         // 默认令牌里有 maps.rate（能打分），需要「缺权限」的用例自己覆盖。
         appVrccConnection.mockResolvedValue({
             connected: true,
-            scope: 'profile notifications maps mutuals maps.rate'
+            scope: 'profile notifications maps mutuals maps.rate maps.write'
         });
     });
 
@@ -407,5 +417,119 @@ describe('WorldVrccPanel', () => {
         ).toBeTruthy();
         // 不该出现打分控件（只有排序切换那一个 radiogroup 也没有）
         expect(screen.queryAllByRole('radio').length).toBe(0);
+    });
+
+    // -- 短评的赞 / 踩 ------------------------------------------------------
+
+    it('有 maps.write 时赞踩是真按钮，点一下投赞', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(myMapPage());
+        appVrccVoteMapContent.mockResolvedValue({
+            kind: 'rate',
+            id: 1,
+            up: 6,
+            down: 0,
+            mine: 1
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        const up = await screen.findByRole('button', {
+            name: 'dialog.world.vrcc.vote_up'
+        });
+        fireEvent.click(up);
+
+        await waitFor(() =>
+            expect(appVrccVoteMapContent).toHaveBeenCalledWith('rate', 1, 'up')
+        );
+    });
+
+    it('点已经赞过的赞 = 取消（发 none）', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({
+                rates: [
+                    {
+                        id: 5,
+                        text: '我已经赞过',
+                        score: 8,
+                        up: 3,
+                        vote: 1,
+                        mine: false
+                    }
+                ]
+            })
+        );
+        appVrccVoteMapContent.mockResolvedValue({
+            kind: 'rate',
+            id: 5,
+            up: 2,
+            down: 0,
+            mine: 0
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        const up = await screen.findByRole('button', {
+            name: 'dialog.world.vrcc.vote_up'
+        });
+        fireEvent.click(up);
+
+        await waitFor(() =>
+            expect(appVrccVoteMapContent).toHaveBeenCalledWith(
+                'rate',
+                5,
+                'none'
+            )
+        );
+    });
+
+    it('自己的短评不给投票按钮', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({
+                rates: [{ id: 7, text: '我写的', score: 9, up: 1, mine: true }]
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        await screen.findByText('我写的');
+        expect(
+            screen.queryByRole('button', {
+                name: 'dialog.world.vrcc.vote_up'
+            })
+        ).toBeNull();
+    });
+
+    it('没有 maps.write 时赞踩退化成纯计数，不是按钮', async () => {
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMapPage.mockResolvedValue(
+            myMapPage({
+                rates: [
+                    {
+                        id: 5,
+                        text: '别人写的',
+                        score: 8,
+                        up: 5,
+                        down: 1,
+                        mine: false
+                    }
+                ]
+            })
+        );
+        // 有 maps.rate 但没有 maps.write
+        appVrccConnection.mockResolvedValue({
+            connected: true,
+            scope: 'profile notifications maps mutuals maps.rate'
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        await screen.findByText('别人写的');
+        expect(
+            screen.queryByRole('button', {
+                name: 'dialog.world.vrcc.vote_up'
+            })
+        ).toBeNull();
+        // 计数仍然显示，但只是文字而不是按钮
+        expect(screen.getByText('👍 5')).toBeTruthy();
+        expect(screen.getByText('👎 1')).toBeTruthy();
     });
 });

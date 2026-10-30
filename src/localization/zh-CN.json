@@ -4897,7 +4897,11 @@
                 "rate_delete": "删除评分",
                 "rate_failed": "提交失败，请稍后再试。",
                 "rate_needs_scope": "打分需要重新连接一次星遇同频账户。",
-                "words_placeholder": "写一句短评（可选，30 字以内）"
+                "words_placeholder": "写一句短评（可选，30 字以内）",
+                "vote_up": "这条短评有帮助",
+                "vote_down": "这条短评没有帮助",
+                "vote_own_hint": "不能给自己的短评投票。",
+                "vote_needs_scope": "投票需要重新连接一次星遇同频账户。"
             }
         },
         "avatar": {

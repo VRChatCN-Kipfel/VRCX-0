@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import type { VrccMyMapPage } from '@/platform/tauri/bindings';
 import {
     fetchVrccScopeGrants,
+    voteVrccMapContent,
     vrccMyMapPageQueryOptions,
     vrccPublicMapQueryOptions
 } from '@/repositories/vrccMapRepository';
@@ -101,6 +102,17 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     const scopeQuery = useQuery({
         queryKey: queryKeys.vrccScope('maps.rate'),
         queryFn: () => fetchVrccScopeGrants('maps.rate'),
+        staleTime: 60 * 1000,
+        retry: 0,
+        refetchOnWindowFocus: false
+    });
+
+    // 投票是另一项权限（maps.write），和打分（maps.rate）分开判定：
+    // 两个敏感权限都可以单独缺失，混成一个布尔会让「能打分不能投票」的
+    // 玩家看到一个点不动的赞。**同样必须在提前 return 之前调用。**
+    const writeScopeQuery = useQuery({
+        queryKey: queryKeys.vrccScope('maps.write'),
+        queryFn: () => fetchVrccScopeGrants('maps.write'),
         staleTime: 60 * 1000,
         retry: 0,
         refetchOnWindowFocus: false
@@ -224,6 +236,7 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     // 却没有 `maps.rate`，服务器会回 `403 scope`。给这类玩家看一个点不动的
     // 打分器，不如直接告诉他「重新连接一次即可」。
     const canRate = scopeQuery.data === true;
+    const canVote = writeScopeQuery.data === true;
 
     return (
         // `h-full` + 内部 flex：让这一页永远不超过标签页容器的高度。
@@ -351,6 +364,7 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                                     rate.id ?? `${rate.who?.n ?? 'x'}-${index}`
                                 }
                                 rate={rate}
+                                canVote={canVote}
                             />
                         ))}
                     </div>
@@ -439,6 +453,166 @@ function SortToggle({
     );
 }
 
+/**
+ * 赞 / 踩按钮。
+ *
+ * ## 三件事必须同时成立才可点
+ *
+ * 1. 有 `maps.write`（否则服务器 `403 scope`）；
+ * 2. 这条**不是我自己写的**（官方禁止投自己的票）；
+ * 3. 这条有编号（公开接口那条热评没有 `id`，投不了）。
+ *
+ * 任一不满足就只显示计数、不做成按钮：一个点了必然失败的按钮比纯数字更糟。
+ *
+ * ## 点击语义
+ *
+ * 点已赞的赞 = 取消（官方 `v: 0`）。这个换算写在契约层的
+ * `VrccVote::toggled_from` 里，前后端共用同一份判断。
+ *
+ * ## 为什么本地存一份计数
+ *
+ * 投票接口返回的是**更新之后**的 up/down 与我的票，直接拿来刷新这一行，
+ * 不必重查整个列表。若失败则回滚到原值——不做乐观更新，只在成功后写。
+ */
+function VoteButtons({
+    rate,
+    canVote
+}: {
+    rate: CommentLike;
+    canVote?: boolean;
+}) {
+    const { t } = useTranslation();
+    const id = typeof rate.id === 'number' ? rate.id : null;
+    const isMine = rate.mine === true;
+
+    const [up, setUp] = useState(typeof rate.up === 'number' ? rate.up : 0);
+    const [down, setDown] = useState(
+        typeof rate.down === 'number' ? rate.down : 0
+    );
+    const [myVote, setMyVote] = useState<'none' | 'up' | 'down'>(
+        rate.vote === 1 ? 'up' : rate.vote === -1 ? 'down' : 'none'
+    );
+    const [busy, setBusy] = useState(false);
+
+    const interactive = Boolean(canVote) && !isMine && id !== null;
+
+    async function cast(tapped: 'up' | 'down') {
+        if (!interactive || id === null || busy) {
+            return;
+        }
+        // 点已选的那个 = 取消
+        const next = myVote === tapped ? 'none' : tapped;
+        setBusy(true);
+        try {
+            const result = await voteVrccMapContent(id, next);
+            // 以服务器返回的为准
+            if (typeof result.up === 'number') {
+                setUp(result.up);
+            }
+            if (typeof result.down === 'number') {
+                setDown(result.down);
+            }
+            // 注意这个字段叫 `mine`——它来自官方的 `mine`，含义是**我投的票**
+            // （整数），不是「这条是不是我写的」。后者在 `CommentLike.mine`
+            // （布尔）。两者同名不同义，读代码时别弄混。
+            setMyVote(
+                result.mine === 1 ? 'up' : result.mine === -1 ? 'down' : 'none'
+            );
+        } catch {
+            // 写操作不重试，也不谎报成功：计数保持原样，玩家可以再点一次。
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    const label = (kind: 'up' | 'down') =>
+        kind === 'up'
+            ? t('dialog.world.vrcc.vote_up')
+            : t('dialog.world.vrcc.vote_down');
+
+    // 只读形态：连 0 都不显示，避免一排 `0` 噪音
+    if (!interactive) {
+        const showUp = up > 0;
+        const showDown = down > 0;
+        if (!showUp && !showDown) {
+            return null;
+        }
+        return (
+            <span
+                className="text-muted-foreground flex items-center gap-2"
+                // 不可投票时说清为什么，免得玩家以为界面坏了
+                title={
+                    isMine
+                        ? t('dialog.world.vrcc.vote_own_hint')
+                        : !canVote
+                          ? t('dialog.world.vrcc.vote_needs_scope')
+                          : undefined
+                }
+            >
+                {showUp ? <span>{`👍 ${up}`}</span> : null}
+                {showDown ? <span>{`👎 ${down}`}</span> : null}
+            </span>
+        );
+    }
+
+    return (
+        <span className="flex items-center gap-0.5">
+            <VoteButton
+                active={myVote === 'up'}
+                disabled={busy}
+                count={up}
+                icon="👍"
+                label={label('up')}
+                onClick={() => void cast('up')}
+            />
+            <VoteButton
+                active={myVote === 'down'}
+                disabled={busy}
+                count={down}
+                icon="👎"
+                label={label('down')}
+                onClick={() => void cast('down')}
+            />
+        </span>
+    );
+}
+
+function VoteButton({
+    active,
+    disabled,
+    count,
+    icon,
+    label,
+    onClick
+}: {
+    active: boolean;
+    disabled: boolean;
+    count: number;
+    icon: string;
+    label: string;
+    onClick: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            aria-pressed={active}
+            aria-label={label}
+            className={cn(
+                'flex items-center gap-0.5 rounded px-1 py-0.5 transition-colors',
+                'hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50',
+                'focus-visible:ring-ring focus-visible:ring-1 focus-visible:outline-none',
+                active && 'bg-primary/15 text-primary'
+            )}
+        >
+            <span aria-hidden="true">{icon}</span>
+            {/* 票数为 0 时不显示数字，让按钮更紧凑 */}
+            {count > 0 ? <span className="tabular-nums">{count}</span> : null}
+        </button>
+    );
+}
+
 /** 我自己的评分块：分数 + 审核状态 + 我写的短评。 */
 function MineRating({ rate }: { rate: VrccMapRate }) {
     const { t } = useTranslation();
@@ -480,15 +654,19 @@ function MineRating({ rate }: { rate: VrccMapRate }) {
  * `by` 只在热评（公开接口那条）里有——它是服务器拼好的匿名署名；完整列表
  * 里用的是 `who`，两者形状不同，所以都要接受。
  */
-function CommentCard({ rate }: { rate: CommentLike }) {
+function CommentCard({
+    rate,
+    canVote
+}: {
+    rate: CommentLike;
+    canVote?: boolean;
+}) {
     const { t } = useTranslation();
     const who = rate.who;
     // 服务器给的署名可能只有匿名的「某位<星位>」，也可能带 VRChat 名字。
     // 有 VRChat 名字就显示它，否则显示 name，再退到 by（热评那条）。
     const name = who?.vrc || who?.name || rate.by || null;
     const score = typeof rate.score === 'number' ? rate.score : null;
-    const up = typeof rate.up === 'number' ? rate.up : 0;
-    const down = typeof rate.down === 'number' ? rate.down : 0;
     const at = rate.at;
     const hasText = Boolean(rate.text && rate.text.trim());
 
@@ -523,9 +701,8 @@ function CommentCard({ rate }: { rate: CommentLike }) {
                 {at ? (
                     <span>{formatRelativeTime(at, { style: 'short' })}</span>
                 ) : null}
-                <span className="ml-auto flex shrink-0 items-center gap-2">
-                    {up > 0 ? <span>{`👍 ${up}`}</span> : null}
-                    {down > 0 ? <span>{`👎 ${down}`}</span> : null}
+                <span className="ml-auto flex shrink-0 items-center gap-1">
+                    <VoteButtons rate={rate} canVote={canVote} />
                 </span>
             </div>
         </div>

@@ -488,6 +488,26 @@ const generatedCommands = {
         return await TAURI_INVOKE('app__vrcc_delete_map_rating', { world });
     },
     /**
+     * 给短评或地图介绍投票。需要 `maps.write` 敏感权限。
+     *
+     * `vote` 用 `"up"` / `"down"` / `"none"`：`none` 表示取消。
+     * 用字符串而不是整数，是因为界面会在「当前票值」与「点一下之后发什么」之间
+     * 来回换算，枚举化的字面量比 `1` / `-1` / `0` 更难写错。
+     *
+     * **不能给自己的内容投票**——这条由界面提前禁用按钮，服务端也会拒。
+     */
+    async appVrccVoteMapContent(
+        kind: VrccVoteKind,
+        id: number,
+        vote: VrccVote
+    ): Promise<VrccVoteResult> {
+        return await TAURI_INVOKE('app__vrcc_vote_map_content', {
+            kind,
+            id,
+            vote
+        });
+    },
+    /**
      * 玩家视角地图榜。需要 `maps` 普通权限。
      */
     async appVrccMyBoard(sort: VrccMyBoardSort | null): Promise<VrccMyBoard> {
@@ -8352,6 +8372,79 @@ export type VrccUsageSnapshot = {
      * 不要拿本机时区去推。
      */
     resetSecs: number | null;
+};
+/**
+ * 我对一条内容的投票。
+ *
+ * 三种取值对应官方 `v`：`1` 赞、`-1` 踩、`0` 取消。
+ *
+ * **单独建类型而不是用 `i64`**：界面会频繁地在「当前票值」和「点一下之后
+ * 该发什么」之间换算（点已赞的赞 = 取消 = 0），用枚举能把这件事写清楚，
+ * 也挡住传 `2` 这种服务器必然拒绝的值。
+ */
+export type VrccVote =
+    /**
+     * 取消投票。
+     */
+    | 'none'
+    /**
+     * 赞。
+     */
+    | 'up'
+    /**
+     * 踩。
+     */
+    | 'down';
+/**
+ * 投票的对象类型。
+ *
+ * 官方接口同一套投票同时服务于短评（`rate`）和地图介绍（`intro`）。我们
+ * 目前只做短评的投票，但**把两种都建模**：请求体里的 `kind` 是必填的，
+ * 枚举化成字面量可以减少「写错字符串」这类低级错误。
+ */
+export type VrccVoteKind =
+    /**
+     * 给一条短评投票。
+     */
+    | 'rate'
+    /**
+     * 给地图介绍投票。
+     */
+    | 'intro';
+/**
+ * 投票结果（`POST /me/map-votes` 的 200）。
+ *
+ * 官方返回的是**更新之后**的计数，所以调用方可以直接拿它刷新界面，
+ * 不必再查一次列表。
+ *
+ * ## `my_vote` 为什么不叫 `mine`
+ *
+ * 官方响应里这个字段叫 `mine`，但同名的 `VrccMapRate::mine` 表示「这条内容
+ * 是不是我写的」，语义完全不同（一个是布尔，一个是我投的票）。两个字段
+ * 放在同一个界面里用，叫同一个名字迟早会有人把「我写的」当成「我投了」，
+ * 所以这里改名，并且注明它来自官方的 `mine`。
+ */
+export type VrccVoteResult = {
+    /**
+     * 对象的类型（`rate` / `intro`）。
+     */
+    kind?: string | null;
+    /**
+     * 对象的编号。
+     */
+    id?: number | null;
+    /**
+     * 更新后的赞数。
+     */
+    up?: number | null;
+    /**
+     * 更新后的踩数。
+     */
+    down?: number | null;
+    /**
+     * 我现在的票；来自官方的 `mine` 字段（整数）。
+     */
+    mine?: number | null;
 };
 export type VrchatAuthFileAnalysisInput = {
     fileId?: string;
