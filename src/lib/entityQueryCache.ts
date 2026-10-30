@@ -222,6 +222,10 @@ export const queryKeys = Object.freeze({
     ) => withEndpoint(['world', worldId, 'vrcc', 'signedIn', sort], endpoint),
     // 当前令牌是否有某项权限。全局一份，按 scope 名分键。
     vrccScope: (scope: string) => ['vrcc', 'scope', scope] as const,
+    // 一张地图在榜上的状态（board / pending / off）。只有带令牌的接口能区分
+    // 「未收录」和「待审核」，所以独立一个键，不与公开页共用。
+    worldVrccMine: (worldId: string) =>
+        ['world', worldId, 'vrcc', 'mine'] as const,
     groupMembers: (params: VrchatGroupMembersInput, endpoint: string = '') =>
         withEndpoint(
             ['group', params.groupId, 'members', stableParams(params)],

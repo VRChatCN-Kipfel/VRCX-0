@@ -354,11 +354,18 @@ export const vrccApi = {
     pollNotifications: () => call(() => commands.appVrccPollNotifications()),
 
     /**
-     * 当前所在地图在榜上的状态与自己的评分。
+     * 地图在榜上的状态与自己的评分。
      *
-     * 地图被下架或不对当前玩家开放时返回 null，此时**不要**显示打分入口。
+     * - 不传 `world`：问「我现在在的地图」，位置由后端从游戏日志取。
+     * - 传 `world`：问那张具体的图。世界详情对话框走这条。
+     *
+     * 返回 `null` 的情况包括「这张图被下架或不对当前玩家开放」——官方要求
+     * 此时隐藏整块，所以**不要**在 null 时再显示打分入口。
+     *
+     * 这是唯一能区分「未收录」和「待审核」的接口：公开的 `/maps/{world}/page`
+     * 对这两种都回 `404`。
      */
-    myMap: () => call(() => commands.appVrccMyMap()),
+    myMap: (world?: string) => call(() => commands.appVrccMyMap(world ?? null)),
 
     /** 今天这一轮。需要 today 敏感权限（审核后才可用）。 */
     today: () => call(() => commands.appVrccToday()),

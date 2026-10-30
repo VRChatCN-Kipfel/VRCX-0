@@ -12,6 +12,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const appVrccMapPage = vi.fn();
+const appVrccMyMap = vi.fn();
 const appVrccMyMapPage = vi.fn();
 const appVrccConnection = vi.fn();
 const appVrccRateMap = vi.fn();
@@ -21,6 +22,7 @@ const appVrccVoteMapContent = vi.fn();
 vi.mock('@/platform/tauri/bindings', () => ({
     commands: {
         appVrccMapPage: (...args: unknown[]) => appVrccMapPage(...args),
+        appVrccMyMap: (...args: unknown[]) => appVrccMyMap(...args),
         appVrccMyMapPage: (...args: unknown[]) => appVrccMyMapPage(...args),
         appVrccConnection: (...args: unknown[]) => appVrccConnection(...args),
         appVrccRateMap: (...args: unknown[]) => appVrccRateMap(...args),
@@ -130,9 +132,18 @@ describe('WorldVrccPanel', () => {
         appVrccRateMap.mockReset();
         appVrccDeleteMapRating.mockReset();
         appVrccVoteMapContent.mockReset();
+        appVrccMyMap.mockReset();
         // 默认「未连接」：绝大多数测试关心的是公开那一半，不该被额外的
         // 登录查询干扰。需要登录数据的用例自己覆盖这个默认值。
         appVrccMyMapPage.mockRejectedValue(new Error('not connected'));
+        // 默认「未收录」：区分「待审核」的用例自己覆盖。
+        appVrccMyMap.mockResolvedValue({
+            world: 'wrld_test',
+            name: '测试世界',
+            board: false,
+            pending: false,
+            off: false
+        });
         // 默认令牌里有 maps.rate（能打分），需要「缺权限」的用例自己覆盖。
         appVrccConnection.mockResolvedValue({
             connected: true,
@@ -201,6 +212,44 @@ describe('WorldVrccPanel', () => {
         expect(
             screen.getByText('dialog.world.vrcc.not_listed_hint')
         ).toBeTruthy();
+    });
+
+    // -- 四种状态：公开接口都回 404，只有带令牌的能区分 -------------------
+
+    it('已投稿待审核时说「等待审核」，不说「不在榜上」', async () => {
+        // 公开页仍然 404（还没过审），但带令牌的状态是 pending
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockResolvedValue({
+            world: 'wrld_test',
+            board: false,
+            pending: true,
+            off: false
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.pending_title')
+        ).toBeTruthy();
+        // 这是关键：不能同时说「不在榜上」，那会让玩家以为投稿失败
+        expect(screen.queryByText('dialog.world.vrcc.not_listed')).toBeNull();
+    });
+
+    it('未收录时说「不在榜上」', async () => {
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockResolvedValue({
+            world: 'wrld_test',
+            board: false,
+            pending: false,
+            off: false
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.not_listed')
+        ).toBeTruthy();
+        expect(
+            screen.queryByText('dialog.world.vrcc.pending_title')
+        ).toBeNull();
     });
 
     it('请求失败时说读不到，不说「不在榜上」', async () => {

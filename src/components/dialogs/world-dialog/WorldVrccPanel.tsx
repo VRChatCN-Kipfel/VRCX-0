@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import type { VrccMyMapPage } from '@/platform/tauri/bindings';
 import {
     fetchVrccScopeGrants,
+    readVrccMyMap,
     voteVrccMapContent,
     vrccMyMapPageQueryOptions,
     vrccPublicMapQueryOptions
@@ -119,6 +120,18 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
         refetchOnWindowFocus: false
     });
 
+    // 带令牌的状态：只有它能区分「未收录」和「待审核」。
+    // 公开接口对这两种都回 404。**同样必须在提前 return 之前调用。**
+    const myMapQuery = useQuery({
+        queryKey: queryKeys.worldVrccMine(worldId),
+        queryFn: () => readVrccMyMap(worldId),
+        enabled: Boolean(worldId) && scopeQuery.data === true,
+        // 状态会变（投稿后进入审核、审核后上榜），别缓存太久。
+        staleTime: 30 * 1000,
+        retry: 0,
+        refetchOnWindowFocus: false
+    });
+
     if (publicQuery.isPending) {
         return (
             <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
@@ -136,17 +149,38 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
         );
     }
 
-    // 后端把 404 转成 null：这张图不在榜上（含未过审）。
+    // 公开接口对「未收录」和「待审核」都回 404，分不开。所以 404 之后
+    // **必须再看一眼带令牌的状态**，否则玩家投完稿回来看到的还是「不在榜上」，
+    // 会以为投稿失败然后反复投。
     if (publicQuery.data === null) {
+        // 还没查到（或没连接、查不了）：按未收录显示，不要先给「审核中」——
+        // 那是无中生有。
+        if (myMapQuery.isPending) {
+            return (
+                <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
+                    {t('common.loading', '加载中…')}
+                </div>
+            );
+        }
+
+        const offBoard = myMapQuery.data;
+        // `board: true` 但公开页 404：服务器数据不同步（公开页 5 分钟才更新
+        // 一次）。按在榜处理没有意义——公开页拿不到任何统计。这里仍报未收录，
+        // 但不说「还没有这张图」，避免结论过硬。
+        if (offBoard?.pending) {
+            return (
+                <VrccOffBoardState
+                    title={t('dialog.world.vrcc.pending_title')}
+                    hint={t('dialog.world.vrcc.pending_hint')}
+                />
+            );
+        }
+
         return (
-            <div className="flex h-40 flex-col items-center justify-center gap-1 text-center">
-                <div className="text-foreground text-sm font-medium">
-                    {t('dialog.world.vrcc.not_listed')}
-                </div>
-                <div className="text-muted-foreground max-w-70 text-xs leading-relaxed">
-                    {t('dialog.world.vrcc.not_listed_hint')}
-                </div>
-            </div>
+            <VrccOffBoardState
+                title={t('dialog.world.vrcc.not_listed')}
+                hint={t('dialog.world.vrcc.not_listed_hint')}
+            />
         );
     }
 
@@ -611,6 +645,24 @@ function VoteButton({
             {/* 票数为 0 时不显示数字，让按钮更紧凑 */}
             {count > 0 ? <span className="tabular-nums">{count}</span> : null}
         </button>
+    );
+}
+
+/**
+ * 未上榜时的两种状态卡片：**未收录** 与 **已投稿待审核**。
+ *
+ * 这两者在官方数据里是 `pending` 的 true/false，但**公开接口分不开**（都回
+ * `404`），所以只能靠带令牌的 `/me/maps/{world}`。之前的实现把它们合成一句
+ * 「不在榜上」，玩家投完稿回来会以为投稿失败。
+ */
+function VrccOffBoardState({ title, hint }: { title: string; hint: string }) {
+    return (
+        <div className="flex h-40 flex-col items-center justify-center gap-1 text-center">
+            <div className="text-foreground text-sm font-medium">{title}</div>
+            <div className="text-muted-foreground max-w-70 text-xs leading-relaxed">
+                {hint}
+            </div>
+        </div>
     );
 }
 

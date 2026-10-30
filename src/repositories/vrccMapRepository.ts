@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { entityQueryPolicies, queryKeys } from '@/lib/entityQueryCache';
 import { commands } from '@/platform/tauri/bindings';
+import type { VrccMyMap } from '@/platform/tauri/bindings';
 
 /**
  * 星遇同频地图榜上的公开信息。
@@ -105,6 +106,37 @@ export async function rateVrccMap(
 /** 删掉自己给这张图的评分。写操作，语义同上。 */
 export async function deleteVrccMapRating(worldId: string) {
     return await commands.appVrccDeleteMapRating(worldId);
+}
+
+/**
+ * 一张地图在榜上的**状态**与我自己的评分。需要 `maps` 普通权限。
+ *
+ * ## 为什么界面必须调这一条
+ *
+ * 公开的 `/maps/{world}/page` 对「还没被收录」和「已投稿、等审核」**都回
+ * `404`**，两者分不开。玩家投完稿回来看到的还是「不在榜上」，会以为失败
+ * 然后反复投。只有这条带令牌的接口会用 `board` / `pending` 两个布尔把它们
+ * 区分开。
+ *
+ * ## 四种状态
+ *
+ * | `off` | `board` | `pending` | 状态 |
+ * |---|---|---|---|
+ * | true | — | — | 不给看（后端已转成 `null`） |
+ * | false | true | — | 已上榜 |
+ * | false | false | true | 已投稿，待审核 |
+ * | false | false | false | 未收录 |
+ *
+ * `off: true` 在服务层就被转成 `null`（官方要求此时隐藏整块），所以调用方
+ * 拿到 `null` 时**不要**显示任何打分/投稿入口。
+ */
+export async function readVrccMyMap(
+    worldId: string
+): Promise<VrccMyMap | null> {
+    if (!worldId.startsWith('wrld_')) {
+        return null;
+    }
+    return await commands.appVrccMyMap(worldId);
 }
 
 /**

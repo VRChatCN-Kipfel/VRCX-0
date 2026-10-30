@@ -425,18 +425,36 @@ pub async fn app__vrcc_notes(state: State<'_, AppState>) -> Result<Option<VrccNo
 
 /// 当前所在地图在地图榜上的状态与我自己的评分。
 ///
-/// 地图 ID 由后端自己从游戏日志取，前端不用传：位置本来就只有后端知道，
-/// 让每个调用点自己算一遍只会多出一处可能算错的地方。
+/// 一张地图在榜上的状态与我自己的评分。需要 `maps` 普通权限。
 ///
-/// 返回 `null` 的三种情况：不在任何地图里、地图被下架或不对当前玩家开放
-/// （官方要求此时不显示打分面板）、以及未连接。
+/// ## `world` 传 `null` 时问「我现在在的地图」
+///
+/// 这是「所在地图」卡片用的路径：位置只有后端知道，不该让每个调用点自己算。
+///
+/// ## `world` 传具体 ID 时问那张图
+///
+/// 世界详情对话框要问**玩家正在看的那张图**，而不是他站在哪里。这两件事在
+/// 对话框里完全不同（可以从收藏里点开一张自己没去的图）。
+///
+/// ## 这是唯一能区分四种状态的接口
+///
+/// 公开的 `/maps/{world}/page` 对「未收录」和「待审核」都回 `404`，分不开；
+/// 只有带令牌的这一条会用 `board` / `pending` 两个布尔把它们分开。所以
+/// 界面要正确显示「已投稿、等审核」就只能走这里。
+///
+/// 返回 `null` 的情况：`world` 为空、**这张图被下架或不对当前玩家开放**
+/// （`off: true`，官方要求此时隐藏），以及未连接。
 #[tauri::command]
 #[specta::specta]
 pub async fn app__vrcc_my_map(
     state: State<'_, AppState>,
+    world: Option<String>,
 ) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, AppError> {
     let runtime = state.runtime_host();
-    let world = runtime.current_world_id();
+    let world = match world {
+        Some(world) => world,
+        None => runtime.current_world_id(),
+    };
     if world.is_empty() {
         return Ok(None);
     }
