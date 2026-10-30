@@ -7,6 +7,7 @@ import { VrccStars } from '@/components/vrcc/VrccStars';
 import { formatRelativeTime } from '@/lib/dateTime';
 import { queryKeys } from '@/lib/entityQueryCache';
 import { cn } from '@/lib/utils';
+import { VrccError } from '@/lib/vrccError';
 import type { VrccMyMapPage } from '@/platform/tauri/bindings';
 import {
     fetchVrccScopeGrants,
@@ -177,19 +178,19 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     // **必须再看一眼带令牌的状态**，否则玩家投完稿回来看到的还是「不在榜上」，
     // 会以为投稿失败然后反复投。
     //
-    // 404 之后的六种组合，逐一处理：
+    // 404 之后的组合，按顺序判断（命中即返回）：
     //
     // | 带令牌的状态 | 情况 | 显示 |
     // |---|---|---|
     // | 正在请求 | 刚打开 | 加载中 |
     // | `pending: true` | 已投稿待审 | 「已投稿，等待审核」 |
     // | `board: true` | 公开页还没同步（最多 5 分钟） | 「已上榜，数据同步中」 |
-    // | `null` / 请求失败 | `off: true`、未连接、缺 `maps`、网络错 | 「不在榜上」 |
-    // | 其它 | 未收录 | 「不在榜上」 |
+    // | **请求失败** | 令牌过期、网络错 | **「无法确认状态」** |
+    // | 查不到（未连接 / 缺 `maps`） | 没资格问 | 「不在榜上」 |
+    // | 其余 | 未收录 | 「不在榜上」 |
     //
-    // 最后一行把几件事合成一个结论，是刻意的：`off: true` 在服务层就被转成
-    // `null`（官方要求此时隐藏整块），前端**分不出**「被隐藏」和「查不到」。
-    // 而这两种情况下「这张图不在你的榜上」都是事实，不算说谎。
+    // 失败那一行**必须和「不在榜上」分开**：请求失败是「不知道」，不是
+    // 「没有」。把错误说成事实，和「把网络问题说成这图不在榜」是同一类错误。
     if (publicQuery.data === null) {
         // 只在**真的在请求**时显示加载中。查询被禁用时（未连接、缺 maps
         // 权限）`isPending` 也是 true、但 `fetchStatus` 是 `idle`——只看
@@ -199,6 +200,28 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                 <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
                     {t('common.loading', '加载中…')}
                 </div>
+            );
+        }
+
+        // 问过了但没问成。**按错误类别分开说**，因为处理方式完全不同：
+        // 令牌过期要重新连接、缺权限要勾同意、传输失败要查网络。
+        // 这些分类是后端算好随错误过来的，不用猜文案。
+        if (myMapQuery.isError) {
+            const failure = myMapQuery.error;
+            const kind = failure instanceof VrccError ? failure.kind : 'other';
+            const hintKey =
+                kind === 'needsReauth'
+                    ? 'dialog.world.vrcc.unknown_reauth'
+                    : kind === 'missingScope'
+                      ? 'dialog.world.vrcc.unknown_scope'
+                      : kind === 'transport'
+                        ? 'dialog.world.vrcc.unknown_network'
+                        : 'dialog.world.vrcc.unknown_hint';
+            return (
+                <VrccOffBoardState
+                    title={t('dialog.world.vrcc.unknown_title')}
+                    hint={t(hintKey)}
+                />
             );
         }
 

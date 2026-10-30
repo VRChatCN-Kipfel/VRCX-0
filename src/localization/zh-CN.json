@@ -4907,7 +4907,12 @@
                 "syncing_title": "已上榜，数据同步中",
                 "syncing_hint": "星遇同频的公开榜单最多 5 分钟更新一次，稍后再看。",
                 "blocked_title": "不得展示",
-                "blocked_hint": "为遵守星遇同频的相关条款，这张图不向当前账号展示，这里也不显示它的任何数据。"
+                "blocked_hint": "为遵守星遇同频的相关条款，这张图不向当前账号展示，这里也不显示它的任何数据。",
+                "unknown_title": "无法确认状态",
+                "unknown_hint": "查不到你的投稿状态，请稍后重试。",
+                "unknown_reauth": "登录已失效，请重新连接星遇同频。",
+                "unknown_scope": "缺少查看地图的权限，请重新连接时勾选同意。",
+                "unknown_network": "网络连接失败，请检查网络后重试。"
             }
         },
         "avatar": {

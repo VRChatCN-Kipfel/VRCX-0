@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import { entityQueryPolicies, queryKeys } from '@/lib/entityQueryCache';
+import { normalizeVrccError } from '@/lib/vrccError';
 import { commands } from '@/platform/tauri/bindings';
 import type { VrccMyMap } from '@/platform/tauri/bindings';
 
@@ -136,7 +137,15 @@ export async function readVrccMyMap(
     if (!worldId.startsWith('wrld_')) {
         return null;
     }
-    return await commands.appVrccMyMap(worldId);
+    try {
+        return await commands.appVrccMyMap(worldId);
+    } catch (error) {
+        // **必须归一化再抛出**：直接抛原始 `AppError` 的话，调用方拿到的是
+        // 一坨没有分类的对象，只能笼统说「出错了」——而这里的失败要分好几种：
+        // 令牌失效要重新连接、缺 `maps` 权限要勾同意、传输失败要查网络。
+        // 分类是后端算好随错误过来的，扔掉它等于让界面去猜。
+        throw await normalizeVrccError(error);
+    }
 }
 
 /**

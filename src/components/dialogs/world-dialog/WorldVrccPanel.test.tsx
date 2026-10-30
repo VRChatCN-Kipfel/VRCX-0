@@ -308,6 +308,48 @@ describe('WorldVrccPanel', () => {
         ).toBeNull();
     });
 
+    it('状态查询失败时说「无法确认」，不能说成「不在榜上」', async () => {
+        // 公开页 404（不在公开榜上），但带令牌的状态请求失败了。
+        // 失败是「不知道」，不是「没有」——给结论就是把错误当事实。
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockRejectedValue(new Error('token expired'));
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.unknown_title')
+        ).toBeTruthy();
+        expect(screen.queryByText('dialog.world.vrcc.not_listed')).toBeNull();
+    });
+
+    it('按错误类别给出不同的处理建议', async () => {
+        // 令牌失效 → 让玩家重新连接（而不是笼统「稍后重试」）
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockRejectedValue(
+            Object.assign(new Error('gone'), {
+                vrcc: { kind: 'needsReauth', layer: 'session' }
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.unknown_reauth')
+        ).toBeTruthy();
+    });
+
+    it('传输层失败时让玩家查网络，而不是让他重新连接', async () => {
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockRejectedValue(
+            Object.assign(new Error('timeout'), {
+                vrcc: { kind: 'transport', layer: 'transport' }
+            })
+        );
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.unknown_network')
+        ).toBeTruthy();
+    });
+
     it('请求失败时说读不到，不说「不在榜上」', async () => {
         // 这条要等重试跑完。策略里 `retry: 1` 会盖掉 QueryClient 的默认值，
         // 重试期间 `isPending` 仍为真，界面一直是「加载中」——所以给足超时。

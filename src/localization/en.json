@@ -4917,7 +4917,12 @@
                 "syncing_title": "Listed, data still syncing",
                 "syncing_hint": "The public VRCC board updates at most every five minutes — check back shortly.",
                 "blocked_title": "Not available here",
-                "blocked_hint": "Under the VRCC terms this world is not served to this account, so none of its data is shown here."
+                "blocked_hint": "Under the VRCC terms this world is not served to this account, so none of its data is shown here.",
+                "unknown_title": "Status unavailable",
+                "unknown_hint": "Your submission status could not be read. Try again later.",
+                "unknown_reauth": "Your sign-in has expired. Reconnect VRCC.",
+                "unknown_scope": "Permission to read maps is missing. Reconnect and accept it.",
+                "unknown_network": "The network request failed. Check your connection."
             }
         },
         "avatar": {

@@ -4907,7 +4907,12 @@
                 "syncing_title": "已上榜，資料同步中",
                 "syncing_hint": "星遇同頻的公開榜單最多 5 分鐘更新一次，稍後再看。",
                 "blocked_title": "不得展示",
-                "blocked_hint": "為遵守星遇同頻的相關條款，這張圖不向當前帳號展示，這裡也不顯示它的任何資料。"
+                "blocked_hint": "為遵守星遇同頻的相關條款，這張圖不向當前帳號展示，這裡也不顯示它的任何資料。",
+                "unknown_title": "無法確認狀態",
+                "unknown_hint": "查不到你的投稿狀態，請稍後重試。",
+                "unknown_reauth": "登入已失效，請重新連接星遇同頻。",
+                "unknown_scope": "缺少查看地圖的權限，請重新連接時勾選同意。",
+                "unknown_network": "網路連接失敗，請檢查網路後重試。"
             }
         },
         "avatar": {
