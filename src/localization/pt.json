@@ -4908,7 +4908,9 @@
                 "pending_title": "Submitted, awaiting review",
                 "pending_hint": "This world will appear on the VRCC board once it passes review.",
                 "syncing_title": "Listed, data still syncing",
-                "syncing_hint": "The public VRCC board updates at most every five minutes — check back shortly."
+                "syncing_hint": "The public VRCC board updates at most every five minutes — check back shortly.",
+                "blocked_title": "Not available here",
+                "blocked_hint": "Under the VRCC terms this world is not served to this account, so none of its data is shown here."
             }
         },
         "avatar": {

@@ -286,6 +286,28 @@ describe('WorldVrccPanel', () => {
         expect(screen.queryByText('dialog.world.vrcc.not_listed')).toBeNull();
     });
 
+    it('off 为 true 时直接说明不得展示，且不给任何数据', async () => {
+        // 公开页**有**数据，但服务器说这张图不向当前账号下发。
+        // off 是硬阻断：必须压过「已上榜」那条路。
+        appVrccMapPage.mockResolvedValue(mapPage());
+        appVrccMyMap.mockResolvedValue({
+            world: 'wrld_test',
+            board: true,
+            pending: false,
+            off: true
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.blocked_title')
+        ).toBeTruthy();
+        // 不给评分、不给短评、不给名次——什么都别漏出来
+        expect(screen.queryByText('8.4')).toBeNull();
+        expect(
+            screen.queryByText('dialog.world.vrcc.comments_title')
+        ).toBeNull();
+    });
+
     it('请求失败时说读不到，不说「不在榜上」', async () => {
         // 这条要等重试跑完。策略里 `retry: 1` 会盖掉 QueryClient 的默认值，
         // 重试期间 `isPending` 仍为真，界面一直是「加载中」——所以给足超时。

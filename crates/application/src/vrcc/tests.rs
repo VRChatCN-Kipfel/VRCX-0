@@ -109,6 +109,8 @@ struct FakeRemote {
     connection: Mutex<VrccConnection>,
     /// 下一次个人调用返回的错误。
     next_error: Mutex<Option<VrccError>>,
+    /// `my_map` 的返回。设了就用它，没设就按「令牌缺失」处理。
+    my_map: Mutex<Option<VrccMyMap>>,
     /// `recent_notifications` 的返回。
     recent: Mutex<Option<VrccRecentNotifications>>,
     /// `unread` 的返回。
@@ -224,6 +226,9 @@ impl VrccRemote for FakeRemote {
         Box::pin(async move {
             if let Some(error) = self.take_error() {
                 return Err(error);
+            }
+            if let Some(map) = self.my_map.lock().unwrap().clone() {
+                return Ok(map);
             }
             Err(token_missing())
         })
@@ -1041,6 +1046,32 @@ async fn the_signed_in_map_page_treats_404_as_absent() {
     remote.set_error(http(500, "server"));
     let error = service.my_map_page("wrld_x", None).await.unwrap_err();
     assert_eq!(error.layer, ErrorLayer::Server);
+}
+
+/// `off` 的地图要**原样交给界面**，不能折成 `None`。
+///
+/// 折成 `None` 会把「被合规隐藏」「没连接」「查不到」压成同一个结果，界面
+/// 只能一律说「不在榜上」。界面拿不到 `off` 就没法说明真正的原因。
+///
+/// 代价是每个调用点都必须自己判断 `off`——所以这条测试钉住「服务层不会替
+/// 调用方挡掉」这个约定，免得有人又把它折回去。
+#[tokio::test]
+async fn a_hidden_map_is_returned_with_its_off_flag_intact() {
+    let (service, remote, _store) = connected_service();
+    *remote.my_map.lock().unwrap() = Some(VrccMyMap {
+        world: Some("wrld_x".into()),
+        off: Some(true),
+        ..VrccMyMap::default()
+    });
+
+    let map = service
+        .my_map("wrld_x")
+        .await
+        .expect("a hidden map is not an error")
+        .expect("the caller needs the object to explain why it is hidden");
+
+    assert_eq!(map.off, Some(true));
+    assert!(!map.is_visible());
 }
 
 /// 未连接时直接拒绝，不把一个必然 `TokenMissing` 的请求发出去。

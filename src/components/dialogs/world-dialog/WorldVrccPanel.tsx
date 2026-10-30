@@ -132,6 +132,24 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
         refetchOnWindowFocus: false
     });
 
+    // ① `off` 是**硬阻断**，放在最前面按顺序判断，命中即返回。
+    //
+    // 官方要求 `off` 为 true 时「客户端应隐藏此地图卡片」。早先服务层直接把它
+    // 折成 `null`，于是和「没连接」「查不到」混成一样，界面只能一律说
+    // 「不在榜上」——不算说谎，但玩家不知道真正的原因。
+    //
+    // 现在服务层把 `off` 原样交出来，这里在**所有其它分支之前**拦掉：一旦
+    // 命中，后面是「已上榜 / 待审核 / 未收录」哪种都无所谓，不需要再判断。
+    // 不给任何数据，只说明为什么——既满足「不显示卡片」，也不留悬念。
+    if (myMapQuery.data?.off === true) {
+        return (
+            <VrccOffBoardState
+                title={t('dialog.world.vrcc.blocked_title')}
+                hint={t('dialog.world.vrcc.blocked_hint')}
+            />
+        );
+    }
+
     if (publicQuery.isPending) {
         return (
             <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">

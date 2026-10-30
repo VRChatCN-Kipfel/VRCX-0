@@ -820,9 +820,21 @@ impl VrccService {
 
     /// 当前所在地图在地图榜上的状态与我自己的评分。
     ///
-    /// 需要 `maps`（普通权限）。官方的硬性要求是 `off` 为 `true` 时客户端不要
-    /// 显示打分面板；这里在 `off` 时直接返回 `None`，调用方拿不到对象就不可能
-    /// 误显示——比在每个 UI 分支里记得判断 `off` 更可靠。
+    /// 需要 `maps`（普通权限）。
+    ///
+    /// ## `off` 不再折成 `None`
+    ///
+    /// 官方的硬性要求是 `off` 为 `true` 时客户端不要显示这张图的卡片。早先的
+    /// 做法是直接返回 `None`——调用方拿不到对象就不可能误显示，看起来更可靠。
+    ///
+    /// 但那样会把**三种完全不同的情况压成同一个 `None`**：被合规隐藏、
+    /// 玩家没连接、以及「查不到」。界面上只能一律显示「不在榜上」，其中
+    /// 「被隐藏」那种说法虽然不算错，却让玩家不知道真正的原因。
+    ///
+    /// 现在把 `off` 原样交给界面，由它**显示一句「为遵守相关条款不得展示」**。
+    /// 这仍然满足「不显示这张图的卡片」——不给任何数据，只说明原因。代价是
+    /// **每个调用点都必须自己判断 `off`**，所以两处调用点（所在地图卡、世界
+    /// 详情页）都做了显式判断，不要依赖「反正拿不到」。
     pub async fn my_map(&self, world: &str) -> std::result::Result<Option<VrccMyMap>, VrccError> {
         // 只认 wrld_…：带房间实例号的 location 会让接口查错图。
         let world = vrcx_0_core::location::world_id_from_location(world);
@@ -836,11 +848,11 @@ impl VrccService {
             .await
             .map_err(|error| self.settle(error))?;
         if !map.is_visible() {
+            // 只是记一条日志，仍然把对象交出去——界面要用 `off` 说明原因。
             tracing::debug!(
                 world = %world,
-                "vrcc: this map is not shown to this player, hiding the card"
+                "vrcc: this map is not shown to this player, the UI must hide its data"
             );
-            return Ok(None);
         }
         Ok(Some(map))
     }
