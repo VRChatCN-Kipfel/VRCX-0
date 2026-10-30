@@ -16,6 +16,10 @@ vi.mock('@/platform/tauri/bindings', () => ({
 }));
 
 vi.mock('react-i18next', () => ({
+    // `formatRelativeTime` 会连带把 `i18nService` 拉进来，而那个模块在初始化
+    // 时要 `i18n.use(initReactI18next)`。补一个空实现，否则整个测试文件在
+    // 导入阶段就炸。
+    initReactI18next: { type: '3rdParty', init: () => {} },
     useTranslation: () => ({
         // 模仿真实语言包：复数键有 `_one` / `_other`，插值是**单**花括号。
         t: (key: string, options?: Record<string, unknown>) => {
@@ -29,6 +33,17 @@ vi.mock('react-i18next', () => ({
             }
             if (key === 'dialog.world.vrcc.rank') {
                 return `地图榜第 ${rank} 名`;
+            }
+            // 只补测试真正会拼进字符串的那几个键；其余原样返回 key，
+            // 断言里直接写 key 名即可。
+            if (key === 'dialog.world.vrcc.unit_sec') {
+                return '秒';
+            }
+            if (key === 'dialog.world.vrcc.perf_vram') {
+                return '显存';
+            }
+            if (key === 'dialog.world.vrcc.perf_mem') {
+                return '内存';
             }
             return key;
         }
@@ -123,16 +138,22 @@ describe('WorldVrccPanel', () => {
         expect(screen.getByText('2%')).toBeTruthy();
     });
 
-    it('显示去过人数、房间上限与实测', async () => {
+    it('顶部指标行与配置四宫格显示去过、上限、平台与实测', async () => {
         appVrccMapPage.mockResolvedValue(mapPage());
         renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
 
         await screen.findByText('8.4');
-        expect(screen.getByText('1200 人去过')).toBeTruthy();
-        expect(screen.getByText('32')).toBeTruthy();
-        expect(screen.getByText('PC · Quest')).toBeTruthy();
-        expect(screen.getByText('42.8 MB')).toBeTruthy();
-        expect(screen.getByText('4200 ms')).toBeTruthy();
+        // 顶部指标行：数值与标签分开放的，所以断言值本身
+        expect(screen.getByText('1200')).toBeTruthy(); // 去过
+        expect(screen.getByText('32')).toBeTruthy(); // 房间上限
+        expect(screen.getByText('PC · Quest')).toBeTruthy(); // 平台
+        // 配置四宫格：显存 / 内存 / 加载 / 下载。
+        // 夹具里 vram 和 mem 都是 null，那两格不出现——顺带验证了「缺字段
+        // 不留空盒子」。
+        expect(screen.getByText('4秒')).toBeTruthy(); // load 4200ms
+        // 44826624 字节 = 42.75 MiB，四舍五入是 43，不是 42
+        expect(screen.getByText('43M')).toBeTruthy();
+        expect(screen.queryByText('显存')).toBeNull();
     });
 
     it('热评带署名与「去过」标记', async () => {
@@ -242,13 +263,16 @@ describe('WorldVrccPanel', () => {
         expect(screen.getByText('dialog.world.vrcc.mine')).toBeTruthy();
     });
 
-    it('短评里带分数', async () => {
+    it('短评里用自己的星星表示分数', async () => {
         appVrccMapPage.mockResolvedValue(mapPage());
         appVrccMyMapPage.mockResolvedValue(myMapPage());
         renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
 
         await screen.findByText('光影很舒服');
-        expect(screen.getByText('9 / 10')).toBeTruthy();
+        // 分数现在画成星星，靠 aria-label 表达数值（9 分的那条）
+        expect(
+            screen.getAllByRole('img', { name: '9.0' }).length
+        ).toBeGreaterThan(0);
     });
 
     it('没连接时不报错，只在短评处退回一行说明', async () => {

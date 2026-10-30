@@ -102,3 +102,102 @@ export function VrccFactRow({
         </div>
     );
 }
+
+/**
+ * 分节标题 + 分割线。
+ *
+ * 官方那一页是用「小标题 + 一条线」把页面切成若干段（介绍 / 打分 / 短评 /
+ * 配置），这是它读起来不像一坨的关键。我们照这个**结构**走，配色用本项目的
+ * 令牌。
+ *
+ * `aside` 放右侧的次要内容（如「10 条」、排序切换）。
+ */
+export function VrccSection({
+    title,
+    aside,
+    children,
+    className
+}: {
+    title: string;
+    aside?: React.ReactNode;
+    children: React.ReactNode;
+    className?: string;
+}) {
+    return (
+        <section className={cn('flex min-w-0 flex-col gap-2', className)}>
+            <div className="flex min-w-0 items-center gap-2 border-b pb-1.5">
+                <h4 className="text-muted-foreground shrink-0 text-xs font-medium">
+                    {title}
+                </h4>
+                {aside ? <div className="ml-auto shrink-0">{aside}</div> : null}
+            </div>
+            {children}
+        </section>
+    );
+}
+
+/**
+ * 一排指标：值大、标签小，横向平铺。
+ *
+ * 用于顶部那一行（配置档位 / 去过人数 / 平台 / 房间上限）。官方是四项等宽，
+ * 我们跟随同一结构；缺项的会被调用方过滤掉，不留空位。
+ */
+export function VrccMetricRow({
+    items
+}: {
+    items: Array<{ label: string; value: string }>;
+}) {
+    if (!items.length) {
+        return null;
+    }
+    return (
+        <div className="flex min-w-0 flex-wrap items-stretch gap-x-5 gap-y-2">
+            {items.map((item) => (
+                <div
+                    key={item.label}
+                    className="flex min-w-0 flex-col items-center gap-0.5"
+                >
+                    <span className="text-foreground text-sm font-semibold tabular-nums">
+                        {item.value}
+                    </span>
+                    <span className="text-muted-foreground text-[10px] leading-none">
+                        {item.label}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * 配置四宫格：显存 / 内存 / 加载 / 下载。
+ *
+ * 这里是**格子**而不是指标行：四个数都是容量或耗时，放在等宽方框里能一眼
+ * 横向比较，铺成一行反而读不出「这是一组配置」。官方也是这么排的。
+ */
+export function VrccPerfGrid({
+    items
+}: {
+    items: Array<{ label: string; value: string }>;
+}) {
+    if (!items.length) {
+        return null;
+    }
+    return (
+        <div className="grid grid-cols-4 gap-1.5">
+            {items.map((item) => (
+                <div
+                    key={item.label}
+                    className="bg-muted/40 flex min-w-0 flex-col items-center gap-1 rounded-md border px-1 py-2"
+                >
+                    <span className="text-foreground text-xs font-semibold tabular-nums">
+                        {item.value}
+                    </span>
+                    <span className="text-muted-foreground text-[10px] leading-none">
+                        {item.label}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}

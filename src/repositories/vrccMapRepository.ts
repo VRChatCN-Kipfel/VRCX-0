@@ -49,13 +49,19 @@ export function vrccPublicMapQueryOptions(worldId: string) {
  *
  * 缓存策略**比公开版短**：短评会随时间增加，30 分钟太滞钝。这里沿用
  * `vrccMapPage` 的 30 分钟只用于「在不在榜」这种慢变事实，短评不行。
+ *
+ * `sort` 进缓存键：`hot` 和 `new` 是**两份不同的列表**，共用键会让玩家切了
+ * 排序却看到上一份的结果。
  */
-export function vrccMyMapPageQueryOptions(worldId: string) {
+export function vrccMyMapPageQueryOptions(
+    worldId: string,
+    sort: 'hot' | 'new'
+) {
     return queryOptions({
-        queryKey: queryKeys.worldVrccSignedIn(worldId),
+        queryKey: queryKeys.worldVrccSignedIn(worldId, sort),
         queryFn: async () =>
             worldId.startsWith('wrld_')
-                ? commands.appVrccMyMapPage(worldId, null)
+                ? commands.appVrccMyMapPage(worldId, sort)
                 : null,
         staleTime: 5 * 60 * 1000,
         gcTime: 30 * 60 * 1000,

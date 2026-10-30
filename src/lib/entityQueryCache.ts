@@ -213,9 +213,13 @@ export const queryKeys = Object.freeze({
         withEndpoint(['world', worldId, 'vrcc'], endpoint),
     // 带令牌的地图页。**必须与 `worldVrcc` 分开**：两条路的缓存时长、失效
     // 条件、以及「未连接时会失败」这个性质都不同，共用一个键会让公开数据
-    // 被登录数据顶掉，反之亦然。
-    worldVrccSignedIn: (worldId: string, endpoint: string = '') =>
-        withEndpoint(['world', worldId, 'vrcc', 'signedIn'], endpoint),
+    // 被登录数据顶掉，反之亦然。`sort` 也进键：`hot` 和 `new` 是两份不同的
+    // 列表，玩家切了排序不该看到上一份。
+    worldVrccSignedIn: (
+        worldId: string,
+        sort: 'hot' | 'new' = 'hot',
+        endpoint: string = ''
+    ) => withEndpoint(['world', worldId, 'vrcc', 'signedIn', sort], endpoint),
     groupMembers: (params: VrchatGroupMembersInput, endpoint: string = '') =>
         withEndpoint(
             ['group', params.groupId, 'members', stableParams(params)],
