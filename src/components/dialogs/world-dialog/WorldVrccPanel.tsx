@@ -3,6 +3,7 @@ import { ExternalLinkIcon } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { VrccStars } from '@/components/vrcc/VrccStars';
 import { formatRelativeTime } from '@/lib/dateTime';
 import { queryKeys } from '@/lib/entityQueryCache';
 import { cn } from '@/lib/utils';
@@ -285,7 +286,7 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
                             {hasRating ? avg.toFixed(1) : '—'}
                         </span>
                         <div className="flex min-w-0 flex-col gap-1">
-                            <StarRow score={hasRating ? avg : 0} />
+                            <VrccStars score={hasRating ? avg : 0} size="md" />
                             <span className="text-muted-foreground text-[11px] leading-none">
                                 {hasRating
                                     ? t('dialog.world.vrcc.raters', {
@@ -678,7 +679,7 @@ function CommentCard({
                         {name}
                     </span>
                 ) : null}
-                {score !== null ? <StarRow score={score} small /> : null}
+                {score !== null ? <VrccStars score={score} size="sm" /> : null}
                 {rate.went ? (
                     <span className="bg-muted text-muted-foreground rounded px-1 text-[10px] leading-tight">
                         {t('dialog.world.vrcc.went_badge')}
@@ -706,55 +707,5 @@ function CommentCard({
                 </span>
             </div>
         </div>
-    );
-}
-
-/** 一排星星。分数是 1–10，按 `score / 2` 折成 0–5 星。 */
-function StarRow({ score, small }: { score: number; small?: boolean }) {
-    const filled = Math.max(0, Math.min(5, score / 2));
-    const size = small ? 'size-3' : 'size-5';
-    return (
-        <span
-            className={cn('inline-flex shrink-0 items-center gap-0.5')}
-            role="img"
-            aria-label={score.toFixed(1)}
-        >
-            {[0, 1, 2, 3, 4].map((index) => {
-                const ratio = Math.max(0, Math.min(1, filled - index));
-                return (
-                    <span key={index} className={cn('relative', size)}>
-                        <StarGlyph
-                            className={cn(
-                                'text-muted-foreground/30 absolute inset-0',
-                                size
-                            )}
-                        />
-                        {ratio > 0 ? (
-                            <span
-                                className="absolute inset-0 overflow-hidden"
-                                style={{ width: `${ratio * 100}%` }}
-                            >
-                                <StarGlyph
-                                    className={cn('text-primary', size)}
-                                />
-                            </span>
-                        ) : null}
-                    </span>
-                );
-            })}
-        </span>
-    );
-}
-
-function StarGlyph({ className }: { className?: string }) {
-    return (
-        <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            className={cn(className)}
-            fill="currentColor"
-        >
-            <path d="M12 3.4l2.6 5.5 6 .8-4.4 4.2 1.1 6L12 17l-5.3 2.9 1.1-6-4.4-4.2 6-.8z" />
-        </svg>
     );
 }

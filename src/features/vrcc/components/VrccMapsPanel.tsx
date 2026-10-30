@@ -2,6 +2,7 @@ import { ExternalLink, RefreshCw } from 'lucide-react';
 import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { VrccStars } from '@/components/vrcc/VrccStars';
 import { openExternalLink } from '@/services/shellIntegrationService';
 import { Button } from '@/ui/shadcn/button';
 import { Spinner } from '@/ui/shadcn/spinner';
@@ -184,23 +185,35 @@ export function VrccMapsPanel({
                                                     : (map.author ?? '—')}
                                             </div>
                                         </div>
-                                        <div className="shrink-0 text-right">
-                                            <div className="text-sm font-semibold tabular-nums">
-                                                {map.avg != null
-                                                    ? map.avg.toFixed(1)
-                                                    : '—'}
-                                            </div>
-                                            <div className="text-muted-foreground text-[10px] tabular-nums">
-                                                {/* 本周榜显示本周几人打分，和网页上的「本周 N」一样。 */}
-                                                {sort === 'week' &&
-                                                map.week != null
-                                                    ? t(
-                                                          'vrcc.maps.week_count',
-                                                          {
-                                                              count: map.week
-                                                          }
-                                                      )
-                                                    : (map.raters ?? 0)}
+                                        {/* 星级在上、分数在下，右侧一列。
+                                        星负责扫视排序，数字负责精确比较——
+                                        五档星分不出 8.4 和 8.2，两者缺一不可。
+                                        星单独占一行会把行高抬高约 14px，这是
+                                        有意的：当前布局下 20 行里约 18 行都在
+                                        视口内，行高不敏感，可读性更重要。 */}
+                                        <div className="flex shrink-0 flex-col items-end gap-0.5">
+                                            <VrccStars
+                                                score={map.avg}
+                                                size="sm"
+                                            />
+                                            <div className="flex items-baseline gap-1">
+                                                <span className="text-sm font-semibold tabular-nums">
+                                                    {map.avg != null
+                                                        ? map.avg.toFixed(1)
+                                                        : '—'}
+                                                </span>
+                                                <span className="text-muted-foreground text-[10px] tabular-nums">
+                                                    {/* 本周榜显示本周几人打分，和网页上的「本周 N」一样。 */}
+                                                    {sort === 'week' &&
+                                                    map.week != null
+                                                        ? t(
+                                                              'vrcc.maps.week_count',
+                                                              {
+                                                                  count: map.week
+                                                              }
+                                                          )
+                                                        : (map.raters ?? 0)}
+                                                </span>
                                             </div>
                                         </div>
                                     </button>
