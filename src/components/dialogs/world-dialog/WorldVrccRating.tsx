@@ -184,7 +184,9 @@ function WorldVrccRatingShell({
                 <span className="ml-auto shrink-0 text-sm">{value}</span>
             </div>
             {note ? (
-                <div className="text-foreground mt-1 text-[11px] leading-tight">
+                // 靠右：它描述的是上一行右侧那个分数（「8.4」是 412 人打出来的），
+                // 右对齐后两行在视觉上是一组，左对齐会读成标题的续行。
+                <div className="text-foreground mt-1 text-right text-[11px] leading-tight">
                     {note}
                 </div>
             ) : null}
