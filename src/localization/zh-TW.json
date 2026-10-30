@@ -4903,7 +4903,9 @@
                 "vote_own_hint": "不能給自己的短評投票。",
                 "vote_needs_scope": "投票需要重新連接一次星遇同頻帳戶。",
                 "pending_title": "已投稿，等待審核",
-                "pending_hint": "星遇同頻審核通過後，這張圖就會出現在地圖榜上。"
+                "pending_hint": "星遇同頻審核通過後，這張圖就會出現在地圖榜上。",
+                "syncing_title": "已上榜，資料同步中",
+                "syncing_hint": "星遇同頻的公開榜單最多 5 分鐘更新一次，稍後再看。"
             }
         },
         "avatar": {

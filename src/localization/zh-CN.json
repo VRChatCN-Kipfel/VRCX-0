@@ -4903,7 +4903,9 @@
                 "vote_own_hint": "不能给自己的短评投票。",
                 "vote_needs_scope": "投票需要重新连接一次星遇同频账户。",
                 "pending_title": "已投稿，等待审核",
-                "pending_hint": "星遇同频审核通过后，这张图就会出现在地图榜上。"
+                "pending_hint": "星遇同频审核通过后，这张图就会出现在地图榜上。",
+                "syncing_title": "已上榜，数据同步中",
+                "syncing_hint": "星遇同频的公开榜单最多 5 分钟更新一次，稍后再看。"
             }
         },
         "avatar": {

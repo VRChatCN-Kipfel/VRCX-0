@@ -252,6 +252,40 @@ describe('WorldVrccPanel', () => {
         ).toBeNull();
     });
 
+    it('未连接时不会永远停在「加载中」', async () => {
+        appVrccMapPage.mockResolvedValue(null);
+        // 没有 maps 权限 → 状态查询被禁用。禁用时 `isPending` 仍是 true，
+        // 但 `fetchStatus` 是 idle，不能据此显示加载中。
+        appVrccConnection.mockResolvedValue({
+            connected: false,
+            scope: null
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.not_listed')
+        ).toBeTruthy();
+        // 关键：不该停在加载中
+        expect(screen.queryByText('common.loading')).toBeNull();
+    });
+
+    it('在榜但公开页还没同步时，不说「还不在榜上」', async () => {
+        appVrccMapPage.mockResolvedValue(null);
+        appVrccMyMap.mockResolvedValue({
+            world: 'wrld_test',
+            board: true,
+            pending: false,
+            off: false
+        });
+        renderWithClient(<WorldVrccPanel worldId="wrld_test" />);
+
+        expect(
+            await screen.findByText('dialog.world.vrcc.syncing_title')
+        ).toBeTruthy();
+        // 这一格最容易写错：说「还没有这张图」是事实错误
+        expect(screen.queryByText('dialog.world.vrcc.not_listed')).toBeNull();
+    });
+
     it('请求失败时说读不到，不说「不在榜上」', async () => {
         // 这条要等重试跑完。策略里 `retry: 1` 会盖掉 QueryClient 的默认值，
         // 重试期间 `isPending` 仍为真，界面一直是「加载中」——所以给足超时。

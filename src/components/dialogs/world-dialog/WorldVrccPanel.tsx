@@ -152,10 +152,25 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
     // 公开接口对「未收录」和「待审核」都回 404，分不开。所以 404 之后
     // **必须再看一眼带令牌的状态**，否则玩家投完稿回来看到的还是「不在榜上」，
     // 会以为投稿失败然后反复投。
+    //
+    // 404 之后的六种组合，逐一处理：
+    //
+    // | 带令牌的状态 | 情况 | 显示 |
+    // |---|---|---|
+    // | 正在请求 | 刚打开 | 加载中 |
+    // | `pending: true` | 已投稿待审 | 「已投稿，等待审核」 |
+    // | `board: true` | 公开页还没同步（最多 5 分钟） | 「已上榜，数据同步中」 |
+    // | `null` / 请求失败 | `off: true`、未连接、缺 `maps`、网络错 | 「不在榜上」 |
+    // | 其它 | 未收录 | 「不在榜上」 |
+    //
+    // 最后一行把几件事合成一个结论，是刻意的：`off: true` 在服务层就被转成
+    // `null`（官方要求此时隐藏整块），前端**分不出**「被隐藏」和「查不到」。
+    // 而这两种情况下「这张图不在你的榜上」都是事实，不算说谎。
     if (publicQuery.data === null) {
-        // 还没查到（或没连接、查不了）：按未收录显示，不要先给「审核中」——
-        // 那是无中生有。
-        if (myMapQuery.isPending) {
+        // 只在**真的在请求**时显示加载中。查询被禁用时（未连接、缺 maps
+        // 权限）`isPending` 也是 true、但 `fetchStatus` 是 `idle`——只看
+        // `isPending` 会让这类玩家永远停在「加载中…」。
+        if (myMapQuery.isPending && myMapQuery.fetchStatus === 'fetching') {
             return (
                 <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
                     {t('common.loading', '加载中…')}
@@ -164,14 +179,22 @@ export function WorldVrccPanel({ worldId }: { worldId: string }) {
         }
 
         const offBoard = myMapQuery.data;
-        // `board: true` 但公开页 404：服务器数据不同步（公开页 5 分钟才更新
-        // 一次）。按在榜处理没有意义——公开页拿不到任何统计。这里仍报未收录，
-        // 但不说「还没有这张图」，避免结论过硬。
         if (offBoard?.pending) {
             return (
                 <VrccOffBoardState
                     title={t('dialog.world.vrcc.pending_title')}
                     hint={t('dialog.world.vrcc.pending_hint')}
+                />
+            );
+        }
+
+        // 服务器说已在榜、公开页却是 404：公开页最多 5 分钟才更新一次。
+        // 这时说「还不在地图榜上」是**错的**，所以换一句。
+        if (offBoard?.board) {
+            return (
+                <VrccOffBoardState
+                    title={t('dialog.world.vrcc.syncing_title')}
+                    hint={t('dialog.world.vrcc.syncing_hint')}
                 />
             );
         }
