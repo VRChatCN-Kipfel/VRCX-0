@@ -803,7 +803,8 @@
             "maps": "地图榜",
             "notifications": "提醒",
             "me": "我的",
-            "mutuals": "连上"
+            "mutuals": "连上",
+            "crossings": "星轨相交"
         },
         "maps": {
             "hint": "满 {min} 人评分才进总榜",
@@ -883,7 +884,6 @@
             "empty": "还没有互相连上的星友",
             "needs_scope": "「互相连上」需要 mutuals 权限，重新连接一次即可（开发版标识拿不到这项）。",
             "unnamed": "未命名",
-            "open_profile": "在 VRChat 玩家详情里打开",
             "unavailable": "这一项需要额外权限，当前客户端还没开通",
             "rate_mine": "我给 TA 的分",
             "linked_at": "连上的时间",
@@ -915,6 +915,30 @@
         "announcement": {
             "open": "查看",
             "dismiss": "关闭这条公告"
+        },
+        "crossings": {
+            "need_connect": "连接星遇同频账号后，就能看到和你擦肩而过的人。",
+            "unavailable": "这个账号暂时用不了星轨相交。",
+            "needs_scope": "这项功能需要 crossings 权限。重新连接时勾选它。",
+            "empty": "还没有擦肩记录。在同一个 VRChat 房间里遇到过的星友会出现在这里。",
+            "count": "{count} 条擦肩记录",
+            "quota": "今天还能连 {left} / {max} 颗",
+            "refresh": "刷新",
+            "unnamed": "未命名星",
+            "fresh": "新",
+            "linked": "你已连向 TA",
+            "mutual": "已双向连上",
+            "not_linked": "还没连上",
+            "open_page": "在 vrcc.cc 上查看",
+            "why": {
+                "verify": "先验证 VRChat 账号才能使用星轨相交。",
+                "wait": "你的 VRChat 账号正在等待验证。",
+                "queued": "机器人「VRCC 的小助手」的好友请求正在排队。",
+                "sent": "机器人「VRCC 的小助手」的好友请求已发出，请在 VRChat 里同意。",
+                "gone": "你在 VRChat 里删除了机器人好友。",
+                "friend": "先把机器人「VRCC 的小助手」加为 VRChat 好友，才能使用星轨相交。",
+                "unknown": "星轨相交暂时不可用。"
+            }
         }
     },
     "nav_menu": {
@@ -2185,7 +2209,6 @@
                     "go_to_friend": "选择好友",
                     "cancelling": "正在取消操作",
                     "find_friend": "查找好友",
-                    "open_profile": "查看资料",
                     "hide_from_graph": "从关系图中隐藏",
                     "clear_filters": "清除筛选"
                 },
@@ -3278,7 +3301,7 @@
                             "status_account_mismatch_skipped": "其他账号的日志 · 已跳过",
                             "status_live_file": "VRChat 正在写入 · 请关闭游戏后重试",
                             "status_unreadable": "无法读取此文件",
-                            "inserted": "已补录 {{count}} 条记录",
+                            "inserted": "已补录 {count} 条记录",
                             "nothing_new": "记录均已存在，无需补录",
                             "unverified_warning": "部分日志未包含登录账号信息。若确认由本人账号产生，请勾选下方选项一并补录；若无法确认，请勿勾选，混入其他账号的记录将导致历史数据错乱。",
                             "confirm_unverified": "我确认这些日志由本人账号产生",
@@ -3880,8 +3903,8 @@
                 "override_disabled": "自定义 CSS 已禁用。",
                 "override_cleared": "自定义 CSS 已清空。",
                 "disable_failed": "更新社区主题设置失败。",
-                "update_available": "主题“{{name}}”有新版本",
-                "theme_updated": "社区主题已更新到 {{version}}。",
+                "update_available": "主题“{name}”有新版本",
+                "theme_updated": "社区主题已更新到 {version}。",
                 "update_failed": "更新社区主题失败。"
             },
             "confirm": {

@@ -548,6 +548,28 @@ const generatedCommands = {
     async appVrccMutuals(): Promise<VrccMutuals> {
         return await TAURI_INVOKE('app__vrcc_mutuals');
     },
+    /**
+     * 星轨相交：在同房间偶遇过的玩家列表。需要 `crossings` 敏感权限（要审核）。
+     *
+     * `mark` 只在玩家真的打开「星轨相交」页时为 true —— 它会把已读同步到账号，
+     * 网页和手机上的红点跟着消。后台只为算未读数时**必须**传 false。
+     *
+     * 返回里的 `hidden` 已经由应用层按 `why` 定好：为 true 时整个模块都不应显示
+     * （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
+     */
+    async appVrccCrossings(mark: boolean): Promise<VrccCrossings> {
+        return await TAURI_INVOKE('app__vrcc_crossings', { mark });
+    },
+    /**
+     * 星轨相交的完整星卡（1.13.0 起）。与列表分开，算第二份读的额度。
+     *
+     * 旧服务器上没有这个接口，返回 `null`。
+     */
+    async appVrccCrossingCards(
+        mark: boolean
+    ): Promise<VrccCrossingCards | null> {
+        return await TAURI_INVOKE('app__vrcc_crossing_cards', { mark });
+    },
     async appNotificationHideAndExpire(
         input: NotificationHideExpireInput
     ): Promise<NotificationActionOutcome> {
@@ -7512,6 +7534,130 @@ export type VrccConnectionSnapshot = {
      * 下一次建议轮询时间（毫秒）。
      */
     nextPollAt: number | null;
+};
+/**
+ * `GET /me/crossings/cards`：星轨相交的完整星卡（1.13.0 起）。
+ *
+ * 与 [`VrccCrossings`] 的区别：那个是**列表**（谁跟我擦过肩），这个是
+ * **完整星卡**（网页「连向我 → 星轨相交」的样子），另带今天还能连几颗。
+ * 只有带 `?mark=1` 才标成看过。算第二份读的次数。
+ */
+export type VrccCrossingCards = {
+    cards?: VrccStarCard[];
+    /**
+     * 上次看过时最新那次擦肩的时间；`at` 比它新就是新的。
+     */
+    seen?: number | null;
+    /**
+     * 今天还能从星轨相交连几颗。
+     */
+    left?: number | null;
+    /**
+     * 每天最多几颗。
+     */
+    max?: number | null;
+};
+/**
+ * 星轨相交里的「我」的摘要（`GET /me/crossings` 的 `me` 字段）。
+ *
+ * 只取界面用得到的部分：契约允许服务端返回更多字段，多的直接忽略。
+ */
+export type VrccCrossingMe = {
+    /**
+     * 我的星位编号。
+     */
+    n?: number | null;
+    /**
+     * 我的星位名称。
+     */
+    name?: string | null;
+};
+/**
+ * 一条星轨相交记录（`stars[]` 的条目）。
+ */
+export type VrccCrossingStar = {
+    /**
+     * 星的编号；网页直达地址是 `https://vrcc.cc/match/?tab=inbox&cross={n}`。
+     */
+    n?: number;
+    /**
+     * 星位名称。
+     */
+    name?: string | null;
+    /**
+     * 星位的一句话描述。
+     */
+    line?: string | null;
+    /**
+     * 星群（内部编号，展示时按 `name`）。
+     */
+    group?: string | null;
+    /**
+     * `/light/` 点亮编号；对方未公开时为 `null`。
+     */
+    star?: number | null;
+    /**
+     * 匿名星卡介绍的前 60 个字。
+     */
+    intro?: string | null;
+    /**
+     * 对方的 VRChat 名字。
+     *
+     * **只在 `mutual` 为 `true`（双向连线）后才返回**，否则为 `null`。
+     * 也就是说这里的 `vrc` 是「连上之后才解锁」的信息，不能当通用字段用。
+     */
+    vrc?: string | null;
+    /**
+     * 我是否已经连向对方。
+     */
+    linked?: boolean;
+    /**
+     * 是否已经双向连上。
+     */
+    mutual?: boolean;
+    /**
+     * 相交发生的时间（毫秒时间戳）。
+     */
+    at?: number | null;
+    /**
+     * 是否为上次查看后新产生的记录。
+     */
+    fresh?: boolean;
+};
+/**
+ * `GET /me/crossings`：在同一个 VRChat 房间偶遇过的星遇同频玩家。
+ *
+ * 对应网页「连向我 → 星轨相交」。**需要 `crossings` 敏感权限**；`dev-`
+ * 标识要不到（回 `403 scope_unreviewed`），16–17 岁星池没有这一项。
+ *
+ * 与「互相连上」(`mutuals`) 的区别：互相连上是**双向已连线**的星友，
+ * 星轨相交只是**同房间擦肩**，绝大多数还没有连线。所以这里每条要带上
+ * `linked` / `mutual` 两个状态，让界面能区分「我已连 TA」「已双向」「都还没」。
+ */
+export type VrccCrossings = {
+    stars?: VrccCrossingStar[];
+    /**
+     * 列表里的星数量。
+     */
+    n?: number | null;
+    /**
+     * 星轨相交不可用或为空的原因，见 [`VrccCrossingWhy`]。
+     *
+     * 保留服务器的原始字符串（界面用它挑文案），判定统一走 [`Self::hidden`]。
+     */
+    why?: string | null;
+    /**
+     * 是否必须**整个模块都不显示**（由应用层按 [`VrccCrossingWhy`] 算好）。
+     *
+     * 给成字段而不是让每个消费方各判一次 `why == "hide"`：这条判定的两边
+     * 后果不对称——把 `hide` 当普通空列表，等于向不该看到的人确认「这里有
+     * 星轨相交」这个事实。只在一处算，才不会有一处漏。
+     */
+    hidden?: boolean;
+    /**
+     * 当前玩家自己的星位摘要。
+     */
+    me?: VrccCrossingMe | null;
 };
 /**
  * 设备授权的起步结果。`device_code` 是唯一需要回传的字段，其余是给玩家看的。

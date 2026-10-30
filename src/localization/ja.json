@@ -799,7 +799,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "星軌交差"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -879,7 +880,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them",
             "linked_at": "When you linked",
@@ -911,6 +911,30 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "星遇同頻アカウントに接続すると、すれ違った人が見られます。",
+            "unavailable": "このアカウントでは星軌交差を利用できません。",
+            "needs_scope": "この機能には crossings 権限が必要です。再接続時に許可してください。",
+            "empty": "まだすれ違いの記録はありません。同じ VRChat ワールドで出会った人がここに表示されます。",
+            "count": "{count} 件のすれ違い",
+            "quota": "今日はあと {left} / {max} 件",
+            "refresh": "更新",
+            "unnamed": "名前のない星",
+            "fresh": "新着",
+            "linked": "あなたがつながりました",
+            "mutual": "双方向でつながっています",
+            "not_linked": "まだつながっていません",
+            "open_page": "vrcc.cc で見る",
+            "why": {
+                "verify": "星軌交差を使うには VRChat アカウントの認証が必要です。",
+                "wait": "VRChat アカウントは認証待ちです。",
+                "queued": "ボット「VRCC の小助手」のフレンド申請が待機中です。",
+                "sent": "ボット「VRCC の小助手」のフレンド申請を送信しました。VRChat で承認してください。",
+                "gone": "VRChat でボットのフレンドを削除しました。",
+                "friend": "星軌交差を使うには、ボット「VRCC の小助手」を VRChat のフレンドに追加してください。",
+                "unknown": "星軌交差は一時的に利用できません。"
+            }
         }
     },
     "nav_menu": {
@@ -2181,7 +2205,6 @@
                     "go_to_friend": "フレンドを選択",
                     "cancelling": "キャンセル中",
                     "find_friend": "フレンドを検索",
-                    "open_profile": "プロフィールを開く",
                     "hide_from_graph": "グラフから非表示",
                     "clear_filters": "フィルターを解除"
                 },
@@ -3274,7 +3297,7 @@
                             "status_account_mismatch_skipped": "別アカウントのログ・スキップ済み",
                             "status_live_file": "VRChat が書き込み中・ゲームを終了してから再試行してください",
                             "status_unreadable": "ファイルを読み込めません",
-                            "inserted": "{{count}} 件の記録を補完しました",
+                            "inserted": "{count} 件の記録を補完しました",
                             "nothing_new": "すべての記録が登録済みです",
                             "unverified_warning": "一部のログにはログイン中のアカウント情報が含まれていません。ご自身のアカウントで生成されたログであれば、下の項目にチェックを入れると併せて補完されます。確認できない場合はチェックしないでください。他のアカウントの記録が混在すると履歴が正しくなくなります。",
                             "confirm_unverified": "これらのログは自分のアカウントで生成されたものです",
@@ -3876,8 +3899,8 @@
                 "override_disabled": "カスタム CSS を無効化しました。",
                 "override_cleared": "カスタム CSS をクリアしました。",
                 "disable_failed": "コミュニティテーマ設定の更新に失敗しました。",
-                "update_available": "テーマ「{{name}}」の新しいバージョンがあります",
-                "theme_updated": "コミュニティテーマを {{version}} に更新しました。",
+                "update_available": "テーマ「{name}」の新しいバージョンがあります",
+                "theme_updated": "コミュニティテーマを {version} に更新しました。",
                 "update_failed": "コミュニティテーマを更新できませんでした。"
             },
             "confirm": {

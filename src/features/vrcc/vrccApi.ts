@@ -186,7 +186,26 @@ export const vrccApi = {
      * 条目带 `vrcUser` 时只能用来打开 VRCX-0 自己的玩家详情页——官方合规
      * 要求加好友由玩家在原生界面里自己点，禁止程序代发好友请求。
      */
-    mutuals: () => call(() => commands.appVrccMutuals())
+    mutuals: () => call(() => commands.appVrccMutuals()),
+
+    /**
+     * 「星轨相交」：在同房间偶遇过的玩家列表。需要 crossings 敏感权限。
+     *
+     * `mark` 传 true 表示玩家正在看这一页，服务器会把已读同步到账号、
+     * 清掉网页与手机上的红点。别的场景一律传 false。
+     *
+     * 返回里的 `hidden` 必须处理：为 true 时整个模块都不应显示
+     * （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
+     */
+    crossings: (mark = false) => call(() => commands.appVrccCrossings(mark)),
+
+    /**
+     * 星轨相交的完整星卡（1.13.0 起）。算第二份读的额度。
+     *
+     * 旧服务器上没有这个接口，返回 null。
+     */
+    crossingCards: (mark = false) =>
+        call(() => commands.appVrccCrossingCards(mark))
 };
 
 export type VrccBoard = Awaited<ReturnType<typeof commands.appVrccBoards>>;
@@ -215,6 +234,13 @@ export type VrccDeviceAuthStep = Awaited<
 export type VrccStatus = Awaited<ReturnType<typeof commands.appVrccStatus>>;
 export type VrccToday = Awaited<ReturnType<typeof commands.appVrccToday>>;
 export type VrccMutuals = Awaited<ReturnType<typeof commands.appVrccMutuals>>;
+export type VrccCrossings = Awaited<
+    ReturnType<typeof commands.appVrccCrossings>
+>;
+export type VrccCrossingStar = NonNullable<VrccCrossings['stars']>[number];
+export type VrccCrossingCards = Awaited<
+    ReturnType<typeof commands.appVrccCrossingCards>
+>;
 export type VrccMutualStar = NonNullable<VrccMutuals['stars']>[number];
 export type VrccMyMap = NonNullable<
     Awaited<ReturnType<typeof commands.appVrccMyMap>>

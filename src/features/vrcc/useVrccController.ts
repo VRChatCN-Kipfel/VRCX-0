@@ -21,6 +21,8 @@ import {
     type VrccBoard,
     type VrccBoardSort,
     type VrccConnection,
+    type VrccCrossingCards,
+    type VrccCrossings,
     type VrccDeviceAuthPrompt,
     type VrccMutuals,
     type VrccMyMap,
@@ -61,6 +63,7 @@ const BOARD_REUSE_MS = 60_000;
  */
 const DEVICE_AUTH_COOLDOWN_SECS = 5;
 
+export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'crossings' | 'me';
 /**
  * 把结构化错误翻译成一句玩家看得懂的话。
  *
@@ -101,8 +104,6 @@ export function describeVrccError(error: VrccError): string {
     return error.message || i18n.t('vrcc.error.unknown');
 }
 
-export type VrccTab = 'maps' | 'notifications' | 'mutuals' | 'me';
-
 /** 「提醒」页签里看哪一个：最近的提醒，还是通知中心。 */
 export type VrccNotificationsView = 'recent' | 'notes';
 
@@ -142,6 +143,25 @@ type State = {
      * 全局错误会让玩家以为连接出了问题。
      */
     mutualsError: string | null;
+    /**
+     * 「星轨相交」列表；null 表示还没拉过或没权限。
+     *
+     * 与 mutuals 的区别：mutuals 是**双向已连线**的星友，crossings 只是
+     * **同房间擦肩**的人，大多数还没连线。
+     */
+    crossings: VrccCrossings | null;
+    /** 星轨相交的完整星卡（1.13.0 起）；null 表示没拉过或不支持。 */
+    crossingCards: VrccCrossingCards | null;
+    /**
+     * 「星轨相交」这一项失败的原因。
+     *
+     * 与 mutualsError 同理单独放：`dev-` 标识必然拿不到 `crossings`
+     * 敏感权限，那是**某个功能没开通**，不是整个页面坏了。
+     *
+     * 不可用的**原因分类**不在这里：它在 `crossings.why` / `crossings.hidden`
+     * 里跟着响应一起存下来，只有一份，不会和它各说各话。
+     */
+    crossingsError: string | null;
     service: VrccStatus | null;
     loading: boolean;
     error: VrccError | null;
@@ -175,6 +195,9 @@ const initialState: State = {
     myMap: null,
     mutuals: null,
     mutualsError: null,
+    crossings: null,
+    crossingCards: null,
+    crossingsError: null,
     service: null,
     loading: true,
     error: null,
@@ -412,6 +435,59 @@ export function useVrccController() {
     }, [patch]);
 
     /**
+     * 「星轨相交」列表与完整星卡。
+     *
+     * 需要 `crossings` 敏感权限。`dev-` 标识拿到的是 `403 scope`——预期内
+     * 的结果（敏感权限要审核），不是故障，所以只记到 `crossingsError`
+     * 供该页签自己显示，不走全局 `reportError`。
+     *
+     * `mark` 只在玩家真的打开这一页时为 true：它会把已读同步到账号，
+     * 网页和手机上的红点跟着消。别的场景一律 false。
+     *
+     * 星卡的额度（`left` / `max`）是**按天**算的，读一次算第二份读的
+     * 一次，所以这里只让「玩家真的在看」那一次把两个都拉下来。
+     */
+    const refreshCrossings = useCallback(
+        async (mark = false) => {
+            const epoch = personalEpoch.current;
+            try {
+                // 星卡是 1.13.0 才有的接口；旧服务器会给 404。那只影响
+                // 「今天还能连几颗」这一小块，不该让整个列表失败。
+                const [crossings, cards] = await Promise.all([
+                    vrccApi.crossings(mark),
+                    vrccApi.crossingCards(mark).catch(() => null)
+                ]);
+                // 断开连接会推进代次：断开前发出、断开后才回来的响应
+                // 不能再把状态写回去，否则界面会显示上一个账号的擦肩记录。
+                if (epoch !== personalEpoch.current) return null;
+                patch({
+                    crossings,
+                    crossingCards: cards,
+                    crossingsError: null
+                });
+                return crossings;
+            } catch (error) {
+                if (epoch !== personalEpoch.current) return null;
+                if (
+                    error instanceof VrccError &&
+                    error.kind === 'missingScope'
+                ) {
+                    // 权限没开通：静默记录，界面在自己的页签里说明。
+                    patch({
+                        crossings: null,
+                        crossingCards: null,
+                        crossingsError: error.message
+                    });
+                    return null;
+                }
+                patch({ crossings: null, crossingCards: null });
+                throw error;
+            }
+        },
+        [patch]
+    );
+
+    /**
      * 贴纸和材质名。拿不到不算页面错误：那是装饰素材，缺了它不该让
      * 「我的」页签报错。
      */
@@ -489,6 +565,9 @@ export function useVrccController() {
             void refreshMutuals().catch((error) => {
                 reportError(error, 'refreshMutuals');
             });
+            // 「星轨相交」**不在这里拉**：首屏一定是地图榜那个页签，没人看得见
+            // 它。它又算两份每天额度（列表一份、星卡一份），提前拉等于每次开页
+            // 都白花 2 次。等玩家真切到那一页时 `setTab` 会拉，连 mark 一起做。
             void refreshUnread(true).catch((error) => {
                 reportError(error, 'refreshUnread');
             });
@@ -660,6 +739,10 @@ export function useVrccController() {
      * 切到「提醒」时用 `mark=true` 重拉一次：这是玩家真正在看这个列表的时刻，
      * 服务器据此把已读同步到账号，网页和手机 App 上的红点会跟着消。
      * 官方的做法也是「打开最近的提醒」时才 mark。
+     *
+     * 「星轨相交」同理，而且这里**只有**这一条路会传 `mark=true`：
+     * `load()` 与刷新按钮都传 false。漏掉这一条，玩家永远消不掉红点；
+     * 反过来在别处误传 true，等于替玩家把没看过的记录标成看过。
      */
     const setTab = useCallback(
         (tab: VrccTab) => {
@@ -676,9 +759,17 @@ export function useVrccController() {
                     reportError(error, 'refreshMutuals');
                 });
             }
+            if (tab === 'crossings') {
+                // 打开这一页 = 看过了。权限没开通时 `refreshCrossings`
+                // 自己把原因记进 `crossingsError`，不会抛出来。
+                refreshCrossings(true).catch((error) => {
+                    reportError(error, 'refreshCrossings');
+                });
+            }
         },
         [
             patch,
+            refreshCrossings,
             refreshMutuals,
             refreshRecent,
             reportError,
@@ -856,12 +947,15 @@ export function useVrccController() {
                 recent: null,
                 unread: null,
                 notes: null,
-                // 「所在地图」和「互相连上」都是**上一个账号**的个人数据。
-                // 不清的话，`VrccPage` 只看 `myMap` 是否存在就渲染卡片，
-                // 断开后还会继续显示别人的评分。
+                // 「所在地图」「互相连上」「星轨相交」都是**上一个账号**的
+                // 个人数据。不清的话，`VrccPage` 只看 `myMap` 是否存在就渲染
+                // 卡片，断开后还会继续显示别人的评分和擦肩记录。
                 myMap: null,
                 mutuals: null,
-                mutualsError: null
+                mutualsError: null,
+                crossings: null,
+                crossingCards: null,
+                crossingsError: null
             });
         } catch (error) {
             // 可重试的失败（网络不通、正在退避）**后端会刻意保留令牌**，
@@ -921,6 +1015,7 @@ export function useVrccController() {
         setNotificationsView,
         refreshMyMap,
         refreshMutuals,
+        refreshCrossings,
         beginDeviceAuth,
         disconnect,
         openWorld,

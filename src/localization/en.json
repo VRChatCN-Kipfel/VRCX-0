@@ -803,7 +803,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Crossings"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -883,7 +884,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them",
             "linked_at": "When you linked",
@@ -915,6 +915,30 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Connect your star account to see who you crossed paths with.",
+            "unavailable": "Crossings is not available for this account yet.",
+            "needs_scope": "This feature needs the crossings permission. Reconnect and allow it when asked.",
+            "empty": "No crossings yet. People you meet in the same VRChat world show up here.",
+            "count": "{count} crossings",
+            "quota": "{left} of {max} left today",
+            "refresh": "Refresh",
+            "unnamed": "Unnamed star",
+            "fresh": "New",
+            "linked": "You linked them",
+            "mutual": "Connected both ways",
+            "not_linked": "Not connected yet",
+            "open_page": "Open on vrcc.cc",
+            "why": {
+                "verify": "Verify your VRChat account to use crossings.",
+                "wait": "Your VRChat account is waiting for verification.",
+                "queued": "A friend request from the VRCC assistant is queued.",
+                "sent": "A friend request from the VRCC assistant was sent. Accept it in VRChat.",
+                "gone": "You removed the VRCC assistant from your VRChat friends.",
+                "friend": "Add the VRCC assistant as a VRChat friend to use crossings.",
+                "unknown": "Crossings is temporarily unavailable."
+            }
         }
     },
     "nav_menu": {
@@ -2191,7 +2215,6 @@
                     "go_to_friend": "Go to friend",
                     "cancelling": "Cancelling",
                     "find_friend": "Find a friend",
-                    "open_profile": "Open profile",
                     "hide_from_graph": "Hide from graph",
                     "clear_filters": "Clear filters"
                 },
@@ -3284,7 +3307,7 @@
                             "status_account_mismatch_skipped": "Belongs to another account · skipped",
                             "status_live_file": "Being written by VRChat · close the game and try again",
                             "status_unreadable": "File cannot be read",
-                            "inserted": "Records imported: {{count}}",
+                            "inserted": "Records imported: {count}",
                             "nothing_new": "All records already exist",
                             "unverified_warning": "Some logs do not include information about the signed-in account. If they were created by your account, select the option below to include them. If this cannot be confirmed, leave it cleared; records from another account would corrupt your history.",
                             "confirm_unverified": "I confirm these logs were created by my account",
@@ -3886,8 +3909,8 @@
                 "override_disabled": "Custom CSS disabled.",
                 "override_cleared": "Custom CSS cleared.",
                 "disable_failed": "Failed to update community theme settings.",
-                "update_available": "{{name}} has an update",
-                "theme_updated": "Community theme updated to {{version}}.",
+                "update_available": "{name} has an update",
+                "theme_updated": "Community theme updated to {version}.",
                 "update_failed": "Failed to update community theme."
             },
             "confirm": {

@@ -3,7 +3,10 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use vrcx_0_contracts::vrcc::{HttpDetail, LocalThrottle, VrccBoardMap, VrccUnread};
+use vrcx_0_contracts::vrcc::{
+    HttpDetail, LocalThrottle, VrccBoardMap, VrccCrossingCards, VrccCrossingStar, VrccCrossings,
+    VrccUnread,
+};
 // ---------------------------------------------------------------------------
 // 造错误的几个便捷函数
 //
@@ -119,6 +122,12 @@ struct FakeRemote {
     notes_polled: Mutex<Vec<(Option<i64>, Option<i64>)>>,
     /// 记录 `device_code` 收到的 `scope`。
     device_code_scopes: Mutex<Vec<Option<String>>>,
+    /// `crossings` / `crossing_cards` 的返回。
+    crossings: Mutex<Option<VrccCrossings>>,
+    cards: Mutex<Option<VrccCrossingCards>>,
+    /// 记录两个星轨接口收到的 `mark`。
+    crossings_mark: Mutex<Option<bool>>,
+    cards_mark: Mutex<Option<bool>>,
 }
 
 impl FakeRemote {
@@ -148,6 +157,16 @@ impl FakeRemote {
     /// 预设下一次 `unread` 的返回。
     fn set_unread(&self, unread: VrccUnread) {
         *self.unread.lock().unwrap() = Some(unread);
+    }
+
+    /// 预设星轨相交列表的返回。
+    fn set_crossings(&self, crossings: VrccCrossings) {
+        *self.crossings.lock().unwrap() = Some(crossings);
+    }
+
+    /// 预设星轨相交星卡的返回。
+    fn set_crossing_cards(&self, cards: VrccCrossingCards) {
+        *self.cards.lock().unwrap() = Some(cards);
     }
 
     /// 让下一次个人调用失败。
@@ -342,6 +361,34 @@ impl VrccRemote for FakeRemote {
                 return Err(error);
             }
             Err(token_missing())
+        })
+    }
+
+    /// 星轨相交列表。假实现记录收到的 `mark`，并按预设返回。
+    fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings> {
+        *self.crossings_mark.lock().unwrap() = Some(mark);
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            let stars = self
+                .crossings
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or_else(token_missing)?;
+            Ok(stars)
+        })
+    }
+
+    /// 星轨相交的完整星卡。同样记录 `mark`，并按预设返回。
+    fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards> {
+        *self.cards_mark.lock().unwrap() = Some(mark);
+        Box::pin(async move {
+            if let Some(error) = self.take_error() {
+                return Err(error);
+            }
+            self.cards.lock().unwrap().clone().ok_or_else(token_missing)
         })
     }
 
@@ -764,7 +811,9 @@ async fn device_auth_asks_for_the_scope_that_fits_the_client() {
         ("dev-test", "profile notifications maps"),
         (
             "app_0123456789abcdef",
-            "profile notifications maps mutuals maps.rate maps.write",
+            // `crossings` 是「星轨相交」页要用的敏感权限。漏了它，那个页签
+            // 对每个玩家都永远是「缺权限」，功能等于没做。
+            "profile notifications maps mutuals crossings maps.rate maps.write",
         ),
     ];
     for (client, expected) in cases {
@@ -1232,4 +1281,128 @@ async fn personal_map_lists_work_once_connected() {
     remote.set_error(http(403, "scope"));
     let error = service.my_board(VrccMyBoardSort::Top).await.unwrap_err();
     assert_eq!(error.layer, ErrorLayer::Server);
+}
+
+// ---------------------------------------------------------------------------
+// 星轨相交
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn crossings_requires_connection() {
+    // 星轨相交是个人接口：没连接时不能发请求，直接报没令牌。
+    // 与 mutuals / today 共用同一条守卫，但值得单独钉住——它是新加的
+    // 敏感权限接口，漏掉守卫就会拿空令牌发出去，服务器回 401 让玩家
+    // 误以为自己的账号出了问题。
+    let service = VrccService::new(Arc::new(MemoryStore::default()), FakeRemote::new());
+    let error = service.crossings(false).await.unwrap_err();
+    assert!(error.is_session_lost());
+
+    let error = service.crossing_cards(false).await.unwrap_err();
+    assert!(error.is_session_lost());
+}
+
+/// 连接好、`crossings` 能返回一条的测试服务。
+fn crossings_service(reason: Option<&str>) -> (VrccService, Arc<FakeRemote>) {
+    let remote = FakeRemote::new();
+    remote.mark_connected();
+    remote.set_crossings(VrccCrossings {
+        stars: vec![VrccCrossingStar {
+            n: 77,
+            name: Some("拾光旅人".into()),
+            ..Default::default()
+        }],
+        n: Some(1),
+        why: reason.map(str::to_string),
+        ..Default::default()
+    });
+    (
+        VrccService::new(Arc::new(MemoryStore::default()), remote.clone()),
+        remote,
+    )
+}
+
+#[tokio::test]
+async fn crossings_passes_the_mark_flag_through() {
+    // `mark` 决定要不要把星轨相交标成已读、连带清掉网页与手机的红点。
+    // 应用层**不做判断**，只原样透传给端口——但这条链路必须通：如果哪
+    // 一层把 mark 丢成 false，玩家打开页面后红点永远消不掉，而且看不出
+    // 任何报错。
+    let (service, remote) = crossings_service(None);
+
+    service.crossings(true).await.expect("mark=true 应该成功");
+    assert_eq!(
+        *remote.crossings_mark.lock().unwrap(),
+        Some(true),
+        "mark 必须透传成 true，否则玩家打开页面后红点消不掉"
+    );
+
+    service.crossings(false).await.expect("mark=false 应该成功");
+    assert_eq!(*remote.crossings_mark.lock().unwrap(), Some(false));
+}
+
+#[tokio::test]
+async fn crossings_only_hide_when_the_server_says_hide() {
+    // `hidden` 由应用层按 `why` 定好，消费方不再各自去比字符串。
+    // 这条判定的两边后果不对称：把 `hide` 当成普通空列表，等于向不该
+    // 看到的人确认「这里有星轨相交」这个事实本身。
+    let (service, _) = crossings_service(Some("hide"));
+    assert!(
+        service.crossings(false).await.expect("应成功").hidden,
+        "why=hide 必须整块隐藏"
+    );
+
+    for reason in [
+        "verify",
+        "wait",
+        "queued",
+        "sent",
+        "gone",
+        "friend",
+        "something-new",
+    ] {
+        let (service, _) = crossings_service(Some(reason));
+        assert!(
+            !service.crossings(false).await.expect("应成功").hidden,
+            "why={reason} 只是暂时不可用，不能藏起来"
+        );
+    }
+
+    let (service, _) = crossings_service(None);
+    assert!(!service.crossings(false).await.expect("应成功").hidden);
+}
+
+#[tokio::test]
+async fn crossing_cards_falls_back_to_none_on_old_servers() {
+    // `/me/crossings/cards` 是 1.13.0 才有的。旧服务器回 `404 not_found`，
+    // 这只影响「今天还能连几颗」那一小块——**不能让整个列表跟着失败**，
+    // 也不能把令牌当成失效（`not_found` 不是 `gone`）。
+    let (service, remote) = crossings_service(None);
+    remote.set_error(http(404, "not_found"));
+
+    let cards = service
+        .crossing_cards(false)
+        .await
+        .expect("旧服务器不该报错");
+    assert!(
+        cards.is_none(),
+        "没有这个接口时返回 None，界面藏起额度那一行"
+    );
+    assert!(
+        service.snapshot().connected,
+        "`not_found` 不是令牌失效，不能把连接弄断"
+    );
+
+    // 真的拿到时照常返回，`mark` 同样透传。
+    remote.set_crossing_cards(VrccCrossingCards {
+        left: Some(3),
+        max: Some(5),
+        ..Default::default()
+    });
+    let cards = service
+        .crossing_cards(true)
+        .await
+        .expect("应成功")
+        .expect("应返回星卡");
+    assert_eq!(cards.left, Some(3));
+    assert_eq!(*remote.cards_mark.lock().unwrap(), Some(true));
 }

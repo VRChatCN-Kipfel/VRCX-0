@@ -808,7 +808,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Křížení"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -888,7 +889,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them",
             "linked_at": "When you linked",
@@ -920,6 +920,30 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Připojte svůj hvězdný účet, abyste viděli, s kým jste se míjeli.",
+            "unavailable": "Křížení nejsou pro tento účet dostupná.",
+            "needs_scope": "Tato funkce vyžaduje oprávnění crossings. Připojte se znovu a povolte ho.",
+            "empty": "Zatím žádná křížení. Lidé potkaní ve stejném světě VRChat se objeví zde.",
+            "count": "Křížení: {count}",
+            "quota": "Dnes zbývá {left} z {max}",
+            "refresh": "Obnovit",
+            "unnamed": "Nepojmenovaná hvězda",
+            "fresh": "Nové",
+            "linked": "Už jste se propojili",
+            "mutual": "Propojeno obousměrně",
+            "not_linked": "Zatím nepřipojeno",
+            "open_page": "Zobrazit na vrcc.cc",
+            "why": {
+                "verify": "Ověřte svůj účet VRChat, abyste mohli používat křížení.",
+                "wait": "Váš účet VRChat čeká na ověření.",
+                "queued": "Žádost o přátelství od asistenta VRCC je ve frontě.",
+                "sent": "Žádost o přátelství od asistenta VRCC byla odeslána. Přijměte ji ve VRChatu.",
+                "gone": "Odstranili jste asistenta VRCC z přátel ve VRChatu.",
+                "friend": "Přidejte asistenta VRCC jako přítele ve VRChatu, abyste mohli používat křížení.",
+                "unknown": "Křížení jsou dočasně nedostupná."
+            }
         }
     },
     "nav_menu": {
@@ -2202,7 +2226,6 @@
                     "go_to_friend": "Přejít na přítele",
                     "cancelling": "Ruší se",
                     "find_friend": "Najít přítele",
-                    "open_profile": "Otevřít profil",
                     "hide_from_graph": "Skrýt z grafu",
                     "clear_filters": "Zrušit filtry"
                 },
@@ -3295,7 +3318,7 @@
                             "status_account_mismatch_skipped": "Patří jinému účtu · přeskočeno",
                             "status_live_file": "VRChat do souboru zapisuje · ukončete hru a zkuste to znovu",
                             "status_unreadable": "Soubor nelze přečíst",
-                            "inserted": "Importované záznamy: {{count}}",
+                            "inserted": "Importované záznamy: {count}",
                             "nothing_new": "Všechny záznamy již existují",
                             "unverified_warning": "Některé logy neobsahují údaje o přihlášeném účtu. Pokud pocházejí z vašeho účtu, zaškrtněte volbu níže a budou zahrnuty. Pokud to nelze potvrdit, ponechte volbu nezaškrtnutou; záznamy jiného účtu by narušily vaši historii.",
                             "confirm_unverified": "Potvrzuji, že tyto logy pocházejí z mého účtu",
@@ -3901,8 +3924,8 @@
                 "override_disabled": "Vlastní CSS bylo zakázáno.",
                 "override_cleared": "Upravené CSS bylo vymazáno.",
                 "disable_failed": "Aktualizace nastavení komunitního motivu se nezdařila.",
-                "update_available": "Je k dispozici nová verze motivu {{name}}",
-                "theme_updated": "Komunitní motiv byl aktualizován na verzi {{version}}.",
+                "update_available": "Je k dispozici nová verze motivu {name}",
+                "theme_updated": "Komunitní motiv byl aktualizován na verzi {version}.",
                 "update_failed": "Aktualizace komunitního motivu se nezdařila."
             },
             "confirm": {

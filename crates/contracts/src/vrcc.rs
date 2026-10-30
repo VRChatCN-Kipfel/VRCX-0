@@ -389,11 +389,18 @@ pub const VRCC_DEFAULT_CLIENT: &str = VRCC_DEV_CLIENT;
 ///   `maps.rate`，违反官方《使用要求》第 10 条「只申请用得到的权限」。
 ///
 /// 这里只列界面真正用到的：提醒、所在地图、「连上」页（`mutuals`）、
-/// 给地图打分（`maps.rate`）、给短评投票（`maps.write`）。
-/// `mutuals`、`maps.rate`、`maps.write` 都是敏感权限，只有正式标识能要，
-/// `dev-` 用 [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用
+/// 「星轨相交」页（`crossings`）、给地图打分（`maps.rate`）、给短评投票
+/// （`maps.write`）。
+///
+/// `mutuals`、`crossings`、`maps.rate`、`maps.write` 都是敏感权限，只有正式
+/// 标识能要，`dev-` 用 [`VRCC_DEV_DEVICE_AUTH_SCOPE`]。实际要哪一串用
 /// [`device_auth_scope`] 选。
-pub const VRCC_DEVICE_AUTH_SCOPE: &str = "profile notifications maps mutuals maps.rate maps.write";
+///
+/// **`crossings` 必须在这里**：令牌的权限是签发时定下的，事后要再拿到它
+/// 只能重新授权。不列进来，界面上的「星轨相交」页签对每一个玩家都永远
+/// 是「缺权限」——功能等于没做。
+pub const VRCC_DEVICE_AUTH_SCOPE: &str =
+    "profile notifications maps mutuals crossings maps.rate maps.write";
 
 /// `dev-` 标识申请的权限：只能要普通权限，要了敏感的 `device/code`
 /// 会直接回答 `403 scope_unreviewed`，连码都拿不到。
@@ -1040,6 +1047,188 @@ pub struct VrccMutuals {
     /// 互相连上的总数。
     #[serde(default)]
     pub n: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// 星轨相交（`GET /me/crossings`，需要 crossings 敏感权限）
+// ---------------------------------------------------------------------------
+
+/// `GET /me/crossings`：在同一个 VRChat 房间偶遇过的星遇同频玩家。
+///
+/// 对应网页「连向我 → 星轨相交」。**需要 `crossings` 敏感权限**；`dev-`
+/// 标识要不到（回 `403 scope_unreviewed`），16–17 岁星池没有这一项。
+///
+/// 与「互相连上」(`mutuals`) 的区别：互相连上是**双向已连线**的星友，
+/// 星轨相交只是**同房间擦肩**，绝大多数还没有连线。所以这里每条要带上
+/// `linked` / `mutual` 两个状态，让界面能区分「我已连 TA」「已双向」「都还没」。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccCrossings {
+    #[serde(default)]
+    pub stars: Vec<VrccCrossingStar>,
+    /// 列表里的星数量。
+    #[serde(default)]
+    pub n: Option<i64>,
+    /// 星轨相交不可用或为空的原因，见 [`VrccCrossingWhy`]。
+    ///
+    /// 保留服务器的原始字符串（界面用它挑文案），判定统一走 [`Self::hidden`]。
+    #[serde(default)]
+    pub why: Option<String>,
+    /// 是否必须**整个模块都不显示**（由应用层按 [`VrccCrossingWhy`] 算好）。
+    ///
+    /// 给成字段而不是让每个消费方各判一次 `why == "hide"`：这条判定的两边
+    /// 后果不对称——把 `hide` 当普通空列表，等于向不该看到的人确认「这里有
+    /// 星轨相交」这个事实。只在一处算，才不会有一处漏。
+    #[serde(default)]
+    pub hidden: bool,
+    /// 当前玩家自己的星位摘要。
+    #[serde(default)]
+    pub me: Option<VrccCrossingMe>,
+}
+
+/// 一条星轨相交记录（`stars[]` 的条目）。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccCrossingStar {
+    /// 星的编号；网页直达地址是 `https://vrcc.cc/match/?tab=inbox&cross={n}`。
+    #[serde(default)]
+    pub n: i64,
+    /// 星位名称。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 星位的一句话描述。
+    #[serde(default)]
+    pub line: Option<String>,
+    /// 星群（内部编号，展示时按 `name`）。
+    #[serde(default)]
+    pub group: Option<String>,
+    /// `/light/` 点亮编号；对方未公开时为 `null`。
+    #[serde(default)]
+    pub star: Option<i64>,
+    /// 匿名星卡介绍的前 60 个字。
+    #[serde(default)]
+    pub intro: Option<String>,
+    /// 对方的 VRChat 名字。
+    ///
+    /// **只在 `mutual` 为 `true`（双向连线）后才返回**，否则为 `null`。
+    /// 也就是说这里的 `vrc` 是「连上之后才解锁」的信息，不能当通用字段用。
+    #[serde(default)]
+    pub vrc: Option<String>,
+    /// 我是否已经连向对方。
+    #[serde(default)]
+    pub linked: bool,
+    /// 是否已经双向连上。
+    #[serde(default)]
+    pub mutual: bool,
+    /// 相交发生的时间（毫秒时间戳）。
+    #[serde(default)]
+    pub at: Option<i64>,
+    /// 是否为上次查看后新产生的记录。
+    #[serde(default)]
+    pub fresh: bool,
+}
+
+/// 星轨相交里的「我」的摘要（`GET /me/crossings` 的 `me` 字段）。
+///
+/// 只取界面用得到的部分：契约允许服务端返回更多字段，多的直接忽略。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccCrossingMe {
+    /// 我的星位编号。
+    #[serde(default)]
+    pub n: Option<i64>,
+    /// 我的星位名称。
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// 星轨相交不可用的原因（`why`）。
+///
+/// 按官方文档列的七种取值分类；服务器以后加新的，落到 `Unknown` 而不是
+/// 解析失败——一个没见过的原因不该让整页崩掉。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VrccCrossingWhy {
+    /// 正常开放（`null`）。
+    #[default]
+    Available,
+    /// 不对该玩家开放（16–17 岁星池，或隐私设置里关了）。**界面应整个隐藏**。
+    Hidden,
+    /// 尚未验证 VRChat 账号。
+    Unverified,
+    /// VRChat 账号正在等待验证。
+    WaitingVerify,
+    /// 机器人「VRCC 的小助手」的好友请求在排队。
+    Queued,
+    /// 机器人好友请求已发出，等待玩家在 VRChat 内同意。
+    Sent,
+    /// 玩家在 VRChat 内删除了机器人好友。
+    Gone,
+    /// 尚未开启机器人好友。
+    NotFriend,
+    /// 服务器新加的原因，本地还不认识。
+    Unknown,
+}
+
+impl VrccCrossingWhy {
+    /// 从服务端的 `why` 字符串解析。
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(str::trim) {
+            None | Some("") => Self::Available,
+            Some("hide") => Self::Hidden,
+            Some("verify") => Self::Unverified,
+            Some("wait") => Self::WaitingVerify,
+            Some("queued") => Self::Queued,
+            Some("sent") => Self::Sent,
+            Some("gone") => Self::Gone,
+            Some("friend") => Self::NotFriend,
+            Some(_) => Self::Unknown,
+        }
+    }
+
+    /// 是否应当**整个模块都不显示**。
+    ///
+    /// `Hidden` 是唯一要整个隐藏的情况——官方文档明确说「客户端不应显示
+    /// 此模块」。其余原因都是「功能在但暂时不可用」，应当显示原因而不是
+    /// 让页面空着。
+    pub fn is_hidden(self) -> bool {
+        matches!(self, Self::Hidden)
+    }
+}
+
+impl VrccCrossings {
+    /// 分类后的 `why`。
+    pub fn reason(&self) -> VrccCrossingWhy {
+        VrccCrossingWhy::parse(self.why.as_deref())
+    }
+
+    /// 按 `why` 定下 `hidden`。
+    ///
+    /// 由应用层在拿到响应后调用一次，之后所有消费方只看 `hidden` 字段，
+    /// 不再各自去比 `why == "hide"` 字符串。
+    pub fn settle_visibility(&mut self) {
+        self.hidden = self.reason().is_hidden();
+    }
+}
+
+/// `GET /me/crossings/cards`：星轨相交的完整星卡（1.13.0 起）。
+///
+/// 与 [`VrccCrossings`] 的区别：那个是**列表**（谁跟我擦过肩），这个是
+/// **完整星卡**（网页「连向我 → 星轨相交」的样子），另带今天还能连几颗。
+/// 只有带 `?mark=1` 才标成看过。算第二份读的次数。
+#[derive(Clone, Debug, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccCrossingCards {
+    #[serde(default)]
+    pub cards: Vec<VrccStarCard>,
+    /// 上次看过时最新那次擦肩的时间；`at` 比它新就是新的。
+    #[serde(default)]
+    pub seen: Option<i64>,
+    /// 今天还能从星轨相交连几颗。
+    #[serde(default)]
+    pub left: Option<i64>,
+    /// 每天最多几颗。
+    #[serde(default)]
+    pub max: Option<i64>,
 }
 
 /// `GET /me/today`：这一轮路过的星 + 轮次进度。

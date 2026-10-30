@@ -24,11 +24,11 @@ use serde_json::json;
 use vrcx_0_contracts::vrcc::resolve_client_id;
 use vrcx_0_contracts::vrcc::{
     ErrorDetail, ErrorLayer, HttpDetail, LocalThrottle, TransportKind, VrccAnnouncements,
-    VrccBoard, VrccBoardSort, VrccDeviceCode, VrccErrorBody, VrccMapDetail, VrccMapPage,
-    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
-    VrccNotifications, VrccRatedMaps, VrccRatingInput, VrccRatingText, VrccRecentNotifications,
-    VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccVote, VrccVoteKind,
-    VrccVoteResult, VRCC_API_BASE, VRCC_SITE_ORIGIN,
+    VrccBoard, VrccBoardSort, VrccCrossingCards, VrccCrossings, VrccDeviceCode, VrccErrorBody,
+    VrccMapDetail, VrccMapPage, VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap,
+    VrccMyMapPage, VrccNotes, VrccNotifications, VrccRatedMaps, VrccRatingInput, VrccRatingText,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread,
+    VrccVote, VrccVoteKind, VrccVoteResult, VRCC_API_BASE, VRCC_SITE_ORIGIN,
 };
 use vrcx_0_core::proxy::with_remote_dns;
 
@@ -1351,6 +1351,54 @@ impl VrccClient {
         })
         .await
     }
+
+    /// 星轨相交：在同房间偶遇过的玩家列表（`GET /me/crossings`）。
+    ///
+    /// **需要 `crossings` 敏感权限**。`dev-` 标识要不到，会回
+    /// `403 scope_unreviewed`——这是预期行为，不是故障，所以调用方应当把
+    /// `MissingScope` 当成「功能没开通」处理，而不是「连接坏了」。
+    ///
+    /// `mark` 只在玩家真的打开这一页时为 true：它会把已读同步到账号，
+    /// 网页和手机上的红点跟着消。后台只为算数字时**必须**传 false，
+    /// 否则等于替玩家把提醒标成看过了。
+    ///
+    /// 计入第一份读的额度（与 `/me/mutuals`、`/me/notifications/recent`
+    /// 共享每授权每天 1000 次）。
+    pub async fn crossings(&self, mark: bool) -> Result<VrccCrossings, VrccError> {
+        self.request(Call {
+            method: "GET",
+            path: crossings_path(mark),
+            body: None,
+            authed: true,
+            key: "crossings",
+            min_gap: Duration::from_secs(30),
+            bucket: Some(QuotaBucket::Reads),
+            bypass_gate: false,
+        })
+        .await
+    }
+
+    /// 星轨相交的完整星卡（`GET /me/crossings/cards`，1.13.0 起）。
+    ///
+    /// 与 [`Self::crossings`] 的区别：那个是「谁跟我擦过肩」的列表，这个是
+    /// 网页「连向我 → 星轨相交」那种完整星卡，另带今天还能连几颗。
+    ///
+    /// **算第二份读的额度**（`MoreReads`，与 `/me/today`、`/me/notes` 分开
+    /// 计），所以拉取频率要比列表更克制。只有带 `?mark=1` 才标成看过。
+    pub async fn crossing_cards(&self, mark: bool) -> Result<VrccCrossingCards, VrccError> {
+        self.request(Call {
+            method: "GET",
+            path: crossing_cards_path(mark),
+            body: None,
+            authed: true,
+            key: "crossings/cards",
+            // 列表是 30 秒，星卡**更宽**：它是第二份读，别跟列表抢窗口。
+            min_gap: Duration::from_secs(60),
+            bucket: Some(QuotaBucket::MoreReads),
+            bypass_gate: false,
+        })
+        .await
+    }
 }
 
 /// 地图榜的路径。总榜不带 `sort`，和旧服务器上的写法一模一样。
@@ -1389,6 +1437,27 @@ fn recent_path(mark: bool) -> &'static str {
         "me/notifications/recent?mark=1"
     } else {
         "me/notifications/recent"
+    }
+}
+
+/// 星轨相交列表的路径。
+///
+/// 与 `recent_path` 同一套 `mark` 约定：要标才带 `?mark=1`，不标整个参数
+/// 都不带。这样 1.9.0 前后两种服务器语义都正确。
+fn crossings_path(mark: bool) -> &'static str {
+    if mark {
+        "me/crossings?mark=1"
+    } else {
+        "me/crossings"
+    }
+}
+
+/// 星轨相交完整星卡的路径。`mark` 约定同上。
+fn crossing_cards_path(mark: bool) -> &'static str {
+    if mark {
+        "me/crossings/cards?mark=1"
+    } else {
+        "me/crossings/cards"
     }
 }
 
@@ -1723,6 +1792,9 @@ mod tests {
             VRCC_DEVICE_AUTH_SCOPE
         );
         assert!(!VRCC_DEV_DEVICE_AUTH_SCOPE.contains("mutuals"));
+        // 敏感权限只出现在正式标识那一串；`dev-` 要了会连码都拿不到。
+        assert!(VRCC_DEVICE_AUTH_SCOPE.contains("crossings"));
+        assert!(!VRCC_DEV_DEVICE_AUTH_SCOPE.contains("crossings"));
         for scope in [VRCC_DEVICE_AUTH_SCOPE, VRCC_DEV_DEVICE_AUTH_SCOPE] {
             assert!(scope.starts_with("profile notifications maps"));
         }
@@ -2338,6 +2410,22 @@ mod tests {
             boards_path(5, VrccBoardSort::New),
             "boards/maps?limit=5&sort=new"
         );
+    }
+
+    /// 星轨相交的两个端点都要遵守「要标才带 `mark=1`」。
+    ///
+    /// 这条值得单独钉住：`crossings` 是**唯一**会把已读同步到玩家账号、
+    /// 连带清掉网页与手机红点的读接口。后台只为算未读数时若误传 true，
+    /// 等于替玩家把提醒标成看过了——那个损失不可撤销。
+    #[test]
+    fn crossing_paths_only_mark_when_asked() {
+        assert_eq!(crossings_path(true), "me/crossings?mark=1");
+        assert_eq!(crossings_path(false), "me/crossings");
+        assert!(!crossings_path(false).contains("mark"));
+
+        assert_eq!(crossing_cards_path(true), "me/crossings/cards?mark=1");
+        assert_eq!(crossing_cards_path(false), "me/crossings/cards");
+        assert!(!crossing_cards_path(false).contains("mark"));
     }
 
     /// 批量查地图的路径。

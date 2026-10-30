@@ -11,11 +11,11 @@ use std::time::{Duration, Instant};
 use vrcx_0_application_core::Result;
 use vrcx_0_contracts::vrcc::{
     device_auth_scope, is_dev_client, ErrorDetail, ErrorLayer, TransportKind, VrccAnnouncements,
-    VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccDeviceCode, VrccError, VrccMapPage,
-    VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
-    VrccNotifications, VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus,
-    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccUsageSnapshot, VrccVote,
-    VrccVoteKind, VrccVoteResult, VrccWristSummary,
+    VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccCrossingCards, VrccCrossings,
+    VrccDeviceCode, VrccError, VrccMapPage, VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap,
+    VrccMyMapPage, VrccNotes, VrccNotifications, VrccRatedMaps, VrccRatingText,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccTokenResponse, VrccUnread,
+    VrccUsageSnapshot, VrccVote, VrccVoteKind, VrccVoteResult, VrccWristSummary,
 };
 
 /// 服务器回答 `me/unread` 是 `404 not_found`（还没更新到 1.13.0）之后，
@@ -128,6 +128,10 @@ pub trait VrccRemote: Send + Sync {
     fn notes<'a>(&'a self) -> VrccFuture<'a, VrccNotes>;
     fn today<'a>(&'a self) -> VrccFuture<'a, VrccToday>;
     fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals>;
+    /// 星轨相交列表。`mark` 只在玩家真正打开该页时为 true。
+    fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings>;
+    /// 星轨相交的完整星卡（1.13.0 起）。算第二份读的额度。
+    fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards>;
 
     // -- 本地状态（不联网） -------------------------------------------------
     /// 把令牌交给实现方持有。之后所有个人请求自动带上它。
@@ -1104,6 +1108,49 @@ impl VrccService {
             .mutuals()
             .await
             .map_err(|error| self.settle(error))
+    }
+
+    /// 星轨相交：在同房间偶遇过的玩家列表（需要 `crossings` 敏感权限）。
+    ///
+    /// `mark` 只在玩家真正打开「星轨相交」页时为 true —— 它会把已读同步到
+    /// 账号，网页和手机上的红点跟着消。后台只为算未读数时**必须**传 false，
+    /// 否则等于替玩家把提醒标成看过了。
+    ///
+    /// 与 `mutuals` 的区别：互相连上是**双向已连线**的星友，星轨相交只是
+    /// **同房间擦肩**，大多数还没连线。所以界面要按 `linked` / `mutual`
+    /// 两个状态区分展示与可执行动作。
+    ///
+    /// 返回里的 `why` 必须由调用方处理：`hide` 时**不应显示**该模块
+    /// （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
+    pub async fn crossings(&self, mark: bool) -> std::result::Result<VrccCrossings, VrccError> {
+        self.ensure_connected()?;
+        let mut crossings = self
+            .remote
+            .crossings(mark)
+            .await
+            .map_err(|error| self.settle(error))?;
+        // `why == "hide"` 的判定只在这里做一次，消费方只看 `hidden`。
+        crossings.settle_visibility();
+        Ok(crossings)
+    }
+
+    /// 星轨相交的完整星卡（`/me/crossings/cards`，1.13.0 起）。
+    ///
+    /// 比列表重，且算**第二份读**的额度（与 `/me/today`、`/me/notes` 分开计），
+    /// 所以只应在玩家打开星轨相交页时按需拉取，不要进后台轮询。
+    ///
+    /// 旧服务器没有这个接口，回 `404 not_found` 时返回 `None`：它只影响
+    /// 「今天还能连几颗」那一小块，不该让整个列表跟着失败。
+    pub async fn crossing_cards(
+        &self,
+        mark: bool,
+    ) -> std::result::Result<Option<VrccCrossingCards>, VrccError> {
+        self.ensure_connected()?;
+        match self.remote.crossing_cards(mark).await {
+            Ok(cards) => Ok(Some(cards)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(self.settle(error)),
+        }
     }
 
     fn ensure_connected(&self) -> std::result::Result<(), VrccError> {

@@ -507,3 +507,41 @@ pub async fn app__vrcc_mutuals(
         .await
         .map_err(|failure| AppError::Vrcc { failure })
 }
+
+/// 星轨相交：在同房间偶遇过的玩家列表。需要 `crossings` 敏感权限（要审核）。
+///
+/// `mark` 只在玩家真的打开「星轨相交」页时为 true —— 它会把已读同步到账号，
+/// 网页和手机上的红点跟着消。后台只为算未读数时**必须**传 false。
+///
+/// 返回里的 `hidden` 已经由应用层按 `why` 定好：为 true 时整个模块都不应显示
+/// （16–17 岁星池，或玩家在隐私设置里关了星轨相交）。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_crossings(
+    state: State<'_, AppState>,
+    mark: bool,
+) -> Result<vrcx_0_contracts::vrcc::VrccCrossings, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .crossings(mark)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 星轨相交的完整星卡（1.13.0 起）。与列表分开，算第二份读的额度。
+///
+/// 旧服务器上没有这个接口，返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_crossing_cards(
+    state: State<'_, AppState>,
+    mark: bool,
+) -> Result<Option<vrcx_0_contracts::vrcc::VrccCrossingCards>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .crossing_cards(mark)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}

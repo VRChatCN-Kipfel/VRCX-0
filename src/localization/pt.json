@@ -800,7 +800,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Cruzar"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -880,7 +881,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them",
             "linked_at": "When you linked",
@@ -912,6 +912,30 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Conecte sua conta estelar para ver com quem você se cruzou.",
+            "unavailable": "Os cruzamentos não estão disponíveis para esta conta.",
+            "needs_scope": "Esta função precisa da permissão crossings. Reconecte e conceda-a.",
+            "empty": "Ainda não há cruzamentos. Pessoas encontradas no mesmo mundo do VRChat aparecerão aqui.",
+            "count": "{count} cruzamentos",
+            "quota": "Restam {left} de {max} hoje",
+            "refresh": "Atualizar",
+            "unnamed": "Estrela sem nome",
+            "fresh": "Novo",
+            "linked": "Você a conectou",
+            "mutual": "Conectados nos dois sentidos",
+            "not_linked": "Ainda não conectado",
+            "open_page": "Ver no vrcc.cc",
+            "why": {
+                "verify": "Verifique sua conta do VRChat para usar os cruzamentos.",
+                "wait": "Sua conta do VRChat está aguardando verificação.",
+                "queued": "Um pedido de amizade do assistente VRCC está na fila.",
+                "sent": "Um pedido de amizade do assistente VRCC foi enviado. Aceite no VRChat.",
+                "gone": "Você removeu o assistente VRCC dos seus amigos do VRChat.",
+                "friend": "Adicione o assistente VRCC como amigo no VRChat para usar os cruzamentos.",
+                "unknown": "Os cruzamentos estão temporariamente indisponíveis."
+            }
         }
     },
     "nav_menu": {
@@ -2184,7 +2208,6 @@
                     "go_to_friend": "Ir para o amigo",
                     "cancelling": "Cancelando",
                     "find_friend": "Procurar amigo",
-                    "open_profile": "Abrir perfil",
                     "hide_from_graph": "Ocultar do gráfico",
                     "clear_filters": "Limpar filtros"
                 },
@@ -3277,7 +3300,7 @@
                             "status_account_mismatch_skipped": "Pertence a outra conta · ignorado",
                             "status_live_file": "Em gravação pelo VRChat · feche o jogo e tente novamente",
                             "status_unreadable": "Não é possível ler o arquivo",
-                            "inserted": "Registros importados: {{count}}",
+                            "inserted": "Registros importados: {count}",
                             "nothing_new": "Todos os registros já existem",
                             "unverified_warning": "Alguns logs não incluem informações da conta conectada. Se foram gerados pela sua conta, marque a opção abaixo para incluí-los. Se não for possível confirmar, deixe-a desmarcada; registros de outra conta comprometeriam seu histórico.",
                             "confirm_unverified": "Confirmo que estes logs foram gerados pela minha conta",
@@ -3879,8 +3902,8 @@
                 "override_disabled": "CSS personalizado desativado.",
                 "override_cleared": "CSS de override limpo.",
                 "disable_failed": "Falha ao atualizar as configurações de tema da comunidade.",
-                "update_available": "Nova versão de {{name}} disponível",
-                "theme_updated": "Tema da comunidade atualizado para {{version}}.",
+                "update_available": "Nova versão de {name} disponível",
+                "theme_updated": "Tema da comunidade atualizado para {version}.",
                 "update_failed": "Falha ao atualizar o tema da comunidade."
             },
             "confirm": {

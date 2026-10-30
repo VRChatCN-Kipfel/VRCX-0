@@ -12,10 +12,10 @@
 
 use vrcx_0_application::vrcc::{VrccConnection, VrccFuture, VrccLocalUsage, VrccRemote};
 use vrcx_0_contracts::vrcc::{
-    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccDeviceCode, VrccMapPage, VrccMutuals,
-    VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccNotifications,
-    VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday,
-    VrccTokenResponse, VrccUnread, VrccVote, VrccVoteKind, VrccVoteResult,
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccCrossingCards, VrccCrossings, VrccDeviceCode,
+    VrccMapPage, VrccMutuals, VrccMyBoard, VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes,
+    VrccNotifications, VrccRatedMaps, VrccRatingText, VrccRecentNotifications, VrccStatus,
+    VrccStickers, VrccToday, VrccTokenResponse, VrccUnread, VrccVote, VrccVoteKind, VrccVoteResult,
 };
 use vrcx_0_integrations::vrcc::{now_millis, VrccSession, WINDOW_LIMIT};
 
@@ -149,6 +149,16 @@ impl VrccRemote for VrccRemoteAdapter {
 
     fn mutuals<'a>(&'a self) -> VrccFuture<'a, VrccMutuals> {
         Box::pin(async move { self.client().mutuals().await })
+    }
+
+    /// 星轨相交列表。`mark` 原样透传：要不要标已读是应用层的决定
+    /// （只有玩家真的打开该页才标），这一层不做判断。
+    fn crossings<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossings> {
+        Box::pin(async move { self.client().crossings(mark).await })
+    }
+
+    fn crossing_cards<'a>(&'a self, mark: bool) -> VrccFuture<'a, VrccCrossingCards> {
+        Box::pin(async move { self.client().crossing_cards(mark).await })
     }
 
     fn connect(

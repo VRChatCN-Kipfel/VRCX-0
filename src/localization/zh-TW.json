@@ -803,7 +803,8 @@
             "maps": "地圖榜",
             "notifications": "提醒",
             "me": "我的",
-            "mutuals": "連上"
+            "mutuals": "連上",
+            "crossings": "星軌相交"
         },
         "maps": {
             "hint": "滿 {min} 人評分才進總榜",
@@ -883,7 +884,6 @@
             "empty": "還沒有互相連上的星友",
             "needs_scope": "「互相連上」需要 mutuals 權限，重新連線一次即可（開發版標識拿不到這項）。",
             "unnamed": "未命名",
-            "open_profile": "在 VRChat 玩家詳情裡開啟",
             "unavailable": "這一項需要額外權限，當前客戶端還沒開通",
             "rate_mine": "我給 TA 的分",
             "linked_at": "連上的時間",
@@ -915,6 +915,30 @@
         "announcement": {
             "open": "查看",
             "dismiss": "關閉這條公告"
+        },
+        "crossings": {
+            "need_connect": "連接星遇同頻帳號後，就能看到和你擦肩而過的人。",
+            "unavailable": "這個帳號暫時用不了星軌相交。",
+            "needs_scope": "這項功能需要 crossings 權限。重新連接時勾選它。",
+            "empty": "還沒有擦肩記錄。在同一個 VRChat 房間裡遇到過的星友會出現在這裡。",
+            "count": "{count} 條擦肩記錄",
+            "quota": "今天還能連 {left} / {max} 顆",
+            "refresh": "重新整理",
+            "unnamed": "未命名星",
+            "fresh": "新",
+            "linked": "你已連向 TA",
+            "mutual": "已雙向連上",
+            "not_linked": "還沒連上",
+            "open_page": "在 vrcc.cc 上查看",
+            "why": {
+                "verify": "先驗證 VRChat 帳號才能使用星軌相交。",
+                "wait": "你的 VRChat 帳號正在等待驗證。",
+                "queued": "機器人「VRCC 的小幫手」的好友邀請正在排隊。",
+                "sent": "機器人「VRCC 的小幫手」的好友邀請已送出，請在 VRChat 裡同意。",
+                "gone": "你在 VRChat 裡刪除了機器人好友。",
+                "friend": "先把機器人「VRCC 的小幫手」加為 VRChat 好友，才能使用星軌相交。",
+                "unknown": "星軌相交暫時不可用。"
+            }
         }
     },
     "nav_menu": {
@@ -2185,7 +2209,6 @@
                     "go_to_friend": "選擇好友",
                     "cancelling": "正在取消",
                     "find_friend": "尋找好友",
-                    "open_profile": "檢視個人資料",
                     "hide_from_graph": "從關係圖中隱藏",
                     "clear_filters": "清除篩選"
                 },
@@ -3278,7 +3301,7 @@
                             "status_account_mismatch_skipped": "其他帳號的記錄檔 · 已略過",
                             "status_live_file": "VRChat 正在寫入 · 請關閉遊戲後重試",
                             "status_unreadable": "無法讀取此檔案",
-                            "inserted": "已補錄 {{count}} 筆紀錄",
+                            "inserted": "已補錄 {count} 筆紀錄",
                             "nothing_new": "紀錄皆已存在，無需補錄",
                             "unverified_warning": "部分記錄檔未包含登入帳號資訊。若確認由本人帳號產生，請勾選下方選項一併補錄；若無法確認，請勿勾選，混入其他帳號的紀錄將導致歷史資料錯亂。",
                             "confirm_unverified": "我確認這些記錄檔由本人帳號產生",
@@ -3880,8 +3903,8 @@
                 "override_disabled": "自訂 CSS 已停用。",
                 "override_cleared": "自訂 CSS 已清除。",
                 "disable_failed": "更新社群主題設定失敗。",
-                "update_available": "主題“{{name}}”有新版本",
-                "theme_updated": "社群主題已更新至 {{version}}。",
+                "update_available": "主題“{name}”有新版本",
+                "theme_updated": "社群主題已更新至 {version}。",
                 "update_failed": "更新社群主題失敗。"
             },
             "confirm": {

@@ -808,7 +808,8 @@
             "maps": "Map board",
             "notifications": "Notifications",
             "me": "Me",
-            "mutuals": "Mutuals"
+            "mutuals": "Mutuals",
+            "crossings": "Пересечения"
         },
         "maps": {
             "hint": "Needs {min} ratings to reach the board",
@@ -888,7 +889,6 @@
             "empty": "No mutual links yet",
             "needs_scope": "Mutual links need the mutuals permission; reconnect once to get it (development builds can't).",
             "unnamed": "Unnamed",
-            "open_profile": "Open in the VRChat player dialog",
             "unavailable": "This needs an extra permission this client does not have",
             "rate_mine": "My rating for them",
             "linked_at": "When you linked",
@@ -920,6 +920,30 @@
         "announcement": {
             "open": "View",
             "dismiss": "Dismiss this announcement"
+        },
+        "crossings": {
+            "need_connect": "Подключите звёздный аккаунт, чтобы видеть, с кем вы пересекались.",
+            "unavailable": "Пересечения недоступны для этого аккаунта.",
+            "needs_scope": "Для этой функции нужно разрешение crossings. Переподключитесь и разрешите его.",
+            "empty": "Пересечений пока нет. Люди, встреченные в одном мире VRChat, появятся здесь.",
+            "count": "Пересечений: {count}",
+            "quota": "Сегодня осталось {left} из {max}",
+            "refresh": "Обновить",
+            "unnamed": "Безымянная звезда",
+            "fresh": "Новое",
+            "linked": "Вы связались",
+            "mutual": "Связь в обе стороны",
+            "not_linked": "Ещё не связано",
+            "open_page": "Открыть на vrcc.cc",
+            "why": {
+                "verify": "Подтвердите аккаунт VRChat, чтобы использовать пересечения.",
+                "wait": "Ваш аккаунт VRChat ожидает подтверждения.",
+                "queued": "Запрос в друзья от помощника VRCC в очереди.",
+                "sent": "Запрос в друзья от помощника VRCC отправлен. Примите его в VRChat.",
+                "gone": "Вы удалили помощника VRCC из друзей VRChat.",
+                "friend": "Добавьте помощника VRCC в друзья VRChat, чтобы использовать пересечения.",
+                "unknown": "Пересечения временно недоступны."
+            }
         }
     },
     "nav_menu": {
@@ -2200,7 +2224,6 @@
                     "go_to_friend": "Перейти к другу",
                     "cancelling": "Отмена",
                     "find_friend": "Найти друга",
-                    "open_profile": "Открыть профиль",
                     "hide_from_graph": "Скрыть с графа",
                     "clear_filters": "Сбросить фильтры"
                 },
@@ -3293,7 +3316,7 @@
                             "status_account_mismatch_skipped": "Принадлежит другому аккаунту · пропущено",
                             "status_live_file": "Файл используется VRChat · закройте игру и повторите попытку",
                             "status_unreadable": "Не удаётся прочитать файл",
-                            "inserted": "Импортировано записей: {{count}}",
+                            "inserted": "Импортировано записей: {count}",
                             "nothing_new": "Все записи уже существуют",
                             "unverified_warning": "Некоторые логи не содержат сведений об аккаунте, выполнившем вход. Если они созданы вашим аккаунтом, отметьте пункт ниже, чтобы включить их. Если подтвердить это нельзя, оставьте пункт неотмеченным: записи другого аккаунта нарушат вашу историю.",
                             "confirm_unverified": "Подтверждаю, что эти логи созданы моим аккаунтом",
@@ -3895,8 +3918,8 @@
                 "override_disabled": "Пользовательский CSS отключён.",
                 "override_cleared": "Пользовательский CSS очищен.",
                 "disable_failed": "Не удалось обновить тематические параметры сообщества.",
-                "update_available": "Доступна новая версия темы «{{name}}»",
-                "theme_updated": "Тема сообщества обновлена до {{version}}.",
+                "update_available": "Доступна новая версия темы «{name}»",
+                "theme_updated": "Тема сообщества обновлена до {version}.",
                 "update_failed": "Не удалось обновить тему сообщества."
             },
             "confirm": {

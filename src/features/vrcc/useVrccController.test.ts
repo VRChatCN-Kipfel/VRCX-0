@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     pollNotifications: vi.fn(),
     myMap: vi.fn(),
     mutuals: vi.fn(),
+    crossings: vi.fn(),
+    crossingCards: vi.fn(),
     today: vi.fn(),
     beginDeviceAuth: vi.fn(),
     deviceAuthPoll: vi.fn(),
@@ -66,6 +68,8 @@ vi.mock('@/platform/tauri/bindings', () => ({
         appVrccPollNotifications: mocks.pollNotifications,
         appVrccMyMap: mocks.myMap,
         appVrccMutuals: mocks.mutuals,
+        appVrccCrossings: mocks.crossings,
+        appVrccCrossingCards: mocks.crossingCards,
         appVrccToday: mocks.today,
         appVrccDeviceAuthBegin: mocks.beginDeviceAuth,
         appVrccDeviceAuthPoll: mocks.deviceAuthPoll,
@@ -139,6 +143,19 @@ beforeEach(() => {
     });
     mocks.myMap.mockResolvedValue(null);
     mocks.mutuals.mockResolvedValue({ stars: [], n: 0 });
+    mocks.crossings.mockResolvedValue({
+        stars: [],
+        n: 0,
+        why: null,
+        hidden: false,
+        me: null
+    });
+    mocks.crossingCards.mockResolvedValue({
+        cards: [],
+        seen: null,
+        left: null,
+        max: null
+    });
     // 订阅立即返回一个退订函数，模拟 Tauri 正常挂上监听。
     mocks.subscribeNotices.mockResolvedValue(() => {});
 });
@@ -314,6 +331,135 @@ describe('useVrccController', () => {
         );
         expect(result.current.error?.kind).toBe('needsReauth');
         consoleSpy.mockRestore();
+    });
+
+    it('crossings 缺权限时只记在页签里，不弹 toast、不拖垮整页', async () => {
+        // 与 mutuals 同一个道理：`dev-` 标识拿不到 `crossings` 敏感权限，
+        // 线上实返 `403 scope`。这是预期结果，不是故障——只在「星轨相交」
+        // 页签里说明，不该渲染成整页红色横幅。
+        mocks.crossings.mockRejectedValue(
+            Object.assign(new Error('HTTP 403 scope'), {
+                vrcc: { kind: 'missingScope', need: 'crossings' }
+            })
+        );
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        act(() => result.current.setTab('crossings'));
+        await waitFor(() =>
+            expect(result.current.crossingsError).not.toBeNull()
+        );
+
+        expect(result.current.crossingsError).toContain('403');
+        expect(result.current.crossings).toBeNull();
+        expect(mocks.toastAdd).not.toHaveBeenCalled();
+        // 地图榜与连接状态照旧可用。
+        expect(result.current.boards).not.toBeNull();
+        expect(result.current.connection?.connected).toBe(true);
+    });
+
+    it('crossings 把 hidden 带出来，交给界面隐藏整个模块', async () => {
+        // `hide` 意味着玩家不该看到这个模块（16-17 岁星池，或玩家在隐私
+        // 设置里关了星轨相交）。官方要求客户端不显示，所以控制器必须把
+        // 后端算好的 `hidden` 留在 state 里，不能吞掉——吞掉就会变成一个
+        // 普通空列表，等于向不该看到的人确认「这里有星轨相交」这个事实。
+        mocks.crossings.mockResolvedValue({
+            stars: [],
+            n: 0,
+            why: 'hide',
+            hidden: true,
+            me: null
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        act(() => result.current.setTab('crossings'));
+        await waitFor(() =>
+            expect(result.current.crossings?.hidden).toBe(true)
+        );
+        expect(result.current.crossings?.why).toBe('hide');
+        expect(result.current.crossings?.stars).toHaveLength(0);
+    });
+
+    it('首屏不拉星轨相交，切到这一页才拉、并且带 mark=true', async () => {
+        // 两件事一起钉住：
+        // 1. 首屏一定停在地图榜，没人看得见星轨相交。它算两份每天额度
+        //    （列表一份、星卡一份），提前拉就是每次开页白花 2 次。
+        // 2. 玩家真切到这一页 = 看过了，要带 mark=true 把红点消掉。
+        //    这条链路错了，红点永远消不掉。
+        mocks.crossings.mockResolvedValue({
+            stars: [],
+            n: 0,
+            why: null,
+            hidden: false,
+            me: null
+        });
+        mocks.crossingCards.mockResolvedValue({
+            cards: [],
+            seen: null,
+            left: 3,
+            max: 5
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+
+        // 首屏：一次都没问过。
+        expect(mocks.crossings).not.toHaveBeenCalled();
+        expect(mocks.crossingCards).not.toHaveBeenCalled();
+
+        // 玩家切到「星轨相交」：带 mark=true 拉。
+        act(() => result.current.setTab('crossings'));
+        await waitFor(() => expect(mocks.crossings).toHaveBeenCalledWith(true));
+        expect(mocks.crossingCards).toHaveBeenCalledWith(true);
+        // 星卡的额度读数被记下来了。
+        await waitFor(() => expect(result.current.crossingCards?.left).toBe(3));
+    });
+
+    it('手动刷新星轨相交不替玩家把记录标成已读', async () => {
+        // 刷新按钮只是「再看看有没有新的」，不是「我看过了」。顺手传
+        // mark=true 会把玩家还没看完的记录标成已读，而且不可撤销、
+        // 不会报错。
+        mocks.crossings.mockResolvedValue({
+            stars: [],
+            n: 0,
+            why: null,
+            hidden: false,
+            me: null
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+
+        mocks.crossings.mockClear();
+        await act(async () => {
+            await result.current.refreshCrossings(false);
+        });
+        expect(mocks.crossings).toHaveBeenCalledWith(false);
+    });
+
+    it('断开连接后清掉星轨相交，不把上个账号的记录留在界面上', async () => {
+        // 擦肩记录是**个人数据**。不清的话，断开后页签里还留着别人的
+        // 记录和额度，看起来像是连着的。
+        mocks.crossings.mockResolvedValue({
+            stars: [{ n: 77, name: '拾光旅人', linked: false, mutual: false }],
+            n: 1,
+            why: null,
+            hidden: false,
+            me: null
+        });
+        const { result } = renderHook(() => useVrccController());
+        await waitFor(() => expect(result.current.loading).toBe(false));
+
+        // 首屏不拉，先切到那一页把数据填上。
+        act(() => result.current.setTab('crossings'));
+        await waitFor(() =>
+            expect(result.current.crossings?.stars).toHaveLength(1)
+        );
+
+        mocks.disconnect.mockResolvedValue(undefined);
+        await act(async () => {
+            await result.current.disconnect();
+        });
+
+        expect(result.current.crossings).toBeNull();
+        expect(result.current.crossingCards).toBeNull();
     });
 
     it('mutuals 缺权限时只记在页签里，不弹 toast、不拖垮整页', async () => {
