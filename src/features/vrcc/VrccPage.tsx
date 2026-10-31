@@ -32,11 +32,8 @@ import { VrccMePanel } from './components/VrccMePanel';
 import { VrccMutualsPanel } from './components/VrccMutualsPanel';
 import { VrccNotificationsPanel } from './components/VrccNotificationsPanel';
 import { useVrccController, type VrccTab } from './useVrccController';
-import type {
-    VrccAnnouncement,
-    VrccRecentNotifications,
-    VrccUnread
-} from './vrccApi';
+import type { VrccAnnouncement } from './vrccApi';
+import { countVrccUnread } from './vrccUnreadCount';
 
 /**
  * 关掉的公告编号，记在本机。公告的编号只增不减：这条和更早的不再显示，
@@ -51,28 +48,6 @@ function readDismissedAnnouncement(): number | null {
     } catch {
         return null;
     }
-}
-
-/**
- * 页签上的未读数。
- *
- * 服务器有 `me/unread`（1.13.0 起）时是网页上几处红点的合计；旧服务器上
- * 退回「最近的提醒」里 `id > read` 的条数（`read` 没有时都算未读）。
- */
-function unreadCount(
-    unread: VrccUnread | null,
-    recent: VrccRecentNotifications | null
-): number {
-    if (unread) {
-        return (
-            (unread.inbox ?? 0) +
-            (unread.cross ?? 0) +
-            (unread.chats ?? 0) +
-            (unread.notes ?? 0)
-        );
-    }
-    const read = recent?.read ?? 0;
-    return (recent?.items ?? []).filter((item) => (item.id ?? 0) > read).length;
 }
 
 const VRCC_TABS: readonly VrccTab[] = [
@@ -126,7 +101,7 @@ export function VrccPage() {
     } = useVrccController();
 
     const connected = connection?.connected ?? false;
-    const unreadTotal = connected ? unreadCount(unread, recent) : 0;
+    const unreadTotal = connected ? countVrccUnread(unread, recent) : 0;
     // 从通知中心点进来时带的页签名。
     const [searchParams, setSearchParams] = useSearchParams();
     const requestedTab = searchParams.get('tab');

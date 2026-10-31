@@ -11,6 +11,7 @@ import i18n from '@/services/i18nService';
 import { openExternalLink } from '@/services/shellIntegrationService';
 import { toast } from '@/services/toastService';
 import { useRuntimeStore } from '@/state/runtimeStore';
+import { useVrccUnreadStore } from '@/state/vrccUnreadStore';
 import { useVrcNotificationStore } from '@/state/vrcNotificationStore';
 
 import {
@@ -30,6 +31,7 @@ import {
     type VrccUnread,
     type VrccUsage
 } from './vrccApi';
+import { countVrccUnread } from './vrccUnreadCount';
 
 /**
  * 后端提醒轮询发出的事件名，与 Rust 侧
@@ -653,6 +655,38 @@ export function useVrccController() {
         refreshUnread,
         reportError
     ]);
+
+    /**
+     * 把未读合计同步给侧边栏。
+     *
+     * 侧边栏是常驻组件，而 controller 只在星遇同频页面挂载时跑，所以数字得
+     * 从这里推出去。算的口径和页面标题旁那个角标一致（同一个
+     * `countVrccUnread`），否则两处会显示不同的数字。
+     *
+     * 没连上时推 0：连接断开后留一个旧数字，比不显示更容易误导。
+     */
+    useEffect(() => {
+        const connected = state.connection?.connected ?? false;
+        useVrccUnreadStore.getState().setConnected(connected);
+        useVrccUnreadStore
+            .getState()
+            .setUnreadTotal(
+                connected ? countVrccUnread(state.unread, state.recent) : 0
+            );
+    }, [state.connection?.connected, state.unread, state.recent]);
+
+    /**
+     * 卸载时清掉侧边栏的角标。
+     *
+     * 只清数字不清连接态：玩家可能只是切到别的页面，连接仍然有效，角标在
+     * 下次进页面时会重新拉。真正断开连接时上面的 effect 已经推了 0。
+     */
+    useEffect(
+        () => () => {
+            useVrccUnreadStore.getState().reset();
+        },
+        []
+    );
 
     /**
      * 切页签。
