@@ -374,6 +374,13 @@ pub(super) fn start_host_services(app: &tauri::AppHandle, state: &AppState) {
     state.runtime_host().start_data_services();
     state.runtime_host().start_game_services();
     state.runtime_host().start_desktop_services();
+    // 星遇同频的后台轮询。放到 Rust 侧而不是前端：窗口隐藏到托盘后 WebView
+    // 仍活着（window.hide() 不销毁 WebView），但 Chromium 会节流隐藏页面的
+    // 定时器，前端 60 秒的轮询可能被拉长到几分钟。挂在这里是因为 sink 刚
+    // 设好，轮询发的事件能真正送到前端。
+    state
+        .runtime_host()
+        .start_vrcc_background_poll(std::sync::Arc::new(TauriRuntimeEventSink::new(app.clone())));
 }
 
 #[derive(Clone)]

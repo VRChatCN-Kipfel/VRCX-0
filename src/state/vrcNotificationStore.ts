@@ -27,6 +27,7 @@ import {
     shouldMarkSeenRemotely
 } from '@/shared/utils/notificationSeen';
 import { isRecord } from '@/shared/utils/record';
+import { isVrccNotification } from '@/shared/utils/vrccNotification';
 import { useRuntimeStore } from '@/state/runtimeStore';
 import { useShellStore } from '@/state/shellStore';
 
@@ -347,11 +348,37 @@ function applyPendingSeenRows(rows: NotificationRow[]): NotificationRow[] {
     );
 }
 
+/**
+ * 把未读数分两路发给外壳。
+ *
+ * `unseenCount` 里含站外提醒（星遇同频）：它们是**通知**，应用内该有角标，
+ * 玩家点开通知中心也能看到。
+ *
+ * 但系统托盘/任务栏的图标红点语义是「有一件事在等你处理」，站外提醒读一眼
+ * 就好、没有待办动作，挂上去会让图标常亮成一盏状态灯。所以喂给外壳的是
+ * 另算的 `unseenActionCount`：只数真正需要动作的行。
+ *
+ * 两个数都从同一份 `rows` 现算，不做增量维护——增量维护在「标记已读」「过期」
+ * 「批量忽略」等多条路径上都要同步，漏一处就会长期偏大。
+ */
 function syncShellUnseenCount(unseenCount: number, force = false) {
-    useShellStore.getState().setVrcUnseenNotificationCount(unseenCount);
+    const unseenActionCount = countUnseenActionRows(
+        useVrcNotificationStore.getState().rows
+    );
+    useShellStore.getState().setVrcUnseenNotificationCount(unseenActionCount);
     if (force) {
         useShellStore.getState().updateTrayIconNotification(true);
     }
+}
+
+/** 只数「需要玩家处理」的未读行，站外提醒不算。 */
+function countUnseenActionRows(rows: NotificationRow[]): number {
+    let count = 0;
+    for (const row of rows) {
+        if (isVrccNotification(row)) continue;
+        if (isUnseenNotification(row)) count += 1;
+    }
+    return count;
 }
 
 function withoutFailedIds(failedIds: string[], idSet: Set<string>): string[] {

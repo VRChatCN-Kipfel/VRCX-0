@@ -1,0 +1,208 @@
+import { ExternalLink, Users } from 'lucide-react';
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { formatRelativeTime } from '@/lib/dateTime';
+import { vrccStarGroupColor } from '@/shared/constants/vrccStarGroup';
+import { Button } from '@/ui/shadcn/button';
+
+import { useMutualPresence, type MutualPresence } from '../useMutualPresence';
+import type { VrccMutuals } from '../vrccApi';
+import { VrccCommunityGroup } from './VrccCommunityGroup';
+
+/**
+ * 「互相连上」的星友列表。
+ *
+ * 需要 `mutuals` 敏感权限，`dev-` 标识一定拿不到（会回 `403 scope_unreviewed`）。
+ * 所以这里对「没连上 / 没权限 / 空列表」三种情况分别给出人话，而不是统一空白。
+ *
+ * **合规边界（重要）**：条目只提供「打开 VRCX-0 自己的玩家详情页」这一个动作。
+ * 官方明文要求——客户端若提供加好友入口，只能打开客户端自己的玩家页面让玩家
+ * 手动点添加，**严禁由程序自动代替玩家向 VRChat 发送好友请求**。
+ * 所以这里没有、也不应该有「加好友」按钮：加好友在玩家详情页里由玩家自己点。
+ */
+export function VrccMutualsPanel({
+    connected,
+    mutuals,
+    mutualsError,
+    onOpenUser,
+    onOpenGroup
+}: {
+    connected: boolean;
+    mutuals: VrccMutuals | null;
+    /**
+     * 这项功能没开通的原因（`dev-` 标识必然要不到 `mutuals` 敏感权限）。
+     * 只在本页签显示——它是「某个功能没开通」，不是「整页坏了」。
+     */
+    mutualsError?: string | null;
+    onOpenUser: (userId: string) => void;
+    /** 打开 VRCX-0 自己的群组详情窗。加入动作由玩家在那里自己点。 */
+    onOpenGroup: (groupId: string) => void;
+}) {
+    const { t } = useTranslation();
+    // 必须在任何提前 return 之前调用：Hooks 的调用顺序每一轮渲染都得一致。
+    const presenceLookup = useMutualPresence();
+    const stars = mutuals?.stars;
+
+    // 在线优先，其余保持服务端顺序（最近连上的在前）。
+    //
+    // 用「原下标」当第二排序键，让「同状态之间保持服务端顺序」变成这条比较
+    // 函数**自己**保证的事，而不是依赖 `sort` 的稳定性。
+    //
+    // （`Array.prototype.sort` 从 ES2019 起确实要求稳定，所以这里即使去掉
+    // 第二键，在符合规范的引擎上结果也一样。仍然显式写出来，是因为这条规则
+    // 是需求的一部分——「最近连上的在前」——不该建立在引擎实现细节上。）
+    const orderedStars = useMemo(() => {
+        const list = stars ?? [];
+        return list
+            .map((star, index) => ({ star, index }))
+            .sort((left, right) => {
+                const rank = (value: MutualPresence) =>
+                    value === 'online' ? 0 : 1;
+                return (
+                    rank(presenceLookup.of(left.star.vrcUser)) -
+                        rank(presenceLookup.of(right.star.vrcUser)) ||
+                    left.index - right.index
+                );
+            })
+            .map((entry) => entry.star);
+    }, [stars, presenceLookup]);
+
+    if (!connected) {
+        return (
+            <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-2 text-sm">
+                <Users className="size-6" />
+                {t('vrcc.mutuals.need_connect')}
+            </div>
+        );
+    }
+
+    if ((stars ?? []).length === 0) {
+        return (
+            <div className="text-muted-foreground flex h-40 flex-col items-center justify-center gap-2 px-6 text-center text-sm">
+                <Users className="size-6" />
+                <div className="leading-relaxed">
+                    {mutualsError
+                        ? t('vrcc.mutuals.unavailable')
+                        : t('vrcc.mutuals.empty')}
+                </div>
+                {/* 只有真的因为缺权限失败时才提示去开权限。
+                    已经有 `mutuals` 权限、只是确实没连上人的玩家，
+                    看到「重新连接一次」只会困惑。 */}
+                {mutualsError && (
+                    <div className="text-[11px] leading-relaxed">
+                        {t('vrcc.mutuals.needs_scope')}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border">
+                <ul className="divide-y">
+                    {orderedStars.map((star) => {
+                        const userId = star.vrcUser ?? '';
+                        // 没有 vrcUser 说明对方没公开「已验证」，就无法打开玩家页。
+                        // 这时只显示名字，不给一个点了没反应的按钮。
+                        const canOpen = userId.startsWith('usr_');
+                        // 我给 TA 的分（1.12.0 起）：0–5，半颗星一档，0 是没打；
+                        // 连上当天和旧服务器都没有。
+                        const mine = star.rate?.mine ?? 0;
+                        // 连上的时间（毫秒时间戳）。旧服务器和缺少字段时没有，
+                        // 这时整块不渲染——留一个「—」会让人以为记录丢了。
+                        const linkedAt = star.at
+                            ? formatRelativeTime(star.at, { style: 'short' })
+                            : '';
+                        // 星群色点。`A`（万象）没有专属色，官方也是用文字色，
+                        // 所以查不到就用 `currentColor` 跟着文字走，不硬造一个。
+                        const groupColor = vrccStarGroupColor(star.group);
+                        const presence = presenceLookup.of(userId);
+                        return (
+                            <li
+                                key={star.n}
+                                className="flex items-center gap-3 px-3 py-2"
+                            >
+                                <span
+                                    aria-hidden
+                                    className="text-muted-foreground size-2 shrink-0 rounded-full"
+                                    style={
+                                        groupColor
+                                            ? { backgroundColor: groupColor }
+                                            : undefined
+                                    }
+                                    title={
+                                        groupColor
+                                            ? undefined
+                                            : (star.group ?? '')
+                                    }
+                                />
+                                <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
+                                    #{star.n}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-medium">
+                                        {star.name ?? t('vrcc.mutuals.unnamed')}
+                                    </div>
+                                    <div className="text-muted-foreground truncate text-xs">
+                                        {star.vrc ?? '—'}
+                                    </div>
+                                </div>
+                                {mine > 0 && (
+                                    <span
+                                        className="text-muted-foreground shrink-0 text-xs tabular-nums"
+                                        title={t('vrcc.mutuals.rate_mine')}
+                                    >
+                                        ★ {mine}
+                                    </span>
+                                )}
+                                {/* 「什么时候连上的」和「我打的分」是两件事，
+                                所以各占一个位置，不合并进同一处文案。 */}
+                                {linkedAt && (
+                                    <span
+                                        className="text-muted-foreground shrink-0 text-xs tabular-nums"
+                                        title={t('vrcc.mutuals.linked_at')}
+                                    >
+                                        {linkedAt}
+                                    </span>
+                                )}
+                                {/* 和好友表的关系。好友表没加载好时一律不显示，
+                                    否则会把「还不知道」误显示成「不是好友」。 */}
+                                {presenceLookup.ready && canOpen && (
+                                    <span
+                                        className={
+                                            presence === 'online'
+                                                ? 'shrink-0 text-xs font-medium text-emerald-500'
+                                                : 'text-muted-foreground shrink-0 text-xs'
+                                        }
+                                    >
+                                        {presence === 'online'
+                                            ? t('vrcc.mutuals.presence.online')
+                                            : presence === 'friend'
+                                              ? t(
+                                                    'vrcc.mutuals.presence.friend'
+                                                )
+                                              : t('vrcc.mutuals.presence.add')}
+                                    </span>
+                                )}
+                                {canOpen && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="shrink-0"
+                                        onClick={() => onOpenUser(userId)}
+                                        title={t('vrcc.mutuals.open_profile')}
+                                    >
+                                        <ExternalLink className="size-3.5" />
+                                    </Button>
+                                )}
+                            </li>
+                        );
+                    })}
+                </ul>
+            </div>
+            <VrccCommunityGroup onOpenGroup={onOpenGroup} />
+        </div>
+    );
+}

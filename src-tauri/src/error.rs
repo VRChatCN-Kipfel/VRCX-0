@@ -18,6 +18,7 @@ enum AppErrorCode {
     IntegrationApiPortInUse,
     IntegrationApiBind,
     FeedLogger,
+    Vrcc,
     Custom,
 }
 
@@ -35,6 +36,15 @@ pub(crate) enum SqliteErrorCategory {
 struct AppErrorPayload {
     code: AppErrorCode,
     message: String,
+    /// 星遇同频的错误分类。
+    ///
+    /// **为什么放在这里而不是让前端解析文案**：分类必须在知道
+    /// `VrccError` 确切变体的那一层算（runtime/application），前端只能看到
+    /// 字符串。早先前端靠对中文文案做子串匹配，结果 `401 token` 落进
+    /// `Other`、缺权限的 `need` 在转字符串时丢失、`missing_scope` 提示
+    /// 永远不显示。这里把结论随错误一起带出去。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vrcc: Option<AppErrorVrccDetail>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sqlite_category: Option<SqliteErrorCategory>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,6 +53,32 @@ struct AppErrorPayload {
     port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     feed_logger_code: Option<FeedLoggerErrorCode>,
+}
+
+/// 星遇同频错误的结构化细节，直接来自 `VrccFailure`。
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppErrorVrccDetail {
+    /// 行为分类：`needsReauth` / `missingScope` / `throttled` / `notReady` /
+    /// `transport` / `other`。
+    pub kind: String,
+    /// 失败发生在哪一层：`input` / `client` / `transport` / `server` /
+    /// `session`。
+    ///
+    /// 前端据此区分「网络问题」和「业务拒绝」——这正是玩家分不清的那件事。
+    /// `input` 表示我们自己构造请求出了错，**不该显示给玩家**。
+    pub layer: String,
+    /// 缺哪个权限（`missingScope` 时通常有值）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub need: Option<String>,
+    /// 传输层卡在哪一步：`dns` / `connect` / `timeout` / `body` / `other`。
+    /// 不是传输层错误时不带这个字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_kind: Option<String>,
+    /// 发起调用的接口标识。同一个错误码在不同接口下含义可能不同，
+    /// 例如 `429 too_many` 在 `device_code` 上是按网络出口 IP 算的额度。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -98,8 +134,55 @@ pub enum AppError {
         message: String,
     },
 
+    /// 星遇同频的错误：保留分类结论，别把它折成字符串。
+    #[error("{failure}")]
+    Vrcc {
+        failure: vrcx_0_application::vrcc::VrccFailure,
+    },
+
     #[error("{0}")]
     Custom(String),
+}
+
+/// 星遇同频错误分类的线上名字。
+///
+/// 和前端 `VrccErrorKind` 的联合类型逐字一致（`needsReauth` 等），
+/// 所以前端可以直接拿来当判别用，不需要再映射一次。
+fn vrcc_kind_name(kind: vrcx_0_application::vrcc::VrccErrorKind) -> &'static str {
+    use vrcx_0_application::vrcc::VrccErrorKind as Kind;
+    match kind {
+        Kind::NeedsReauth => "needsReauth",
+        Kind::MissingScope => "missingScope",
+        Kind::Throttled => "throttled",
+        Kind::NotReady => "notReady",
+        Kind::Transport => "transport",
+        Kind::Other => "other",
+    }
+}
+
+/// 和前端 `VrccErrorKind` 的联合类型逐字一致（`needsReauth` 等），
+/// 所以前端可以直接拿来当判别用，不需要再映射一次。
+fn vrcc_layer_name(layer: vrcx_0_contracts::vrcc::ErrorLayer) -> &'static str {
+    use vrcx_0_contracts::vrcc::ErrorLayer as Layer;
+    match layer {
+        Layer::Input => "input",
+        Layer::Client => "client",
+        Layer::Transport => "transport",
+        Layer::Server => "server",
+        Layer::Session => "session",
+    }
+}
+
+/// 传输层环节，同样和前端联合类型逐字一致。
+fn vrcc_transport_kind_name(kind: vrcx_0_contracts::vrcc::TransportKind) -> &'static str {
+    use vrcx_0_contracts::vrcc::TransportKind as Kind;
+    match kind {
+        Kind::Dns => "dns",
+        Kind::Connect => "connect",
+        Kind::Timeout => "timeout",
+        Kind::Body => "body",
+        Kind::Other => "other",
+    }
 }
 
 impl Serialize for AppError {
@@ -107,6 +190,19 @@ impl Serialize for AppError {
         AppErrorPayload {
             code: self.code(),
             message: self.to_string(),
+            vrcc: match self {
+                Self::Vrcc { failure } => Some(AppErrorVrccDetail {
+                    kind: vrcc_kind_name(failure.kind).to_string(),
+                    layer: vrcc_layer_name(failure.layer).to_string(),
+                    need: failure.need.clone(),
+                    transport_kind: failure
+                        .transport_kind
+                        .map(vrcc_transport_kind_name)
+                        .map(str::to_string),
+                    op: failure.op.map(str::to_string),
+                }),
+                _ => None,
+            },
             sqlite_category: self.sqlite_category(),
             status_code: self.status_code(),
             port: self.port(),
@@ -161,6 +257,7 @@ impl AppError {
             Self::IntegrationApiPortInUse { .. } => AppErrorCode::IntegrationApiPortInUse,
             Self::IntegrationApiBind { .. } => AppErrorCode::IntegrationApiBind,
             Self::FeedLogger { .. } => AppErrorCode::FeedLogger,
+            Self::Vrcc { .. } => AppErrorCode::Vrcc,
             Self::Custom(_) => AppErrorCode::Custom,
         }
     }

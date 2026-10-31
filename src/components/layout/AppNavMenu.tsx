@@ -14,6 +14,7 @@ import { setNavbarCollapsedPreference } from '@/services/preferencesService';
 import { toast } from '@/services/toastService';
 import { triggerToolByKey } from '@/services/toolActionService';
 import { DASHBOARD_NAV_KEY_PREFIX } from '@/shared/constants/dashboard';
+import { NAV_NAVIGATE_REQUESTED_EVENT } from '@/shared/events/navLayoutEvents';
 import { useDashboardStore } from '@/state/dashboardStore';
 import {
     hasUnseenInventoryBundles,
@@ -426,6 +427,27 @@ export function AppNavMenu({ isCollapsed }: { isCollapsed: boolean }) {
         notificationLayout,
         preferencesHydrated
     });
+
+    // 后台服务（通知激活、深链）没有 router 上下文，通过事件请求跳页。
+    // 放在组件这一层才有 `navigate`；`useAppNavModel` 里没有它。
+    useEffect(() => {
+        const handleNavigateRequested = (event: Event) => {
+            const to = (event as CustomEvent<unknown>).detail;
+            if (typeof to === 'string' && to.startsWith('/')) {
+                navigate(to);
+            }
+        };
+        window.addEventListener(
+            NAV_NAVIGATE_REQUESTED_EVENT,
+            handleNavigateRequested
+        );
+        return () => {
+            window.removeEventListener(
+                NAV_NAVIGATE_REQUESTED_EVENT,
+                handleNavigateRequested
+            );
+        };
+    }, [navigate]);
     const navShortcutEntries = useMemo(
         () => getNavShortcutEntries(menuItems),
         [menuItems]

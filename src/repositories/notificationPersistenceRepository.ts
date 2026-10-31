@@ -115,7 +115,10 @@ export const NOTIFICATION_TYPES = Object.freeze([
     'avatarreview.failure',
     'promo.redeem',
     'twitchdrop.fulfilled',
-    'text.adventure'
+    'text.adventure',
+    // 站外来源的提醒。类型串是跨语言契约，与 Rust 侧
+    // `runtime-host-desktop::vrcc` 的 `NOTICE_ROW_TYPE` 必须一致。
+    'vrcc.notice'
 ]);
 
 function normalizeUserId(value?: string | null): string {

@@ -1,0 +1,509 @@
+#![allow(non_snake_case)]
+
+//! 星遇同频（vrcc.cc）的命令层。
+//!
+//! 每个命令只做「取运行时 → 调服务 → 错误映射」，业务在
+//! `vrcx_0_application::vrcc`，网络在 `vrcx_0_integrations::vrcc`。
+//!
+//! 设备授权是两步：`begin` 拿码，`poll` 按返回的 `interval` 反复问。
+//! 中间态（`device_code`）留在前端，不落盘。
+
+use tauri::State;
+use vrcx_0_application::vrcc::{VrccDeviceAuthPrompt, VrccDeviceAuthStep, VrccFailure};
+use vrcx_0_contracts::vrcc::{
+    VrccAnnouncements, VrccBoard, VrccBoardSort, VrccConnectionSnapshot, VrccMapPage, VrccMyBoard,
+    VrccMyBoardSort, VrccMyMap, VrccMyMapPage, VrccNotes, VrccRatedMaps, VrccRatingText,
+    VrccRecentNotifications, VrccStatus, VrccStickers, VrccToday, VrccUnread, VrccUsageSnapshot,
+    VrccVote, VrccVoteKind, VrccVoteResult,
+};
+
+use crate::{error::AppError, state::AppState};
+
+/// 设备授权的起步结果。`device_code` 是唯一需要回传的字段，其余是给玩家看的。
+///
+/// 它同时是 `device_auth_poll` 的入参，所以既要 `Serialize` 也要 `Deserialize`。
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VrccDeviceAuthPromptOutput {
+    /// 给玩家看的码，形如 `ABCD-2345`。
+    pub user_code: String,
+    /// 手动输码的页面。
+    pub verification_uri: Option<String>,
+    /// 带码的同意链接，优先用这个。
+    pub verification_uri_complete: Option<String>,
+    /// 多少秒内有效。
+    pub expires_in_secs: i64,
+    /// 官方建议的轮询间隔。
+    pub interval_secs: i64,
+    /// 内部用，换令牌时要回传。
+    pub device_code: String,
+    /// 这次要到的权限。
+    pub scope: Option<String>,
+}
+
+impl From<VrccDeviceAuthPrompt> for VrccDeviceAuthPromptOutput {
+    fn from(prompt: VrccDeviceAuthPrompt) -> Self {
+        Self {
+            user_code: prompt.user_code,
+            verification_uri: prompt.verification_uri,
+            verification_uri_complete: prompt.verification_uri_complete,
+            expires_in_secs: prompt.expires_in_secs,
+            interval_secs: prompt.interval_secs,
+            device_code: prompt.device_code,
+            scope: prompt.scope,
+        }
+    }
+}
+
+/// 轮询一次授权的三种结果。
+#[derive(Debug, serde::Serialize, specta::Type)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum VrccDeviceAuthStepOutput {
+    /// 玩家还没点同意，`interval_secs` 后再问。
+    Pending { interval_secs: i64 },
+    /// 连上了。
+    Connected { connection: VrccConnectionSnapshot },
+    /// 玩家取消或缺码过期，这条流程结束。
+    Terminal { message: String },
+}
+
+impl From<VrccDeviceAuthStep> for VrccDeviceAuthStepOutput {
+    fn from(step: VrccDeviceAuthStep) -> Self {
+        match step {
+            VrccDeviceAuthStep::Pending { interval_secs } => Self::Pending { interval_secs },
+            VrccDeviceAuthStep::Connected(connection) => Self::Connected { connection },
+            VrccDeviceAuthStep::Terminal(message) => Self::Terminal { message },
+        }
+    }
+}
+
+// -- 连接状态 ---------------------------------------------------------------
+
+#[tauri::command(async)]
+#[specta::specta]
+pub fn app__vrcc_connection(state: State<'_, AppState>) -> VrccConnectionSnapshot {
+    state.runtime_host().vrcc().connection()
+}
+
+/// 今日用量。口径是「今日已用 N/上限」，不是「剩余」，且全部来自服务端的
+/// `RateLimit-*` 响应头；还没拿到过时字段是 `null`（界面显示「未知」）。
+#[tauri::command(async)]
+#[specta::specta]
+pub fn app__vrcc_usage(state: State<'_, AppState>) -> VrccUsageSnapshot {
+    state.runtime_host().vrcc().usage()
+}
+
+// -- 开放数据 ---------------------------------------------------------------
+
+/// 地图榜。不需要连接。`sort` 传 `null` 是总榜。
+///
+/// 要的是本周榜或新上榜、回答里却没有 `sort` 时，说明服务器还不支持，
+/// 回的是总榜。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_boards(
+    state: State<'_, AppState>,
+    limit: u32,
+    sort: Option<VrccBoardSort>,
+) -> Result<VrccBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .boards(limit, sort.unwrap_or_default())
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 按世界 ID 批量查地图。不需要连接。
+///
+/// 一次最多 20 张，**只返回在榜上的**——结果条数可能少于传入的数量，前端要
+/// 按 `world` 去配，不能按下标对应。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_maps(
+    state: State<'_, AppState>,
+    worlds: Vec<String>,
+) -> Result<VrccBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .maps(&worlds)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 公告和停站。不需要连接。服务器还没有这个接口时返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_announcements(
+    state: State<'_, AppState>,
+) -> Result<Option<VrccAnnouncements>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .announcements()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 所有贴纸和材质名。不需要连接。服务器还没有这个接口时返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_stickers(
+    state: State<'_, AppState>,
+) -> Result<Option<VrccStickers>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .stickers()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 公开地图页。不需要令牌。不在榜上时（`404`）返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_map_page(
+    state: State<'_, AppState>,
+    world: String,
+) -> Result<Option<VrccMapPage>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .map_page(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 带令牌的地图页：完整短评列表 + 我的评分。需要 `maps` 普通权限。
+///
+/// 不在榜上时（`404`）返回 `null`；未连接时返回需要连接的失败，不会被当成
+/// 「这张图不在榜」。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_map_page(
+    state: State<'_, AppState>,
+    world: String,
+    sort: Option<String>,
+) -> Result<Option<VrccMyMapPage>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_map_page(&world, sort.as_deref())
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 玩家视角地图榜。需要 `maps` 普通权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_board(
+    state: State<'_, AppState>,
+    sort: Option<VrccMyBoardSort>,
+) -> Result<VrccMyBoard, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_board(sort.unwrap_or_default())
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 我打过分的地图。需要 `maps` 普通权限。最近的在前。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_maps(state: State<'_, AppState>) -> Result<VrccRatedMaps, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .my_maps()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 服务探活。用来在页面上显示「星遇同频现在可用吗」。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_status(state: State<'_, AppState>) -> Result<VrccStatus, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .status()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+// -- 写操作（需要 maps.rate） ------------------------------------------------
+
+/// 给地图打分 / 写短评。需要 `maps.rate` 敏感权限。
+///
+/// `text` 用三态字符串表达官方那三种语义，**不能用 `Option<String>` 糊过去**：
+///
+/// | 参数 | 结果 |
+/// |---|---|
+/// | `textMode = "keep"` | 只改分数，保留原短评 |
+/// | `textMode = "clear"` | 删掉短评，保留分数 |
+/// | `textMode = "write"` + `text` | 提交或更新短评 |
+///
+/// 用两个字段而不是一个可空字段：Rust 侧要能区分「没传」和「传了空串」，
+/// 前端传 `null` 与不传在 JSON 里看起来是一样的，这里显式给一个模式位。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_rate_map(
+    state: State<'_, AppState>,
+    world: String,
+    score: i64,
+    text_mode: String,
+    text: Option<String>,
+) -> Result<VrccMyMap, AppError> {
+    let rating_text = match text_mode.as_str() {
+        "keep" => VrccRatingText::Keep,
+        "clear" => VrccRatingText::Clear,
+        "write" => VrccRatingText::Write(text.unwrap_or_default()),
+        _other => {
+            // 前端传了一个我们不认识的模式：这是调用方的 bug，不是网络问题。
+            // 造一个 `Input` 层的错误走同一套映射，界面会显示成一般失败。
+            let error = vrcx_0_contracts::vrcc::VrccError::new(
+                vrcx_0_contracts::vrcc::ErrorLayer::Input,
+                vrcx_0_contracts::vrcc::ErrorDetail::MissingArgument("textMode"),
+            );
+            return Err(AppError::Vrcc {
+                failure: VrccFailure::from_error(&error),
+            });
+        }
+    };
+    state
+        .runtime_host()
+        .vrcc()
+        .rate_map(&world, score, &rating_text)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 删掉自己给这张图的评分。需要 `maps.rate` 敏感权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_delete_map_rating(
+    state: State<'_, AppState>,
+    world: String,
+) -> Result<(), AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .delete_map_rating(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 给短评或地图介绍投票。需要 `maps.write` 敏感权限。
+///
+/// `vote` 用 `"up"` / `"down"` / `"none"`：`none` 表示取消。
+/// 用字符串而不是整数，是因为界面会在「当前票值」与「点一下之后发什么」之间
+/// 来回换算，枚举化的字面量比 `1` / `-1` / `0` 更难写错。
+///
+/// **不能给自己的内容投票**——这条由界面提前禁用按钮，服务端也会拒。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_vote_map_content(
+    state: State<'_, AppState>,
+    kind: VrccVoteKind,
+    id: i64,
+    vote: VrccVote,
+) -> Result<VrccVoteResult, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .vote_map_content(kind, id, vote)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+// -- 设备授权 ---------------------------------------------------------------
+
+/// 第一步：申请连接码。`scope` 传 `null` 时按当前 `X-Client` 选权限。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_device_auth_begin(
+    state: State<'_, AppState>,
+    scope: Option<String>,
+) -> Result<VrccDeviceAuthPromptOutput, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .begin_device_auth(scope)
+        .await
+        .map(VrccDeviceAuthPromptOutput::from)
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 第二步：问一次令牌。前端按返回的 `interval_secs` 定时重试。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_device_auth_poll(
+    state: State<'_, AppState>,
+    prompt: VrccDeviceAuthPromptOutput,
+) -> Result<VrccDeviceAuthStepOutput, AppError> {
+    let prompt = VrccDeviceAuthPrompt {
+        user_code: prompt.user_code,
+        verification_uri: prompt.verification_uri,
+        verification_uri_complete: prompt.verification_uri_complete,
+        expires_in_secs: prompt.expires_in_secs,
+        interval_secs: prompt.interval_secs,
+        device_code: prompt.device_code,
+        scope: prompt.scope,
+    };
+    state
+        .runtime_host()
+        .vrcc()
+        .poll_device_auth(&prompt)
+        .await
+        .map(VrccDeviceAuthStepOutput::from)
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 断开。先让服务器吊销，再清本地。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_disconnect(state: State<'_, AppState>) -> Result<(), AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .disconnect()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+// -- 提醒 -------------------------------------------------------------------
+
+/// 最近的提醒。
+///
+/// `mark` 为 `true` 表示玩家正在看这个列表：服务器会把已读状态同步到账号，
+/// 其他设备（网页、手机 App）上的红点跟着消。后台只为算数字时传 `false`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_recent_notifications(
+    state: State<'_, AppState>,
+    mark: bool,
+) -> Result<VrccRecentNotifications, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .recent_notifications(mark)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 几处未读数（连向我、星轨相交、私聊、通知）。
+///
+/// `refresh` 为 `false` 时只读后台轮询的缓存、不发请求——收到
+/// `vrccNoticesChanged` 时用这个。服务器还没有 `me/unread` 时返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_unread(
+    state: State<'_, AppState>,
+    refresh: bool,
+) -> Result<Option<VrccUnread>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .unread(refresh)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 通知中心。读了不标已读。服务器还没有 `me/notes` 时返回 `null`。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_notes(state: State<'_, AppState>) -> Result<Option<VrccNotes>, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .notes()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 当前所在地图在地图榜上的状态与我自己的评分。
+///
+/// 一张地图在榜上的状态与我自己的评分。需要 `maps` 普通权限。
+///
+/// ## `world` 传 `null` 时问「我现在在的地图」
+///
+/// 这是「所在地图」卡片用的路径：位置只有后端知道，不该让每个调用点自己算。
+///
+/// ## `world` 传具体 ID 时问那张图
+///
+/// 世界详情对话框要问**玩家正在看的那张图**，而不是他站在哪里。这两件事在
+/// 对话框里完全不同（可以从收藏里点开一张自己没去的图）。
+///
+/// ## 这是唯一能区分四种状态的接口
+///
+/// 公开的 `/maps/{world}/page` 对「未收录」和「待审核」都回 `404`，分不开；
+/// 只有带令牌的这一条会用 `board` / `pending` 两个布尔把它们分开。所以
+/// 界面要正确显示「已投稿、等审核」就只能走这里。
+///
+/// 返回 `null` 的情况：`world` 为空、**这张图被下架或不对当前玩家开放**
+/// （`off: true`，官方要求此时隐藏），以及未连接。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_my_map(
+    state: State<'_, AppState>,
+    world: Option<String>,
+) -> Result<Option<vrcx_0_contracts::vrcc::VrccMyMap>, AppError> {
+    let runtime = state.runtime_host();
+    let world = match world {
+        Some(world) => world,
+        None => runtime.current_world_id(),
+    };
+    if world.is_empty() {
+        return Ok(None);
+    }
+    runtime
+        .vrcc()
+        .my_map(&world)
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 增量轮询。游标由后端维护，前端不用关心。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_poll_notifications(
+    state: State<'_, AppState>,
+) -> Result<vrcx_0_contracts::vrcc::VrccNotifications, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .poll_notifications()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 今天这一轮 + 轮次进度。需要 `today` 敏感权限（要审核）。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_today(state: State<'_, AppState>) -> Result<VrccToday, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .today()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}
+
+/// 「互相连上」的星友列表。需要 `mutuals` 敏感权限（要审核）。
+///
+/// 条目里的 `vrcUser` 用来打开 VRCX-0 自己的玩家详情页；加好友由玩家在那里
+/// 自己点。官方合规要求明文禁止程序代玩家发好友请求，所以这里只有这个命令。
+#[tauri::command]
+#[specta::specta]
+pub async fn app__vrcc_mutuals(
+    state: State<'_, AppState>,
+) -> Result<vrcx_0_contracts::vrcc::VrccMutuals, AppError> {
+    state
+        .runtime_host()
+        .vrcc()
+        .mutuals()
+        .await
+        .map_err(|failure| AppError::Vrcc { failure })
+}

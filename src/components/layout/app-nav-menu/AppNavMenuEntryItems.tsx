@@ -11,6 +11,7 @@ import { NavLink } from 'react-router';
 import { ShortcutKey } from '@/components/keyboard/ShortcutHintPanel';
 import { cn } from '@/lib/utils';
 import { useNavigationCacheStore } from '@/state/navigationCacheStore';
+import { useVrccUnreadStore } from '@/state/vrccUnreadStore';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -390,6 +391,8 @@ function NavMenuEntryItem({
     const itemPath = getPathForNavEntry(item);
     const shortcutPosition = shortcutPositionByIndex.get(item.index);
     const showShortcut = shortcutHintsVisible && shortcutPosition !== undefined;
+    // 只有星遇同频那个条目会用到，但 hook 不能放在条件里。
+    const vrccUnreadTotal = useVrccUnreadStore((state) => state.unreadTotal);
 
     return (
         <NavItemContextMenu
@@ -409,7 +412,9 @@ function NavMenuEntryItem({
                     className={cn(
                         navMenuLucideClassName,
                         (isDashboardEntry(item) || isToolEntry(item)) && 'pr-8',
-                        showShortcut && 'pr-8'
+                        showShortcut && 'pr-8',
+                        // 角标是绝对定位的，文字得让开，否则长标题会压到数字上。
+                        item.index === 'vrcc' && vrccUnreadTotal > 0 && 'pr-10'
                     )}
                     onClick={
                         itemPath
@@ -436,6 +441,15 @@ function NavMenuEntryItem({
                         onDeleteDashboard={onDeleteDashboard}
                         onUnpinTool={onUnpinTool}
                     />
+                )}
+                {/* 星遇同频的未读数：和它页面标题旁那个角标用同一份数字。
+                    没有未读时不渲染，留出右侧空间给回车键提示等其它元素。 */}
+                {item.index === 'vrcc' && vrccUnreadTotal > 0 && (
+                    <SidebarMenuBadge className="p-0">
+                        <span className="bg-primary text-primary-foreground flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums">
+                            {vrccUnreadTotal}
+                        </span>
+                    </SidebarMenuBadge>
                 )}
             </SidebarMenuItem>
         </NavItemContextMenu>

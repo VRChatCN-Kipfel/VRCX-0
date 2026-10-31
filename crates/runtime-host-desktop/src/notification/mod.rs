@@ -2,6 +2,7 @@ mod delivery;
 mod desktop;
 mod dispatcher;
 mod do_not_disturb;
+mod icon_cache;
 mod indicator;
 mod overlay_transport;
 #[cfg(windows)]
@@ -21,7 +22,7 @@ pub use delivery::{
 pub use desktop::{
     DesktopNotificationAction, DesktopNotificationTarget, DesktopNotifier, DesktopNotifierSlot,
 };
-pub(crate) use dispatcher::{NotificationDispatcher, NotificationDispatcherDeps};
+pub(crate) use dispatcher::{NotificationDispatcher, NotificationDispatcherDeps, NotificationSink};
 pub use do_not_disturb::{
     NotificationDoNotDisturbMode, NotificationDoNotDisturbRuntime, NotificationDoNotDisturbSnapshot,
 };

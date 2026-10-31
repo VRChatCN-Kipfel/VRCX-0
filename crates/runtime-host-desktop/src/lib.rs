@@ -46,6 +46,7 @@ mod startup_bootstrap;
 mod state;
 pub mod tray_shortcut;
 pub mod vr_overlay;
+pub mod vrcc;
 pub mod vrchat_api;
 mod vrchat_remote;
 mod world_remote;

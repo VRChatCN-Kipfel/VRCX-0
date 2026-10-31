@@ -9,6 +9,7 @@ pub mod profile;
 pub mod remote;
 pub mod social;
 pub mod telemetry;
+pub mod vrcc;
 
 mod event_payloads;
 mod scope_gate;

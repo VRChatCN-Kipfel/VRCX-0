@@ -47,6 +47,7 @@ import {
 } from './WorldDialogViewParts';
 import { WorldInstanceRowTitle } from './WorldInstanceRowTitle';
 import { WorldSidebarPinButton } from './WorldSidebarPinButton';
+import { WorldVrccPanel } from './WorldVrccPanel';
 
 const WORLD_DATE_FALLBACKS = {
     empty: '',
@@ -680,6 +681,11 @@ export function WorldDialogTabPanels({
             {typeof world.storeId === 'string' && world.storeId ? (
                 <EntityDialogTabContent value="store">
                     <EconomyStoreListings storeId={world.storeId} />
+                </EntityDialogTabContent>
+            ) : null}
+            {world.id ? (
+                <EntityDialogTabContent value="vrcc">
+                    <WorldVrccPanel worldId={world.id} />
                 </EntityDialogTabContent>
             ) : null}
             <EntityDialogTabContent value="json">

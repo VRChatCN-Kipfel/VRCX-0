@@ -41,6 +41,7 @@ fn wrist_builder_keeps_renderer_model_free_of_application_entry_shape() {
             instance_duration: "12m".to_string(),
             online_duration: "2h 5m".to_string(),
             local_time: "12:34".to_string(),
+            vrcc: None,
         },
         options: WristOverlayRenderOptions::default(),
         locale: "zh-CN".to_string(),
@@ -389,4 +390,75 @@ fn activity_entry_with_relation(
         },
         actor_relation,
     }
+}
+
+/// 星遇同频摘要进 footer 的 left 槽位：未读数 + 地图排名。
+///
+/// 这条测试存在的理由：摘要类型曾经只加在 `WristRuntimeFooter` 上，
+/// 而 `build_wrist_surface_model` 从来没把它转进 `WristSurfaceModel`，
+/// 于是数据一路传到边界又掉头，腕表什么都不会显示。这个断言就是防它复发。
+#[test]
+fn vrcc_summary_reaches_wrist_footer() {
+    use vrcx_0_overlay_runtime::WristVrccSummary;
+
+    let model = build_wrist_surface_model(WristOverlayFrameInput {
+        activity: ActivitySnapshot::default(),
+        devices: Vec::new(),
+        now_playing: None,
+        live_now_playing: false,
+        footer: WristRuntimeFooter {
+            player_count: 8,
+            instance_duration: String::new(),
+            online_duration: String::new(),
+            local_time: "12:34".to_string(),
+            vrcc: Some(WristVrccSummary {
+                unread: 3,
+                map_rank: Some(7),
+                map_avg_x10: Some(92),
+            }),
+        },
+        options: WristOverlayRenderOptions::default(),
+        locale: "zh-CN".to_string(),
+        show_instance_id_in_location: false,
+        captured_at_ms: 42,
+    });
+
+    // 未读 3 条 + 当前图第 7 名、均分 9.2。
+    //
+    // 文案经 `localizer` 渲染。原来这里是 `format!("●{}")` /
+    // `format!("#{rank}{avg}")`：玩家看不懂「●3 · #7 9.2」是什么，
+    // 而且不跟随界面语言。
+    assert_eq!(model.footer.left, "未读 3 · 本图第 7 名 · 均分 9.2");
+    // 未读数 + 排名没有挤掉 footer 的其它槽位。
+    assert_eq!(model.footer.right, "12:34");
+}
+
+/// 有摘要但没什么可显示时，回落到玩家数而不是显示空白。
+#[test]
+fn empty_vrcc_summary_falls_back_to_player_count() {
+    use vrcx_0_overlay_runtime::WristVrccSummary;
+
+    let model = build_wrist_surface_model(WristOverlayFrameInput {
+        activity: ActivitySnapshot::default(),
+        devices: Vec::new(),
+        now_playing: None,
+        live_now_playing: false,
+        footer: WristRuntimeFooter {
+            player_count: 8,
+            instance_duration: String::new(),
+            online_duration: String::new(),
+            local_time: "12:34".to_string(),
+            vrcc: Some(WristVrccSummary {
+                unread: 0,
+                map_rank: None,
+                map_avg_x10: None,
+            }),
+        },
+        options: WristOverlayRenderOptions::default(),
+        locale: "zh-CN".to_string(),
+        show_instance_id_in_location: false,
+        captured_at_ms: 42,
+    });
+
+    assert_eq!(model.footer.left, "8 名玩家");
 }

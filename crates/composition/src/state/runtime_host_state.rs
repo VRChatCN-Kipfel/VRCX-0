@@ -676,6 +676,14 @@ impl RuntimeHostState {
         self.runtime_context.tasks.stop_all()
     }
 
+    /// 取后台任务调度器，用于挂长期运行的任务（轮询、watcher 之类）。
+    ///
+    /// 和 `stop_runtime_tasks` 配对：这里挂上去的任务会被它统一停掉，
+    /// 所以调用方不用自己管生命周期。
+    pub fn runtime_tasks(&self) -> &TaskSupervisor {
+        &self.runtime_context.tasks
+    }
+
     pub fn app_data_dir(&self) -> &AppDataDirResolution {
         &self.app_data_dir
     }

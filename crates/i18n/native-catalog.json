@@ -193,6 +193,18 @@
                     "source": "overlay.footer.online_duration"
                 },
                 {
+                    "key": "overlay.footer.vrcc_unread",
+                    "source": "overlay.footer.vrcc_unread"
+                },
+                {
+                    "key": "overlay.footer.vrcc_rank",
+                    "source": "overlay.footer.vrcc_rank"
+                },
+                {
+                    "key": "overlay.footer.vrcc_rank_avg",
+                    "source": "overlay.footer.vrcc_rank_avg"
+                },
+                {
                     "key": "overlay.generic_instance_location",
                     "source": "overlay.generic_instance_location"
                 },

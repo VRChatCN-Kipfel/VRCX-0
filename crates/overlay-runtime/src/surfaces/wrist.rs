@@ -106,7 +106,20 @@ pub struct WristRuntimeFooter {
     pub instance_duration: String,
     pub online_duration: String,
     pub local_time: String,
+    /// 星遇同频摘要：未读提醒数 + 当前地图的地图榜名次。
+    ///
+    /// 只读展示，不做交互——腕表上的交互要靠射线与按键，代价远大于收益。
+    /// `None` 表示未连接，腕表不显示这一块。
+    #[serde(default)]
+    pub vrcc: Option<WristVrccSummary>,
 }
+
+/// 腕表上的星遇同频摘要。
+///
+/// 星遇同频摘要。类型定义在契约层，因为填充它的是 `application` 的服务，
+/// 而那个 crate 不能反向依赖 `overlay-runtime`。这里只做再导出，避免两处
+/// 定义各写一份、迟早漂移。
+pub use vrcx_0_contracts::vrcc::VrccWristSummary as WristVrccSummary;
 
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
@@ -223,9 +236,11 @@ pub fn build_wrist_surface_model(input: WristOverlayFrameInput) -> WristSurfaceM
             now_playing_model(now_playing, input.captured_at_ms, input.live_now_playing)
         }),
         footer: OverlayFooter {
-            left: localizer.text(&ActivityText::message(
-                OverlayMessage::overlay_footer_players(input.footer.player_count),
-            )),
+            left: vrcc_footer_left(&localizer, input.footer.vrcc.as_ref()).unwrap_or_else(|| {
+                localizer.text(&ActivityText::message(
+                    OverlayMessage::overlay_footer_players(input.footer.player_count),
+                ))
+            }),
             center: [
                 localized_duration(
                     &localizer,
@@ -245,6 +260,50 @@ pub fn build_wrist_surface_model(input: WristOverlayFrameInput) -> WristSurfaceM
             right: input.footer.local_time,
         },
     }
+}
+
+/// 腕表左下角显示星遇同频摘要。
+///
+/// 用 footer 的 `left` 槽位而不是新增 UI 元素：Slint 那侧已经有这三个
+/// 字符串槽位且布局稳定，直接复用不必动 `.slint` 文件，也不用重建渲染链路。
+///
+/// 内容取舍：只放两个数字（未读几条、当前地图排第几）。腕表是余光扫一眼的
+/// 地方，挤三样以上就变成看不清的噪声。
+///
+/// 返回 `None` 时调用方回落到原来的玩家数——这样没连星遇同频的玩家看到的东西
+/// 和以前完全一样，不会因为我们的功能而少一行信息。
+///
+/// 数字都经 `localizer` 渲染，和底栏其他槽位一样：原来这里是
+/// `format!("●{}")` / `format!("#{rank}{avg}")`，玩家看到「●3 · #7 9.2」
+/// 根本猜不出那是什么，也不跟随界面语言。
+fn vrcc_footer_left(
+    localizer: &OverlayLocalizer,
+    summary: Option<&WristVrccSummary>,
+) -> Option<String> {
+    let summary = summary?;
+    let mut parts = Vec::new();
+    if summary.unread > 0 {
+        parts.push(localizer.text(&ActivityText::message(
+            OverlayMessage::overlay_footer_vrcc_unread(summary.unread),
+        )));
+    }
+    if let Some(rank) = summary.map_rank {
+        // 有均分就一起说清楚：「本图第 7 名 · 均分 9.2」。
+        let message = match summary.map_avg_x10 {
+            Some(avg_x10) => OverlayMessage::overlay_footer_vrcc_rank_avg(
+                rank,
+                format!("{:.1}", avg_x10 as f64 / 10.0),
+            ),
+            None => OverlayMessage::overlay_footer_vrcc_rank(rank),
+        };
+        parts.push(localizer.text(&ActivityText::message(message)));
+    }
+    if parts.is_empty() {
+        // 有摘要但没有可显示的数字（没未读、当前图不在榜）时，不占这一格，
+        // 让玩家数继续显示。
+        return None;
+    }
+    Some(parts.join(" · "))
 }
 
 fn localized_duration(

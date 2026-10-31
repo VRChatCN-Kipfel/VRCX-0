@@ -128,6 +128,13 @@ const navDefinitions = [
         routeName: 'charts-mutual'
     },
     {
+        key: 'vrcc',
+        icon: 'lucide:Star',
+        tooltip: 'vrcc.title',
+        labelKey: 'vrcc.title',
+        routeName: 'vrcc'
+    },
+    {
         key: 'tools',
         icon: 'lucide:Wrench',
         tooltip: 'nav_tooltip.tools',

@@ -36,3 +36,4 @@ pub mod user_dialog_tab_counts;
 pub mod user_groups_overview;
 pub mod vr_overlay;
 pub mod vrc_status;
+pub mod vrcc;

@@ -17,6 +17,7 @@ use vrcx_0_application_game::{
     RuntimeSnapshotStore,
 };
 use vrcx_0_application_realtime::{FriendProjectionObserver, RealtimeHostRuntime};
+use vrcx_0_contracts::vrcc::VrccWristSummary;
 use vrcx_0_core::files::extract_file_id;
 use vrcx_0_core::friends::StateBucket;
 use vrcx_0_host_desktop::tts::{SystemTtsEngine, TtsEngine};
@@ -27,9 +28,10 @@ use vrcx_0_persistence::{config::ConfigRepository, DatabaseService};
 use crate::game_isolation::GameIsolationRuntime;
 use crate::host_actions::RuntimeHost;
 use crate::notification::{
-    migrate_legacy_overlay_notification_keys, seed_hmd_notifications_default, DesktopNotifier,
-    DesktopNotifierSlot, LocalNotificationPolicy, NotificationDispatcher,
-    NotificationDispatcherDeps, NotificationDoNotDisturbRuntime, RealtimeNotificationIndicator,
+    migrate_legacy_overlay_notification_keys, seed_hmd_notifications_default,
+    DesktopNotificationAction, DesktopNotifier, DesktopNotifierSlot, LocalNotificationPolicy,
+    NotificationDispatcher, NotificationDispatcherDeps, NotificationDoNotDisturbRuntime,
+    NotificationSink, RealtimeNotificationIndicator,
 };
 use crate::privacy_lock::PrivacyLockRuntime;
 
@@ -70,6 +72,9 @@ pub struct DesktopRuntimeServices {
     notification_indicator: Arc<RealtimeNotificationIndicator>,
     privacy_lock: Arc<PrivacyLockRuntime>,
     notification_policy: Arc<LocalNotificationPolicy>,
+    /// 通知分发器。同时用作 `ActivitySink`（VRChat 活动）和站外提醒的投递入口
+    /// （vrcc 直接调用），所以留住具体类型而不是只留 trait object。
+    notification_dispatcher: Arc<NotificationDispatcher>,
     pub host: RuntimeHost,
     tts: Arc<dyn TtsEngine>,
     notification_desktop_notifier: DesktopNotifierSlot,
@@ -77,6 +82,12 @@ pub struct DesktopRuntimeServices {
     realtime_user_image_resolver_owner: Mutex<Option<Arc<dyn CachedNotificationUserImageResolver>>>,
     game_log_snapshot: RuntimeSnapshotStore,
     now_playing: Arc<Mutex<Arc<NowPlayingSnapshot>>>,
+    /// 星遇同频运行时，构造后注入。
+    ///
+    /// 和 `realtime_user_image_resolver_owner` 一样是"后挂"：
+    /// `DesktopRuntimeServices` 与 vrcc 运行时在装配时互相看不到，
+    /// 硬要同期构造会把两边的装配顺序绑死。
+    vrcc: Mutex<Option<Arc<crate::vrcc::DesktopVrccRuntime>>>,
 }
 
 impl DesktopRuntimeServices {
@@ -122,7 +133,7 @@ impl DesktopRuntimeServices {
         deps.notification_projection_observers
             .add(notification_indicator.clone());
         deps.auth_scope.add_observer(notification_indicator.clone());
-        let notification_sink: Arc<dyn ActivitySink> =
+        let notification_dispatcher =
             Arc::new(NotificationDispatcher::new(NotificationDispatcherDeps {
                 auth_scope: deps.auth_scope.clone(),
                 db: Arc::clone(&deps.db),
@@ -132,8 +143,15 @@ impl DesktopRuntimeServices {
                 tts: Arc::clone(&tts),
                 tasks: deps.tasks.clone(),
                 policy: Arc::clone(&notification_policy),
+                // 外部图标（非 VRChat 资产）要自己联网取，必须走同一套代理。
+                proxy_url: deps.web.proxy_url().map(ToString::to_string),
             }));
-        deps.activity_sinks.add(notification_sink);
+        // 同一份 dispatcher 有两个身份：作为 `ActivitySink` 接 VRChat 活动，
+        // 以及被 vrcc 直接调用来投递站外提醒。留住具体类型，别只留 trait object。
+        deps.activity_sinks
+            .add(Arc::new(NotificationSink::new(Arc::clone(
+                &notification_dispatcher,
+            ))));
         Ok(Self {
             web: deps.web,
             image_cache: deps.image_cache,
@@ -151,6 +169,7 @@ impl DesktopRuntimeServices {
             notification_indicator,
             privacy_lock,
             notification_policy,
+            notification_dispatcher,
             host,
             tts,
             notification_desktop_notifier,
@@ -158,6 +177,7 @@ impl DesktopRuntimeServices {
             realtime_user_image_resolver_owner: Mutex::new(None),
             game_log_snapshot: RuntimeSnapshotStore::default(),
             now_playing: Arc::new(Mutex::new(Arc::new(NowPlayingSnapshot::default()))),
+            vrcc: Mutex::new(None),
         })
     }
 
@@ -191,8 +211,65 @@ impl DesktopRuntimeServices {
         self.notification_desktop_notifier.set(desktop);
     }
 
+    /// 取通知分发器。
+    ///
+    /// 站外提醒（vrcc）用它投递：这样免打扰、隐私锁、通道偏好、图标解析、
+    /// 有序投递全都和 VRChat 活动走同一套实现，不再有第二条投递路径。
+    pub fn notification_dispatcher(&self) -> Arc<NotificationDispatcher> {
+        Arc::clone(&self.notification_dispatcher)
+    }
+
+    /// 取已挂载的桌面通知桥。
+    ///
+    /// 没有挂载时返回 `None`（Headless 就是这种情况）。调用方应当降级，
+    /// 不要把它当作错误——「没有通知渠道」不等于「功能坏了」。
+    pub fn desktop_notifier(&self) -> Option<Arc<dyn DesktopNotifier>> {
+        self.notification_desktop_notifier.inner_notifier()
+    }
+
+    /// 取通知槽本身（而不是里面那个 notifier）。
+    ///
+    /// 后台任务要在**启动时**就拿到一个稳定的句柄，而真正的 notifier 可能
+    /// 稍后才挂上。槽实现了 `DesktopNotifier`，没挂桥时 `show()` 返回
+    /// `Ok(())`——也就是「暂时没有通知渠道」，不是错误。
+    pub fn notifier_slot(&self) -> Arc<dyn DesktopNotifier> {
+        Arc::new(self.notification_desktop_notifier.clone())
+    }
+
+    /// 直接把一条通知送到桌面通知渠道（Windows toast 等）。
+    ///
+    /// 给「数据源在自己的层里、但没有走 `RenderedNotification`」的调用方用。
+    /// 目前就是星遇同频：它的提醒来自 vrcc.cc，和 VRChat 的活动通知是两个
+    /// 数据模型，塞不进 `NotificationDispatcher`，但应当共用同一个桌面出口——
+    /// 否则每加一个数据源都要自己实现一遍 Windows toast。
+    ///
+    /// 没挂 notifier 时返回错误而不是静默成功：调用方需要知道「没发出去」。
+    pub fn show_desktop_notification(
+        &self,
+        title: &str,
+        body: Option<&str>,
+        action: Option<&DesktopNotificationAction>,
+    ) -> Result<(), String> {
+        self.notification_desktop_notifier
+            .show(title, body, None, true, action)
+    }
+
     pub fn set_frontend_tray_notification(&self, notify: bool) {
         self.notification_indicator.set_frontend_notify(notify);
+    }
+
+    /// 挂上星遇同频运行时，供腕表读取摘要。
+    ///
+    /// 后挂的原因同 `attach_realtime_runtime`：装配顺序上两边互相看不到。
+    /// 没挂上时腕表不显示这一块，不会有半截状态。
+    pub fn attach_vrcc_runtime(&self, vrcc: Arc<crate::vrcc::DesktopVrccRuntime>) {
+        match self.vrcc.lock() {
+            Ok(mut owner) => *owner = Some(vrcc),
+            Err(error) => tracing::warn!(
+                error = %error,
+                "failed to retain vrcc runtime"
+            ),
+        }
     }
 
     pub fn refresh_tray_notification(&self) {
@@ -386,6 +463,23 @@ impl VrOverlayRuntimeServices for DesktopRuntimeServices {
         session
             .last_game_started_at
             .filter(|_| session.is_game_running)
+    }
+
+    fn vrcc_wrist_summary(&self) -> Option<VrccWristSummary> {
+        // 没挂上就直接不显示，不造假摘要。
+        let vrcc = match self.vrcc.lock() {
+            Ok(guard) => guard.clone()?,
+            Err(error) => {
+                tracing::warn!(error = %error, "vrcc runtime lock poisoned");
+                return None;
+            }
+        };
+        // 玩家当前在哪张图由游戏日志给；取不到就只显示未读数。
+        let world =
+            vrcx_0_core::location::world_id_from_location(&self.game_log_snapshot().location);
+        let world = (!world.is_empty()).then_some(world.as_str());
+        let summary = vrcc.wrist_summary(world)?;
+        Some(summary)
     }
 }
 
